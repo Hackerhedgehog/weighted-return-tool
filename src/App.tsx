@@ -16,7 +16,7 @@ export default function App() {
   const [rows, setRows] = useState<BucketRow[]>([])
   const [totalWeight, setTotalWeight] = useState(DEFAULT_TOTAL_WEIGHT)
   const [targetRtp, setTargetRtp] = useState(DEFAULT_TARGET_RTP)
-  const [sort, setSort] = useState<SortState>({ key: 'bucketId', dir: 1 })
+  const [sort, setSort] = useState<SortState>({ key: 'id', dir: 1 })
   const [pasteOpen, setPasteOpen] = useState(true)
   const [pasteText, setPasteText] = useState('')
   const [pasteError, setPasteError] = useState<string | null>(null)

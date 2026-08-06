@@ -2,14 +2,22 @@ import { nextUid, type BucketRow } from './types'
 
 export interface ParseOutcome {
   rows: BucketRow[]
+  /** Header rows, totals rows and anything unparseable, kept for diagnostics. */
   skippedLines: string[]
+  /** True when the pasted data already carried a Weights column. */
+  hasWeights: boolean
   error?: string
 }
 
 /**
- * Parse pasted TSV text: bucketId <tab> label <tab> payout multiplier.
- * Tolerates a header line, blank lines, CRLF, and comma / multi-space
- * separated fallbacks when no tabs are present.
+ * Parse pasted engine data: `ID ⇥ Avg Payout ⇥ Label`.
+ *
+ * The tool's own export is also accepted, so you can export, edit in a
+ * spreadsheet, and paste straight back: with 4+ fields the fourth is read as
+ * the weight, and the header and totals rows are skipped automatically.
+ *
+ * Tolerates a header line, blank lines, CRLF, and comma or multi-space
+ * separators for data pasted from non-TSV sources.
  */
 export function parseTsv(text: string): ParseOutcome {
   const lines = text
@@ -18,16 +26,16 @@ export function parseTsv(text: string): ParseOutcome {
     .filter((l) => l.trim().length > 0)
 
   if (lines.length === 0) {
-    return { rows: [], skippedLines: [], error: 'No data found in the pasted text.' }
+    return { rows: [], skippedLines: [], hasWeights: false, error: 'No data found in the pasted text.' }
   }
 
   const rows: BucketRow[] = []
   const skippedLines: string[] = []
+  let hasWeights = false
 
   for (const line of lines) {
     let parts = line.split('\t').map((p) => p.trim())
     if (parts.length < 3) {
-      // Fallbacks for people pasting from non-TSV sources.
       const commaParts = line.split(',').map((p) => p.trim())
       const spaceParts = line.split(/\s{2,}/).map((p) => p.trim())
       if (commaParts.length >= 3) parts = commaParts
@@ -39,21 +47,38 @@ export function parseTsv(text: string): ParseOutcome {
       continue
     }
 
-    const bucketId = Number(parts[0])
-    const payout = Number(parts[2])
-    if (!Number.isFinite(bucketId) || !Number.isFinite(payout)) {
-      // Most likely a header row; skip silently but record it.
+    // A blank first field is the totals row of our own export; a non-numeric
+    // one is a header. Note Number('') is 0, so the blank check must be
+    // explicit rather than relying on isFinite.
+    const idField = parts[0]
+    const bucketId = Number(idField)
+    if (idField === '' || !Number.isFinite(bucketId)) {
       skippedLines.push(line)
       continue
+    }
+
+    const payout = Number(parts[1])
+    if (parts[1] === '' || !Number.isFinite(payout) || payout < 0) {
+      skippedLines.push(line)
+      continue
+    }
+
+    let weight = 0
+    if (parts.length >= 4 && parts[3] !== '') {
+      const w = Number(parts[3])
+      if (Number.isFinite(w) && w >= 0) {
+        weight = Math.round(w)
+        hasWeights = true
+      }
     }
 
     rows.push({
       uid: nextUid(),
       bucketId: Math.round(bucketId),
-      label: parts[1],
-      payout: Math.round(payout),
-      weight: 0,
-      optionalId: parts[3] ?? '',
+      payout,
+      label: parts[2],
+      weight,
+      locked: false,
     })
   }
 
@@ -61,27 +86,28 @@ export function parseTsv(text: string): ParseOutcome {
     return {
       rows: [],
       skippedLines,
-      error: 'Could not parse any rows. Expected: bucket ID ⇥ bucket label ⇥ payout multiplier.',
+      hasWeights: false,
+      error: 'Could not parse any rows. Expected columns: ID ⇥ Avg Payout ⇥ Label.',
     }
   }
 
-  return { rows, skippedLines }
+  return { rows, skippedLines, hasWeights }
 }
 
+/** Sample data in the real column order, for the "Use sample data" button. */
 export const SAMPLE_TSV = [
-  'bucket_id\tbucket_label\tpayout_multiplier',
-  '0\tNo Win\t0',
-  '1\tPush\t1',
-  '2\tTiny Win\t2',
-  '3\tSmall Win\t3',
-  '4\tDouble Line\t5',
-  '5\tTriple Line\t8',
-  '6\tScatter Pay\t10',
-  '7\tFour of a Kind\t15',
-  '8\tFive of a Kind\t25',
-  '9\tBonus Round\t50',
-  '10\tSuper Bonus\t100',
-  '11\tWild Cascade\t250',
-  '12\tMega Win\t1000',
-  '13\tJackpot\t5000',
+  '0\t1000.00\tjackpot',
+  '1\t200.00\tmega-win',
+  '2\t50.16\tbonus-big',
+  '3\t20.00\tbonus-mid',
+  '4\t10.13\tbonus-small',
+  '5\t0.00\tbonus-tease',
+  '6\t0.00\t0x',
+  '7\t0.33\tgreen-two-only',
+  '8\t0.60\t0-1x',
+  '9\t1.80\t1-2x',
+  '10\t3.57\t2-4x',
+  '11\t7.57\t4-8x',
+  '12\t11.93\t8-16x',
+  '13\t41.38\t32-64x',
 ].join('\n')

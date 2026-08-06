@@ -3,7 +3,7 @@ import type { BucketRow, SortKey, SortState } from '../lib/types'
 import { fmtWeight, fmtPct, fmtDecimal } from '../lib/format'
 import { NumCell, TextCell } from './cells'
 
-export type RowPatch = Partial<Pick<BucketRow, 'bucketId' | 'label' | 'payout' | 'weight' | 'optionalId'>>
+export type RowPatch = Partial<Pick<BucketRow, 'bucketId' | 'label' | 'payout' | 'weight' | 'locked'>>
 
 interface BucketTableProps {
   rows: BucketRow[]
@@ -13,14 +13,13 @@ interface BucketTableProps {
   onPatch: (uid: string, patch: RowPatch) => void
 }
 
-const COLUMNS: { key: SortKey | 'optionalId'; label: string; sortable: boolean }[] = [
-  { key: 'bucketId', label: 'Bucket ID', sortable: true },
-  { key: 'label', label: 'Bucket Label', sortable: true },
-  { key: 'payout', label: 'Payout ×Bet', sortable: true },
-  { key: 'weight', label: 'Weight', sortable: true },
-  { key: 'weightedReturn', label: 'Weighted Return', sortable: true },
+const COLUMNS: { key: SortKey; label: string; sortable: boolean }[] = [
+  { key: 'id', label: 'ID', sortable: true },
+  { key: 'payout', label: 'Avg Payout', sortable: true },
+  { key: 'label', label: 'Label', sortable: true },
+  { key: 'weight', label: 'Weights', sortable: true },
+  { key: 'weightedValue', label: 'Weighted Value', sortable: true },
   { key: 'chance', label: 'Chance', sortable: true },
-  { key: 'optionalId', label: 'Optional ID', sortable: false },
 ]
 
 function sortRows(rows: BucketRow[], sort: SortState, totalWeight: number): BucketRow[] {
@@ -35,9 +34,9 @@ function sortRows(rows: BucketRow[], sort: SortState, totalWeight: number): Buck
       case 'weight':
       case 'chance':
         return dir * (a.weight - b.weight)
-      case 'weightedReturn':
+      case 'weightedValue':
         return dir * ((a.payout * a.weight) / totalWeight - (b.payout * b.weight) / totalWeight)
-      case 'bucketId':
+      case 'id':
       default:
         return dir * (a.bucketId - b.bucketId)
     }
@@ -143,9 +142,6 @@ const Row = memo(function Row({ row, totalWeight, onPatch }: RowProps) {
           validate={(n) => n >= 0 && n <= 100}
           onCommit={(n) => patch({ weight: Math.round((n / 100) * totalWeight) })}
         />
-      </td>
-      <td className="col-opt">
-        <TextCell value={row.optionalId} placeholder="—" onCommit={(s) => patch({ optionalId: s })} />
       </td>
     </tr>
   )
