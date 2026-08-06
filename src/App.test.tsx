@@ -271,6 +271,7 @@ describe('numpad decimal', () => {
   it('types a dot into an open cell editor', () => {
     loadRealData()
     const cell = [...document.querySelectorAll('tbody .col-weight .gcell')][0]
+    fireEvent.mouseDown(cell)
     fireEvent.doubleClick(cell)
     const input = document.querySelector('input.gcell.editing') as HTMLInputElement
     input.setSelectionRange(input.value.length, input.value.length)
@@ -300,6 +301,7 @@ describe('numpad decimal', () => {
   it('leaves a main-row comma alone in the cell editor', () => {
     loadRealData()
     const cell = [...document.querySelectorAll('tbody .col-weight .gcell')][0]
+    fireEvent.mouseDown(cell)
     fireEvent.doubleClick(cell)
     const input = document.querySelector('input.gcell.editing') as HTMLInputElement
     const before = input.value
