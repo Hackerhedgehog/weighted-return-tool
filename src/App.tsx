@@ -1,7 +1,8 @@
 import { useCallback, useMemo, useState } from 'react'
 import type { BucketRow, SortKey, SortState } from './lib/types'
 import { parseTsv, SAMPLE_TSV } from './lib/parse'
-import { distributeWeights, rescaleWeights } from './lib/distribute'
+import { rescaleToTotal, solveWeights } from './lib/distribute'
+import { CURVE_PRESETS, DEFAULT_TARGETS } from './lib/types'
 import { fmtWeight, fmtRtp } from './lib/format'
 import { BucketTable, type RowPatch } from './components/BucketTable'
 import { DistributionChart } from './components/DistributionChart'
@@ -30,10 +31,11 @@ export default function App() {
         setPasteError(outcome.error)
         return
       }
-      const weights = distributeWeights(
-        outcome.rows.map((r) => r.payout),
+      const { weights } = solveWeights(
+        outcome.rows,
         totalWeight,
-        targetRtp,
+        { ...DEFAULT_TARGETS, rtp: targetRtp },
+        CURVE_PRESETS.medium,
       )
       setRows(outcome.rows.map((r, i) => ({ ...r, weight: weights[i] })))
       setPasteError(null)
@@ -45,7 +47,12 @@ export default function App() {
 
   const autoDistribute = useCallback(() => {
     setRows((prev) => {
-      const weights = distributeWeights(prev.map((r) => r.payout), totalWeight, targetRtp)
+      const { weights } = solveWeights(
+        prev,
+        totalWeight,
+        { ...DEFAULT_TARGETS, rtp: targetRtp },
+        CURVE_PRESETS.medium,
+      )
       return prev.map((r, i) => ({ ...r, weight: weights[i] }))
     })
   }, [totalWeight, targetRtp])
@@ -54,8 +61,8 @@ export default function App() {
     setTotalWeight(newTotal)
     // Rescale existing weights proportionally so RTP and chances are preserved.
     setRows((prev) => {
-      const scaled = rescaleWeights(prev.map((r) => r.weight), newTotal)
-      return prev.map((r, i) => ({ ...r, weight: scaled[i] }))
+      const scaled = rescaleToTotal(prev, newTotal)
+      return scaled === null ? prev : prev.map((r, i) => ({ ...r, weight: scaled[i] }))
     })
   }, [])
 

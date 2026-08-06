@@ -1,106 +1,563 @@
-/**
- * Distribute `totalWeight` integer weight units across buckets based on their
- * payout multipliers so that total RTP lands as close as possible to
- * `targetRtp`.
- *
- * Model: weight share of bucket i ∝ (payout_i + 1)^(-alpha).
- * RTP(alpha) is monotonically decreasing in alpha (higher alpha shifts weight
- * toward low payouts), so we binary-search alpha for the target RTP, then
- * round shares to integers that sum exactly to totalWeight.
- */
-export function distributeWeights(
-  payouts: number[],
-  totalWeight: number,
-  targetRtp: number,
-): number[] {
-  const n = payouts.length
-  if (n === 0) return []
-  if (totalWeight < n) return payouts.map(() => 1)
+import type { BucketRow, Targets } from './types'
 
-  const sharesFor = (alpha: number): number[] => {
-    // Subtract max exponent before exponentiating to avoid overflow/underflow.
-    const logs = payouts.map((p) => -alpha * Math.log(p + 1))
+/**
+ * Weight distribution solver.
+ *
+ * The three targets and the volatility setting are over-constrained, so they
+ * are resolved by rank:
+ *
+ *  1. Locked weights are absolute — never touched.
+ *  2. Hit and win chance are satisfied *structurally*, by deciding how much
+ *     total weight each payout group receives. They are preferences with a
+ *     relative tolerance band; the band is spent only when the RTP target is
+ *     otherwise unreachable, and then only as far as needed.
+ *  3. RTP is hit exactly (to integer-weight granularity) by solving the slope
+ *     of the weight curve.
+ *  4. Volatility shapes whatever freedom is left, as curvature of that curve.
+ *
+ * Steps 3 and 4 do not collide because slope and curvature are different basis
+ * functions: `share ∝ exp(−γ·u − c·u²)` with `u = ln(payout) − ln(pMin)`.
+ * Solving γ for RTP leaves c — and therefore the volatility setting — intact.
+ */
+
+export interface SolveResult {
+  weights: number[]
+  achieved: Stats
+  /** Band position actually used, in [-1, 1]. 0 means chances landed on target. */
+  bandUsed: number
+  gamma: number
+  warnings: string[]
+}
+
+export interface Stats {
+  rtp: number
+  hitChance: number
+  winChance: number
+}
+
+const GAMMA_LO = -40
+const GAMMA_HI = 40
+const BISECTION_STEPS = 200
+/** Band resolution: 100 steps per side is far finer than a ±3.5% band needs. */
+const BAND_STEPS = 100
+const GROUP_NAMES = ['zero-payout', 'small-win', 'win'] as const
+
+function clamp(v: number, lo: number, hi: number): number {
+  return Math.min(Math.max(v, lo), hi)
+}
+
+/** 0 = no payout, 1 = payout up to and including 1x, 2 = a win above 1x. */
+export function groupOf(payout: number): 0 | 1 | 2 {
+  if (!(payout > 0)) return 0
+  return payout <= 1 ? 1 : 2
+}
+
+export function statsOf(rows: BucketRow[], totalWeight: number): Stats {
+  if (!(totalWeight > 0)) return { rtp: NaN, hitChance: NaN, winChance: NaN }
+  let rtp = 0
+  let hit = 0
+  let win = 0
+  for (const r of rows) {
+    rtp += (r.payout * r.weight) / totalWeight
+    if (r.payout > 0) hit += r.weight / totalWeight
+    if (r.payout > 1) win += r.weight / totalWeight
+  }
+  return { rtp, hitChance: hit, winChance: win }
+}
+
+/**
+ * Split `total` integer units across `weights` in proportion, exactly.
+ * With `minOne`, every entry gets at least 1 — but only when the budget is
+ * large enough to go round; otherwise zeros are allowed rather than
+ * over-spending.
+ */
+function largestRemainder(weights: number[], total: number, minOne: boolean): number[] {
+  const n = weights.length
+  if (n === 0) return []
+
+  const t = Math.max(0, Math.round(total))
+  if (t === 0) return new Array<number>(n).fill(0)
+
+  const useMin = minOne && t >= n
+  const budget = useMin ? t - n : t
+
+  const positive = weights.map((w) => (Number.isFinite(w) && w > 0 ? w : 0))
+  const sum = positive.reduce((a, b) => a + b, 0)
+  const props = sum > 0 ? positive.map((w) => w / sum) : positive.map(() => 1 / n)
+
+  const raw = props.map((p) => p * budget)
+  const base = raw.map((v) => Math.floor(v))
+  let assigned = base.reduce((a, b) => a + b, 0)
+
+  const order = raw
+    .map((v, i) => ({ i, frac: v - Math.floor(v) }))
+    .sort((a, b) => b.frac - a.frac || a.i - b.i)
+
+  for (let k = 0; assigned < budget && k < n * 2; k++) {
+    base[order[k % n].i] += 1
+    assigned += 1
+  }
+  // Floating point can only ever push us over by a hair, but never ship a
+  // group whose parts outrun its budget.
+  for (let k = 0; assigned > budget && k < n * 2; k++) {
+    const idx = order[n - 1 - (k % n)].i
+    if (base[idx] > 0) {
+      base[idx] -= 1
+      assigned -= 1
+    }
+  }
+
+  return useMin ? base.map((b) => b + 1) : base
+}
+
+interface Ctx {
+  n: number
+  payouts: number[]
+  locked: boolean[]
+  current: number[]
+  /** log-ladder position; 0 for zero-payout buckets, which never use the curve */
+  u: number[]
+  /** unlocked row indices, per group */
+  freeIdx: number[][]
+  lockedSum: number[]
+  totalLocked: number
+  total: number
+  curve: number
+}
+
+function buildCtx(rows: BucketRow[], total: number, curve: number): Ctx {
+  const n = rows.length
+  const payouts = rows.map((r) => r.payout)
+  const locked = rows.map((r) => r.locked)
+  const current = rows.map((r) => Math.max(0, Math.round(r.weight)))
+
+  const positives = payouts.filter((p) => p > 0)
+  const pMin = positives.length > 0 ? Math.min(...positives) : 1
+  const u = payouts.map((p) => (p > 0 ? Math.log(p) - Math.log(pMin) : 0))
+
+  const freeIdx: number[][] = [[], [], []]
+  const lockedSum = [0, 0, 0]
+  let totalLocked = 0
+
+  rows.forEach((r, i) => {
+    const g = groupOf(r.payout)
+    if (r.locked) {
+      lockedSum[g] += current[i]
+      totalLocked += current[i]
+    } else {
+      freeIdx[g].push(i)
+    }
+  })
+
+  return { n, payouts, locked, current, u, freeIdx, lockedSum, totalLocked, total, curve }
+}
+
+function massesFor(targets: Targets, s: number, total: number): number[] {
+  const tau = targets.tolerance / 100
+  const hit = clamp(targets.hitChance * (1 + s * tau), 0, 1)
+  let win = clamp(targets.winChance * (1 + s * tau), 0, 1)
+  if (win > hit) win = hit
+  return [(1 - hit) * total, (hit - win) * total, win * total]
+}
+
+/**
+ * Turn group masses into budgets for the unlocked buckets.
+ * Locked weight is subtracted first; a group whose locks already overrun its
+ * mass is clamped to zero and flagged. Whatever survives is rescaled so the
+ * budgets always add up to exactly the unlocked total — otherwise the weights
+ * would not sum to the grand total.
+ */
+function freeBudgets(ctx: Ctx, masses: number[]): { budgets: number[]; conflict: boolean } {
+  const free = Math.max(0, ctx.total - ctx.totalLocked)
+  const raw = [0, 1, 2].map((g) => masses[g] - ctx.lockedSum[g])
+  const conflict = raw.some((v) => v < -0.5)
+
+  const budgets = raw.map((v, g) => (ctx.freeIdx[g].length === 0 ? 0 : Math.max(0, v)))
+  const sum = budgets.reduce((a, b) => a + b, 0)
+
+  if (sum > 0) {
+    const k = free / sum
+    return { budgets: budgets.map((v) => v * k), conflict }
+  }
+
+  // No group can take weight by mass. Spread by unlocked bucket count so the
+  // total still balances.
+  const counts = [0, 1, 2].map((g) => ctx.freeIdx[g].length)
+  const totalCount = counts.reduce((a, b) => a + b, 0)
+  if (totalCount === 0) return { budgets: [0, 0, 0], conflict }
+  return { budgets: counts.map((c) => (free * c) / totalCount), conflict }
+}
+
+/** Continuous (pre-rounding) weights for a given band position and slope. */
+function continuousWeights(ctx: Ctx, budgets: number[], gamma: number): number[] {
+  const w = new Array<number>(ctx.n).fill(0)
+  for (let i = 0; i < ctx.n; i++) if (ctx.locked[i]) w[i] = ctx.current[i]
+
+  for (const g of [0, 1, 2] as const) {
+    const idx = ctx.freeIdx[g]
+    if (idx.length === 0) continue
+    const budget = budgets[g]
+    if (!(budget > 0)) continue
+
+    if (g === 0) {
+      // Zero-payout buckets contribute nothing to RTP and there is no
+      // principled curve for them, so keep whatever balance the user has.
+      const base = idx.map((i) => ctx.current[i])
+      const sum = base.reduce((a, b) => a + b, 0)
+      const props = sum > 0 ? base.map((b) => b / sum) : idx.map(() => 1 / idx.length)
+      idx.forEach((i, k) => {
+        w[i] = props[k] * budget
+      })
+      continue
+    }
+
+    const logs = idx.map((i) => -gamma * ctx.u[i] - ctx.curve * ctx.u[i] * ctx.u[i])
     const maxLog = Math.max(...logs)
     const raw = logs.map((l) => Math.exp(l - maxLog))
     const sum = raw.reduce((a, b) => a + b, 0)
-    return raw.map((r) => r / sum)
+    idx.forEach((i, k) => {
+      w[i] = (raw[k] / sum) * budget
+    })
   }
 
-  const rtpFor = (alpha: number): number =>
-    sharesFor(alpha).reduce((acc, s, i) => acc + s * payouts[i], 0)
+  return w
+}
 
-  let lo = -30
-  let hi = 30
-  // Clamp target into the achievable range for this payout set.
-  const target = Math.min(Math.max(targetRtp, rtpFor(hi)), rtpFor(lo))
-  for (let iter = 0; iter < 100; iter++) {
+function rtpOf(ctx: Ctx, w: number[]): number {
+  if (!(ctx.total > 0)) return NaN
+  let acc = 0
+  for (let i = 0; i < ctx.n; i++) acc += ctx.payouts[i] * w[i]
+  return acc / ctx.total
+}
+
+/** RTP is monotonically decreasing in gamma, so the range is [at HI, at LO]. */
+function reachRange(ctx: Ctx, budgets: number[]): [number, number] {
+  return [
+    rtpOf(ctx, continuousWeights(ctx, budgets, GAMMA_HI)),
+    rtpOf(ctx, continuousWeights(ctx, budgets, GAMMA_LO)),
+  ]
+}
+
+function solveGamma(ctx: Ctx, budgets: number[], target: number): number {
+  let lo = GAMMA_LO
+  let hi = GAMMA_HI
+  const [min, max] = reachRange(ctx, budgets)
+  const goal = clamp(target, min, max)
+  for (let k = 0; k < BISECTION_STEPS; k++) {
     const mid = (lo + hi) / 2
-    if (rtpFor(mid) > target) lo = mid
+    if (rtpOf(ctx, continuousWeights(ctx, budgets, mid)) > goal) lo = mid
     else hi = mid
   }
+  return (lo + hi) / 2
+}
 
-  const shares = sharesFor((lo + hi) / 2)
-
-  // Round to integers >= 1, then push the remainder into the largest bucket
-  // (typically the zero/low payout bucket) so the sum is exact.
-  const weights = shares.map((s) => Math.max(1, Math.round(s * totalWeight)))
-  let biggest = 0
-  for (let i = 1; i < n; i++) {
-    if (shares[i] > shares[biggest]) biggest = i
+/** Band positions ordered by how much slack they spend. */
+function bandCandidates(): number[] {
+  const out = [0]
+  for (let k = 1; k <= BAND_STEPS; k++) {
+    out.push(k / BAND_STEPS, -k / BAND_STEPS)
   }
-  const diff = totalWeight - weights.reduce((a, b) => a + b, 0)
-  weights[biggest] = Math.max(1, weights[biggest] + diff)
+  return out
+}
 
-  correctRounding(weights, payouts, totalWeight, target)
-  return weights
+/** Round the continuous solution to integers, exact per group and overall. */
+function allocate(ctx: Ctx, cont: number[]): number[] {
+  const out = new Array<number>(ctx.n).fill(0)
+  for (let i = 0; i < ctx.n; i++) if (ctx.locked[i]) out[i] = ctx.current[i]
+
+  const free = Math.max(0, ctx.total - ctx.totalLocked)
+  const active = ([0, 1, 2] as const).filter((g) => ctx.freeIdx[g].length > 0)
+  if (active.length === 0) return out
+
+  const groupSums = active.map((g) => ctx.freeIdx[g].reduce((a, i) => a + cont[i], 0))
+  const groupBudgets = largestRemainder(groupSums, free, false)
+
+  active.forEach((g, k) => {
+    const idx = ctx.freeIdx[g]
+    const alloc = largestRemainder(
+      idx.map((i) => cont[i]),
+      groupBudgets[k],
+      true,
+    )
+    idx.forEach((i, j) => {
+      out[i] = alloc[j]
+    })
+  })
+
+  return out
 }
 
 /**
- * Integer rounding (and the min-weight-1 clamp) drifts the achieved RTP away
- * from the target. Transfer weight units between the lowest-payout bucket and
- * other buckets to close the gap without changing the total.
+ * Every usable pair of unlocked win buckets, widest payout span first.
+ *
+ * The span is the step size: moving one unit between a pair changes RTP by
+ * `span / total`. A wide pair covers distance but lands coarsely; a close pair
+ * is precise but has nowhere near the capacity to cover distance — the closest
+ * pair here spans 0.05, so closing a 3e-4 RTP gap with it alone would need
+ * ~7000 units moved out of buckets holding a few hundred.
+ *
+ * Walking the whole ladder fixes both problems: each step shrinks the residue
+ * to its own granularity, and consecutive spans are close enough that the next
+ * step never needs more capacity than it has. Pairs with equal payouts are
+ * skipped — moving weight between them does nothing (the real data has two
+ * separate 200x buckets).
  */
-function correctRounding(
-  weights: number[],
-  payouts: number[],
-  totalWeight: number,
-  targetRtp: number,
-): void {
-  let minIdx = 0
-  for (let i = 1; i < payouts.length; i++) {
-    if (payouts[i] < payouts[minIdx]) minIdx = i
+function payoutPairs(ctx: Ctx, idx: number[]): [number, number][] {
+  const pairs: { pair: [number, number]; span: number }[] = []
+
+  for (let a = 0; a < idx.length; a++) {
+    for (let b = a + 1; b < idx.length; b++) {
+      const i = idx[a]
+      const j = idx[b]
+      const span = Math.abs(ctx.payouts[i] - ctx.payouts[j])
+      if (!(span > 0)) continue
+      pairs.push({ pair: ctx.payouts[i] < ctx.payouts[j] ? [i, j] : [j, i], span })
+    }
   }
-  const pMin = payouts[minIdx]
 
-  // Candidate partners: richest buckets first so transfers have headroom.
-  const order = payouts
-    .map((_, i) => i)
-    .filter((i) => i !== minIdx && payouts[i] !== pMin)
-    .sort((a, b) => weights[b] - weights[a])
+  pairs.sort((a, b) => b.span - a.span)
+  return pairs.map((p) => p.pair)
+}
 
-  for (const j of order) {
-    const current = weights.reduce((acc, w, i) => acc + w * payouts[i], 0)
-    // Weight·payout units still missing from the target return.
-    const err = targetRtp * totalWeight - current
-    const perUnit = payouts[j] - pMin
-    let d = Math.round(err / perUnit) // move d units from minIdx to j
-    if (d === 0) continue
-    d = Math.max(-(weights[j] - 1), Math.min(weights[minIdx] - 1, d))
-    weights[minIdx] -= d
-    weights[j] += d
+/** Move weight between one pair until RTP stops improving. */
+function transfer(ctx: Ctx, w: number[], target: number, pair: [number, number] | null): void {
+  if (pair === null) return
+  const [lo, hi] = pair
+  const span = ctx.payouts[hi] - ctx.payouts[lo]
+  if (!(span > 0)) return
+
+  const minLo = w[lo] >= 1 ? 1 : 0
+  const minHi = w[hi] >= 1 ? 1 : 0
+  const err = () => (target - rtpOf(ctx, w)) * ctx.total
+
+  const d = clamp(Math.round(err() / span), -(w[hi] - minHi), w[lo] - minLo)
+  if (d !== 0) {
+    w[lo] -= d
+    w[hi] += d
+  }
+
+  for (let k = 0; k < 200; k++) {
+    const before = Math.abs(err())
+    if (before === 0) return
+    const dir = err() > 0 ? 1 : -1
+    if (dir === 1 && w[lo] - 1 < minLo) return
+    if (dir === -1 && w[hi] - 1 < minHi) return
+    w[lo] -= dir
+    w[hi] += dir
+    if (Math.abs(err()) >= before) {
+      w[lo] += dir
+      w[hi] -= dir
+      return
+    }
   }
 }
 
-/** Rescale existing weights proportionally to a new total, preserving RTP. */
-export function rescaleWeights(weights: number[], newTotal: number): number[] {
-  const currentTotal = weights.reduce((a, b) => a + b, 0)
-  if (currentTotal <= 0 || newTotal <= 0) return weights
-  const scaled = weights.map((w) => Math.max(w > 0 ? 1 : 0, Math.round((w / currentTotal) * newTotal)))
-  const diff = newTotal - scaled.reduce((a, b) => a + b, 0)
-  let biggest = 0
-  for (let i = 1; i < scaled.length; i++) {
-    if (scaled[i] > scaled[biggest]) biggest = i
+/**
+ * Integer rounding drifts RTP off target. Shuffle units between unlocked win
+ * buckets, which leaves every group sum — and therefore hit and win chance —
+ * untouched. Accuracy bottoms out at half the finest payout gap divided by the
+ * total: about 2e-8 on the reference ladder.
+ */
+function repairRtp(ctx: Ctx, w: number[], target: number): void {
+  const idx = ctx.freeIdx[2]
+  if (idx.length < 2) return
+
+  const err = () => Math.abs(target - rtpOf(ctx, w)) * ctx.total
+  for (const pair of payoutPairs(ctx, idx)) {
+    if (err() < 1e-9) return
+    transfer(ctx, w, target, pair)
   }
-  scaled[biggest] = Math.max(0, scaled[biggest] + diff)
-  return scaled
+}
+
+export function solveWeights(
+  rows: BucketRow[],
+  totalWeight: number,
+  targets: Targets,
+  curve: number,
+): SolveResult {
+  const empty: SolveResult = {
+    weights: rows.map((r) => Math.max(0, Math.round(r.weight))),
+    achieved: statsOf(rows, totalWeight),
+    bandUsed: 0,
+    gamma: 0,
+    warnings: [],
+  }
+  if (rows.length === 0 || !(totalWeight > 0)) return empty
+
+  const ctx = buildCtx(rows, totalWeight, curve)
+  const warnings: string[] = []
+
+  if (ctx.freeIdx.every((g) => g.length === 0)) {
+    return { ...empty, warnings: ['Every row is locked — nothing left to distribute.'] }
+  }
+
+  // Spend as little of the tolerance band as the targets allow.
+  interface Candidate {
+    s: number
+    budgets: number[]
+    conflict: boolean
+    reachable: boolean
+  }
+
+  let chosen: Candidate | null = null
+  let fallback: Candidate | null = null
+
+  for (const s of bandCandidates()) {
+    const { budgets, conflict } = freeBudgets(ctx, massesFor(targets, s, totalWeight))
+    const [min, max] = reachRange(ctx, budgets)
+    const reachable = targets.rtp >= min - 1e-12 && targets.rtp <= max + 1e-12
+    const candidate: Candidate = { s, budgets, conflict, reachable }
+
+    if (!conflict && reachable) {
+      chosen = candidate
+      break
+    }
+    // Locks are hard, so a lock-clean position beats an RTP-reachable one.
+    if (!conflict && fallback === null) fallback = candidate
+  }
+
+  if (chosen === null) {
+    if (fallback !== null) {
+      chosen = fallback
+    } else {
+      const { budgets, conflict } = freeBudgets(ctx, massesFor(targets, 0, totalWeight))
+      const [min, max] = reachRange(ctx, budgets)
+      chosen = {
+        s: 0,
+        budgets,
+        conflict,
+        reachable: targets.rtp >= min - 1e-12 && targets.rtp <= max + 1e-12,
+      }
+    }
+  }
+
+  const gamma = solveGamma(ctx, chosen.budgets, targets.rtp)
+  const weights = allocate(ctx, continuousWeights(ctx, chosen.budgets, gamma))
+  repairRtp(ctx, weights, targets.rtp)
+
+  const achieved = statsOf(
+    rows.map((r, i) => ({ ...r, weight: weights[i] })),
+    totalWeight,
+  )
+
+  if (chosen.conflict) {
+    const over = [0, 1, 2].filter(
+      (g) => ctx.lockedSum[g] - massesFor(targets, chosen!.s, totalWeight)[g] > 0.5,
+    )
+    for (const g of over) {
+      warnings.push(
+        `Locked weight in the ${GROUP_NAMES[g]} buckets exceeds that group's share of the total, so its chance target could not be met.`,
+      )
+    }
+  }
+
+  // Reachability is a property of the continuous solve. Integer rounding
+  // leaves a residue whose size depends on the closest pair of payouts on the
+  // ladder, so it is not evidence that the target was unreachable.
+  if (!chosen.reachable) {
+    warnings.push(
+      `Target RTP ${targets.rtp} is out of reach at these chances — achieved ${achieved.rtp.toFixed(6)}.`,
+    )
+  }
+
+  const tau = targets.tolerance / 100
+  const outOfBand = (label: string, got: number, want: number) => {
+    if (want <= 0) return
+    if (got < want * (1 - tau) - 1e-9 || got > want * (1 + tau) + 1e-9) {
+      warnings.push(
+        `Achieved ${label} ${got.toFixed(3)} is outside the ±${targets.tolerance}% band around ${want}.`,
+      )
+    }
+  }
+  outOfBand('hit chance', achieved.hitChance, targets.hitChance)
+  outOfBand('win chance', achieved.winChance, targets.winChance)
+
+  return { weights, achieved, bandUsed: chosen.s, gamma, warnings }
+}
+
+/**
+ * Scale to a new total, preserving locks and the current shape.
+ * Returns null when the new total cannot hold the locked weight.
+ */
+export function rescaleToTotal(rows: BucketRow[], newTotal: number): number[] | null {
+  if (!Number.isFinite(newTotal) || newTotal < 0) return null
+
+  const out = rows.map((r) => Math.max(0, Math.round(r.weight)))
+  const lockedSum = rows.reduce((a, r, i) => (r.locked ? a + out[i] : a), 0)
+  if (newTotal < lockedSum) return null
+
+  const freeIdx = rows.map((_, i) => i).filter((i) => !rows[i].locked)
+  const budget = Math.round(newTotal) - lockedSum
+  if (freeIdx.length === 0) return budget === 0 ? out : null
+
+  const base = freeIdx.map((i) => out[i])
+  const anyPositive = base.some((b) => b > 0)
+  const alloc = largestRemainder(anyPositive ? base : base.map(() => 1), budget, false)
+  freeIdx.forEach((i, k) => {
+    out[i] = alloc[k]
+  })
+
+  return out
+}
+
+/**
+ * Move RTP to a new value by reshaping the payout ladder only.
+ *
+ * Each group's unlocked weight is preserved exactly, so hit chance and win
+ * chance do not budge — the common workflow is nudging RTP while the chances
+ * stay where they were put. Implemented as a minimal exponential tilt of the
+ * current weights, so the existing curve's character survives.
+ */
+export function retargetRtp(rows: BucketRow[], totalWeight: number, targetRtp: number): number[] {
+  const out = rows.map((r) => Math.max(0, Math.round(r.weight)))
+  if (rows.length === 0 || !(totalWeight > 0)) return out
+
+  const ctx = buildCtx(rows, totalWeight, 0)
+  const groups = [1, 2] as const
+  const groupTotals = groups.map((g) => ctx.freeIdx[g].reduce((a, i) => a + out[i], 0))
+
+  const tilted = (theta: number): number[] => {
+    const w = out.slice()
+    groups.forEach((g, gi) => {
+      const idx = ctx.freeIdx[g]
+      const groupTotal = groupTotals[gi]
+      if (idx.length === 0 || groupTotal <= 0) return
+      const logs = idx.map((i) => Math.log(Math.max(out[i], 1e-9)) + theta * ctx.u[i])
+      const maxLog = Math.max(...logs)
+      const raw = logs.map((l) => Math.exp(l - maxLog))
+      const sum = raw.reduce((a, b) => a + b, 0)
+      idx.forEach((i, k) => {
+        w[i] = (raw[k] / sum) * groupTotal
+      })
+    })
+    return w
+  }
+
+  // RTP increases with theta: positive theta shifts mass up the ladder.
+  let lo = -40
+  let hi = 40
+  const goal = clamp(targetRtp, rtpOf(ctx, tilted(lo)), rtpOf(ctx, tilted(hi)))
+  for (let k = 0; k < BISECTION_STEPS; k++) {
+    const mid = (lo + hi) / 2
+    if (rtpOf(ctx, tilted(mid)) < goal) lo = mid
+    else hi = mid
+  }
+
+  const cont = tilted((lo + hi) / 2)
+  const result = out.slice()
+  groups.forEach((g, gi) => {
+    const idx = ctx.freeIdx[g]
+    if (idx.length === 0) return
+    const alloc = largestRemainder(
+      idx.map((i) => cont[i]),
+      groupTotals[gi],
+      true,
+    )
+    idx.forEach((i, k) => {
+      result[i] = alloc[k]
+    })
+  })
+
+  repairRtp(ctx, result, targetRtp)
+  return result
 }
