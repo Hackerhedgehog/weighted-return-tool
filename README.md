@@ -96,8 +96,8 @@ paste the result back without editing anything out.
 
 ### Getting started
 
-First launch opens the paste screen. `Load sample` builds the table from the
-bundled 30-bucket reference data; `Paste TSV data` takes your own bucket list
+First launch opens the paste screen. `Load sample` builds the table from a
+bundled sample (14 buckets); `Paste TSV data` takes your own bucket list
 and stays available in the top bar afterwards. `Clear workspace` in the
 targets panel wipes everything and returns to the paste screen, after
 confirming.
