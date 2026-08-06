@@ -1,6 +1,6 @@
 import { useLayoutEffect, useMemo, useRef, useState } from 'react'
 import type { BucketRow } from '../lib/types'
-import { fmtInt, fmtPct } from '../lib/format'
+import { fmtWeight, fmtPct } from '../lib/format'
 
 interface DistributionChartProps {
   rows: BucketRow[]
@@ -155,7 +155,7 @@ export function DistributionChart({ rows, totalWeight, aggregate, logScale }: Di
                   y={HEIGHT - MARGIN.bottom + 18}
                   textAnchor="middle"
                 >
-                  ×{fmtInt(b.payout)}
+                  ×{fmtWeight(b.payout)}
                 </text>
               ) : null,
             )}
@@ -185,7 +185,7 @@ export function DistributionChart({ rows, totalWeight, aggregate, logScale }: Di
                 left: Math.min(Math.max(hoverX, 90), width - 110),
               }}
             >
-              <div className="tt-payout">×{fmtInt(hovered.payout)}</div>
+              <div className="tt-payout">×{fmtWeight(hovered.payout)}</div>
               <div className="tt-labels">
                 {hovered.labels.length > 3
                   ? `${hovered.labels.slice(0, 3).join(', ')} +${hovered.labels.length - 3}`
@@ -197,7 +197,7 @@ export function DistributionChart({ rows, totalWeight, aggregate, logScale }: Di
               </div>
               <div className="tt-row">
                 <span>weight</span>
-                <b>{fmtInt(hovered.weight)}</b>
+                <b>{fmtWeight(hovered.weight)}</b>
               </div>
             </div>
           )}

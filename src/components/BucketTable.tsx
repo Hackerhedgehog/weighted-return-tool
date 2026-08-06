@@ -1,6 +1,6 @@
 import { memo, useCallback } from 'react'
 import type { BucketRow, SortKey, SortState } from '../lib/types'
-import { fmtInt, fmtPct, fmtReturn } from '../lib/format'
+import { fmtWeight, fmtPct, fmtDecimal } from '../lib/format'
 import { NumCell, TextCell } from './cells'
 
 export type RowPatch = Partial<Pick<BucketRow, 'bucketId' | 'label' | 'payout' | 'weight' | 'optionalId'>>
@@ -111,7 +111,7 @@ const Row = memo(function Row({ row, totalWeight, onPatch }: RowProps) {
       <td className="col-payout">
         <NumCell
           value={row.payout}
-          display={fmtInt(row.payout)}
+          display={fmtWeight(row.payout)}
           validate={(n) => Number.isInteger(n) && n >= 0}
           onCommit={(n) => patch({ payout: Math.round(n) })}
         />
@@ -119,7 +119,7 @@ const Row = memo(function Row({ row, totalWeight, onPatch }: RowProps) {
       <td className="col-weight">
         <NumCell
           value={row.weight}
-          display={fmtInt(row.weight)}
+          display={fmtWeight(row.weight)}
           validate={(n) => Number.isInteger(n) && n >= 0}
           onCommit={(n) => patch({ weight: Math.round(n) })}
         />
@@ -127,7 +127,7 @@ const Row = memo(function Row({ row, totalWeight, onPatch }: RowProps) {
       <td className="col-wr">
         <NumCell
           value={weightedReturn}
-          display={fmtReturn(weightedReturn)}
+          display={fmtDecimal(weightedReturn)}
           editValue={Number.isFinite(weightedReturn) ? String(weightedReturn) : ''}
           validate={(n) => n >= 0 && row.payout > 0}
           onCommit={(n) => {

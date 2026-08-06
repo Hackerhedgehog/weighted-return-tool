@@ -1,0 +1,3 @@
+# The reference TSV fixtures are compared byte-for-byte by the export
+# acceptance test. Keep git from rewriting their CRLF line endings.
+*.tsv -text

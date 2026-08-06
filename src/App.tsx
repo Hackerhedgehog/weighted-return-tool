@@ -2,7 +2,7 @@ import { useCallback, useMemo, useState } from 'react'
 import type { BucketRow, SortKey, SortState } from './lib/types'
 import { parseTsv, SAMPLE_TSV } from './lib/parse'
 import { distributeWeights, rescaleWeights } from './lib/distribute'
-import { fmtInt, fmtRtp } from './lib/format'
+import { fmtWeight, fmtRtp } from './lib/format'
 import { BucketTable, type RowPatch } from './components/BucketTable'
 import { DistributionChart } from './components/DistributionChart'
 import { RtpGauge } from './components/RtpGauge'
@@ -132,17 +132,17 @@ export default function App() {
               <NumCell
                 className="stat-input"
                 value={totalWeight}
-                display={fmtInt(totalWeight)}
+                display={fmtWeight(totalWeight)}
                 validate={(n) => Number.isInteger(n) && n > 0}
                 onCommit={(n) => changeTotalWeight(Math.round(n))}
               />
               <span className={`stat-hint ${stats.delta !== 0 ? 'warn' : ''}`}>
-                Σ weights {fmtInt(stats.sumWeights)}
+                Σ weights {fmtWeight(stats.sumWeights)}
                 {stats.delta !== 0 && (
                   <>
                     {' '}
                     (Δ {stats.delta > 0 ? '+' : ''}
-                    {fmtInt(stats.delta)}){' '}
+                    {fmtWeight(stats.delta)}){' '}
                     <button type="button" className="link-btn" onClick={absorbDelta}>
                       fix
                     </button>
