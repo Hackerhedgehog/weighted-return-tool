@@ -3,6 +3,7 @@ import { readFileSync } from 'node:fs'
 import { parseTsv } from './parse'
 import {
   groupOf,
+  largestRemainder,
   rescaleToTotal,
   retargetRtp,
   solveWeights,
@@ -259,5 +260,22 @@ describe('retargetRtp', () => {
     const out = retargetRtp(src, T, 1.05)
     expect(out[0]).toBe(src[0].weight)
     expect(sum(out)).toBe(T)
+  })
+})
+
+describe('largestRemainder with a step', () => {
+  it('allocates only multiples of the step, exactly to the total', () => {
+    const out = largestRemainder([3, 1, 1], 1000, false, 100)
+    expect(out).toEqual([600, 200, 200])
+  })
+
+  it('minOne gives every entry at least one step', () => {
+    const out = largestRemainder([1000, 1, 1], 300, true, 100)
+    expect(out.every((v) => v >= 100 && v % 100 === 0)).toBe(true)
+    expect(sum(out)).toBe(300)
+  })
+
+  it('defaults to unit granularity', () => {
+    expect(sum(largestRemainder([1, 1, 1], 10, false))).toBe(10)
   })
 })

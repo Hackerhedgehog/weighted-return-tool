@@ -48,6 +48,16 @@ export function volatilityForCurve(curve: number): Volatility {
   return 'custom'
 }
 
+/**
+ * Granularity of tool-distributed weights: every weight the tool computes
+ * lands on a multiple of the step. 1 is "free". Manually typed weight cells
+ * are never snapped.
+ */
+export type WeightStep = 1 | 10 | 100
+
+export const WEIGHT_STEPS: WeightStep[] = [1, 10, 100]
+export const DEFAULT_WEIGHT_STEP: WeightStep = 1
+
 export interface Targets {
   /** Hard target. Fraction, so 0.95 means 95%. */
   rtp: number
