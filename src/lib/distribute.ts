@@ -69,9 +69,9 @@ export function statsOf(rows: BucketRow[], totalWeight: number): Stats {
  * Split `total` integer units across `weights` in proportion, exactly.
  * With `minOne`, every entry gets at least 1 — but only when the budget is
  * large enough to go round; otherwise zeros are allowed rather than
- * over-spending.
+ * over-spending. Exported for the direct-manipulation ops in interact.ts.
  */
-function largestRemainder(weights: number[], total: number, minOne: boolean): number[] {
+export function largestRemainder(weights: number[], total: number, minOne: boolean): number[] {
   const n = weights.length
   if (n === 0) return []
 
