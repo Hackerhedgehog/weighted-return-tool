@@ -265,8 +265,8 @@ export default function App() {
   )
 
   const exportText = useCallback(
-    () => buildTsv(sortRows(docRef.current.rows, sort, totalWeight), totalWeight),
-    [sort, totalWeight],
+    () => buildTsv(sortRows(docRef.current.rows, sort, totalWeight, grouping.rank), totalWeight),
+    [sort, totalWeight, grouping],
   )
 
   const handleCopy = useCallback(async () => {
@@ -338,12 +338,21 @@ export default function App() {
                 Arrow keys to move · type an operator to adjust (200 then +500 → 700) · drag a header
                 edge to resize
               </span>
+              <button
+                type="button"
+                className={`btn group-sort ${sort.key === 'group' ? 'primary' : ''}`}
+                title="Order rows by bucket group — colors match the chart"
+                onClick={() => handleSort('group')}
+              >
+                Group sort
+              </button>
             </div>
             <BucketTable
               rows={viewRows}
               totalWeight={totalWeight}
               sort={sort}
               columnWidths={columnWidths}
+              grouping={grouping}
               onSort={handleSort}
               onPatch={patchRow}
               onWidths={setColumnWidths}

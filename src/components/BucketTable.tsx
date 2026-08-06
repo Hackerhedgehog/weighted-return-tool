@@ -1,5 +1,6 @@
 import { useCallback, useMemo, useRef } from 'react'
 import type { BucketRow, ColumnKey, RowPatch, SortKey, SortState } from '../lib/types'
+import type { Grouping } from '../lib/groups'
 import { COLUMNS, sortRows, type Column } from '../lib/columns'
 import { fmtDecimal, fmtPayout, fmtWeight } from '../lib/format'
 import { weightForChance, weightForValue } from '../lib/distribute'
@@ -14,6 +15,8 @@ interface BucketTableProps {
   totalWeight: number
   sort: SortState
   columnWidths: Record<string, number>
+  /** Colors each row by its bucket group and drives the group sort. */
+  grouping: Grouping
   onSort: (key: SortKey) => void
   onPatch: (uid: string, patch: RowPatch) => void
   onWidths: (widths: Record<string, number>) => void
@@ -36,13 +39,17 @@ export function BucketTable({
   totalWeight,
   sort,
   columnWidths,
+  grouping,
   onSort,
   onPatch,
   onWidths,
   onTotalWeight,
   onTotalRtp,
 }: BucketTableProps) {
-  const sorted = useMemo(() => sortRows(rows, sort, totalWeight), [rows, sort, totalWeight])
+  const sorted = useMemo(
+    () => sortRows(rows, sort, totalWeight, grouping.rank),
+    [rows, sort, totalWeight, grouping],
+  )
   const tableRef = useRef<HTMLTableElement>(null)
 
   const totalsRowIndex = sorted.length
@@ -219,7 +226,13 @@ export function BucketTable({
 
         <tbody>
           {sorted.map((row, rowIdx) => (
-            <tr key={row.uid} className={`grid-row ${row.locked ? 'locked' : ''}`}>
+            <tr
+              key={row.uid}
+              className={`grid-row ${row.locked ? 'locked' : ''}`}
+              // group tint only — spacing must stay identical across groups,
+              // and the locked highlight (a class style) must stay visible
+              style={row.locked ? undefined : { background: grouping.byUid.get(row.uid)?.tint }}
+            >
               <td className="col-lock">
                 <LockCell
                   locked={row.locked}

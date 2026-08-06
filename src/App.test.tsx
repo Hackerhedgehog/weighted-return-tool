@@ -130,6 +130,40 @@ describe('App', () => {
     expect(document.querySelector('.grid-row .col-weight .gcell')!.textContent).toBe(before)
   })
 
+  it('tints rows by bucket group without touching layout', () => {
+    loadRealData()
+    const styles = [...document.querySelectorAll('.grid-row')].map(
+      (tr) => tr.getAttribute('style') ?? '',
+    )
+    expect(styles.some((s) => s.includes('--series-0-tint'))).toBe(true) // win ranges
+    expect(styles.some((s) => s.includes('--series-1-tint'))).toBe(true) // bonus
+    expect(styles.some((s) => s.includes('--series-6-tint'))).toBe(true) // 0x buckets
+  })
+
+  it('sorts by group when the Group sort button is clicked', () => {
+    loadRealData()
+    fireEvent.click(screen.getByRole('button', { name: 'Group sort' }))
+
+    const labels = [...document.querySelectorAll('.grid-row .col-label .gcell')].map(
+      (el) => el.textContent ?? '',
+    )
+    // win ranges lead, ordered by payout
+    expect(labels[0]).toBe('0-1x')
+    // every zero-payout bucket sits in one contiguous block
+    const zeroBlock = ['joker2-tease', 'bonus-silent-tease', 'bonus1-tease', 'bonus2-tease', '0x']
+      .map((l) => labels.indexOf(l))
+      .sort((a, b) => a - b)
+    expect(zeroBlock[0]).toBeGreaterThan(-1)
+    expect(zeroBlock[4] - zeroBlock[0]).toBe(4)
+  })
+
+  it('shows the simulation panel below everything else', () => {
+    loadRealData()
+    expect(screen.getByText('Simulation')).toBeDefined()
+    expect(screen.getByLabelText('Spins')).toBeDefined()
+    expect(screen.getByRole('button', { name: 'Run' })).toBeDefined()
+  })
+
   it('restores the workspace after a reload', () => {
     loadRealData()
     const before = document.querySelector('.grid-row .col-weight .gcell')!.textContent

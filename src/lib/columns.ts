@@ -28,13 +28,27 @@ export const DEFAULT_WIDTHS: Record<string, number> = Object.fromEntries(
   COLUMNS.map((c) => [c.key, c.width]),
 )
 
-/** Shared so the export writes rows in the same order the table shows them. */
-export function sortRows(rows: BucketRow[], sort: SortState, totalWeight: number): BucketRow[] {
+/**
+ * Shared so the export writes rows in the same order the table shows them.
+ * `groupRank` (uid → group index) drives the 'group' sort; without it that
+ * sort falls back to bucket id.
+ */
+export function sortRows(
+  rows: BucketRow[],
+  sort: SortState,
+  totalWeight: number,
+  groupRank?: Map<string, number>,
+): BucketRow[] {
   const dir = sort.dir
   const value = (r: BucketRow) => (totalWeight > 0 ? (r.payout * r.weight) / totalWeight : 0)
 
   return [...rows].sort((a, b) => {
     switch (sort.key) {
+      case 'group': {
+        const ra = groupRank?.get(a.uid) ?? 0
+        const rb = groupRank?.get(b.uid) ?? 0
+        return dir * (ra - rb) || a.payout - b.payout || a.bucketId - b.bucketId
+      }
       case 'label':
         return (
           dir * a.label.localeCompare(b.label, undefined, { sensitivity: 'base', numeric: true })

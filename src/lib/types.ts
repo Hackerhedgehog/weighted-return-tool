@@ -79,7 +79,8 @@ export type RowPatch = Partial<
   Pick<BucketRow, 'bucketId' | 'payout' | 'label' | 'weight' | 'locked'>
 >
 
-export type SortKey = Exclude<ColumnKey, 'lock'>
+/** 'group' has no column of its own — it's driven by the Group sort button. */
+export type SortKey = Exclude<ColumnKey, 'lock'> | 'group'
 
 export interface SortState {
   key: SortKey
