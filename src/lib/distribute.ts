@@ -543,22 +543,29 @@ export function weightForValue(
 
 /**
  * Scale to a new total, preserving locks and the current shape.
- * Returns null when the new total cannot hold the locked weight.
+ * Returns null when the new total cannot hold the locked weight,
+ * or when the free budget is not divisible by the step.
  */
-export function rescaleToTotal(rows: BucketRow[], newTotal: number): number[] | null {
+export function rescaleToTotal(
+  rows: BucketRow[],
+  newTotal: number,
+  step: WeightStep = 1,
+): number[] | null {
   if (!Number.isFinite(newTotal) || newTotal < 0) return null
 
   const out = rows.map((r) => Math.max(0, Math.round(r.weight)))
   const lockedSum = rows.reduce((a, r, i) => (r.locked ? a + out[i] : a), 0)
   if (newTotal < lockedSum) return null
 
-  const freeIdx = rows.map((_, i) => i).filter((i) => !rows[i].locked)
   const budget = Math.round(newTotal) - lockedSum
+  if (budget % step !== 0) return null
+
+  const freeIdx = rows.map((_, i) => i).filter((i) => !rows[i].locked)
   if (freeIdx.length === 0) return budget === 0 ? out : null
 
   const base = freeIdx.map((i) => out[i])
   const anyPositive = base.some((b) => b > 0)
-  const alloc = largestRemainder(anyPositive ? base : base.map(() => 1), budget, false)
+  const alloc = largestRemainder(anyPositive ? base : base.map(() => 1), budget, false, step)
   freeIdx.forEach((i, k) => {
     out[i] = alloc[k]
   })
@@ -573,14 +580,25 @@ export function rescaleToTotal(rows: BucketRow[], newTotal: number): number[] | 
  * chance do not budge — the common workflow is nudging RTP while the chances
  * stay where they were put. Implemented as a minimal exponential tilt of the
  * current weights, so the existing curve's character survives.
+ *
+ * Returns null when a group's unlocked sum is not divisible by the step,
+ * since no on-step redistribution can preserve an off-step sum.
  */
-export function retargetRtp(rows: BucketRow[], totalWeight: number, targetRtp: number): number[] {
+export function retargetRtp(
+  rows: BucketRow[],
+  totalWeight: number,
+  targetRtp: number,
+  step: WeightStep = 1,
+): number[] | null {
   const out = rows.map((r) => Math.max(0, Math.round(r.weight)))
   if (rows.length === 0 || !(totalWeight > 0)) return out
 
   const ctx = buildCtx(rows, totalWeight, 0)
   const groups = [1, 2] as const
   const groupTotals = groups.map((g) => ctx.freeIdx[g].reduce((a, i) => a + out[i], 0))
+  // Each group's unlocked sum is preserved exactly, so each must already sit
+  // on the step — otherwise no on-step redistribution can reproduce it.
+  if (groupTotals.some((t) => t % step !== 0)) return null
 
   const tilted = (theta: number): number[] => {
     const w = out.slice()
@@ -618,12 +636,13 @@ export function retargetRtp(rows: BucketRow[], totalWeight: number, targetRtp: n
       idx.map((i) => cont[i]),
       groupTotals[gi],
       true,
+      step,
     )
     idx.forEach((i, k) => {
       result[i] = alloc[k]
     })
   })
 
-  repairRtp(ctx, result, targetRtp, 1)
+  repairRtp(ctx, result, targetRtp, step)
   return result
 }

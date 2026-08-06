@@ -240,7 +240,7 @@ describe('retargetRtp', () => {
 
   it('reaches a new RTP without moving hit or win chance', () => {
     const before = statsOf(withWeights(start), T)
-    const out = retargetRtp(withWeights(start), T, 1.05)
+    const out = retargetRtp(withWeights(start), T, 1.05)!
     const after = statsOf(withWeights(out), T)
 
     expect(sum(out)).toBe(T)
@@ -250,16 +250,46 @@ describe('retargetRtp', () => {
   })
 
   it('works downwards too', () => {
-    const out = retargetRtp(withWeights(start), T, 0.8)
+    const out = retargetRtp(withWeights(start), T, 0.8)!
     expect(statsOf(withWeights(out), T).rtp).toBeCloseTo(0.8, 4)
     expect(sum(out)).toBe(T)
   })
 
   it('respects locks', () => {
     const src = withWeights(start).map((r, i) => (i === 0 ? { ...r, locked: true } : r))
-    const out = retargetRtp(src, T, 1.05)
+    const out = retargetRtp(src, T, 1.05)!
     expect(out[0]).toBe(src[0].weight)
     expect(sum(out)).toBe(T)
+  })
+})
+
+describe('weight steps on rescale and retarget', () => {
+  const T100 = 1200300
+  const start = solveWeights(rows, T100, DEFAULT_TARGETS, CURVE_PRESETS.medium, 100).weights
+
+  it('rescales on the step', () => {
+    const out = rescaleToTotal(withWeights(start), 600000, 100)!
+    expect(out).not.toBeNull()
+    expect(sum(out)).toBe(600000)
+    expect(out.every((w) => w % 100 === 0)).toBe(true)
+  })
+
+  it('rejects a rescale whose free budget is off the step', () => {
+    expect(rescaleToTotal(withWeights(start), 600050, 100)).toBeNull()
+  })
+
+  it('retargets RTP while keeping every weight on the step', () => {
+    const out = retargetRtp(withWeights(start), T100, 1.05, 100)!
+    expect(out).not.toBeNull()
+    expect(sum(out)).toBe(T100)
+    expect(out.every((w) => w % 100 === 0)).toBe(true)
+    expect(statsOf(withWeights(out), T100).rtp).toBeCloseTo(1.05, 4)
+  })
+
+  it('refuses to retarget when the current weights sit off the step', () => {
+    // the step-1 solve at T puts 144,042 in the win group — not a multiple of 100
+    const offStep = solveWeights(rows, T, DEFAULT_TARGETS, CURVE_PRESETS.medium).weights
+    expect(retargetRtp(withWeights(offStep), T, 1.05, 100)).toBeNull()
   })
 })
 
