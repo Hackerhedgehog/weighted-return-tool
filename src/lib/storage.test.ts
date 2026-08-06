@@ -95,4 +95,17 @@ describe('storage', () => {
       },
     })
   })
+
+  it('round-trips a workspace carrying a weight step', () => {
+    saveWorkspace({ ...workspace, weightStep: 100 })
+    expect(loadWorkspace()?.weightStep).toBe(100)
+  })
+
+  it('accepts a stepless workspace but rejects a bogus step', () => {
+    saveWorkspace(workspace)
+    expect(loadWorkspace()).toEqual(workspace)
+
+    store.set(STORAGE_KEY, JSON.stringify({ ...workspace, weightStep: 7 }))
+    expect(loadWorkspace()).toBeNull()
+  })
 })
