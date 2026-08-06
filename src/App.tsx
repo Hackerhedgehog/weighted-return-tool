@@ -250,7 +250,11 @@ export default function App() {
         const lockedSum = d.rows
           .filter((r) => r.locked)
           .reduce((a, r) => a + r.weight, 0)
-        if (next < lockedSum) {
+        if (d.rows.every((r) => r.locked)) {
+          setNotices([
+            `Every row is locked — unlock something or set the total to exactly the locked weight (${lockedSum.toLocaleString('en-US')}).`,
+          ])
+        } else if (next < lockedSum) {
           setNotices([
             `Total weight cannot be set below the locked weight (${lockedSum.toLocaleString('en-US')}).`,
           ])
@@ -287,6 +291,7 @@ export default function App() {
   const handleDragCommit = useCallback(
     (rows: BucketRow[]) => {
       setPreview(null)
+      setNotices([])
       commit((d) => ({ ...d, rows }))
     },
     [commit],

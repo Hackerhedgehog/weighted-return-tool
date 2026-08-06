@@ -98,6 +98,25 @@ describe('App', () => {
     expect(after.textContent).toBe(weightBefore)
   })
 
+  it('shows a clear notice when every row is locked and the total is changed', () => {
+    loadRealData()
+    document.querySelectorAll('.grid-row .gcell.lock').forEach((el) => fireEvent.click(el))
+    expect(document.querySelectorAll('.grid-row.locked')).toHaveLength(30)
+
+    const cell = document.querySelector('.totals-row .col-weight .gcell') as HTMLElement
+    fireEvent.mouseDown(cell)
+    fireEvent.doubleClick(cell)
+    const input = document.querySelector('.totals-row .col-weight input') as HTMLInputElement
+    fireEvent.change(input, { target: { value: '2000000' } })
+    fireEvent.keyDown(input, { key: 'Enter' })
+
+    expect(
+      screen.getByText(
+        'Every row is locked — unlock something or set the total to exactly the locked weight (1,000,000).',
+      ),
+    ).toBeDefined()
+  })
+
   it('adds to a cell when an operator is typed on it', () => {
     loadRealData()
     const cell = document.querySelector('.grid-row .col-weight .gcell') as HTMLElement
@@ -217,6 +236,31 @@ describe('weight step', () => {
       weightStep: 100,
     })
     render(<App />)
+    expect(screen.getByRole('button', { name: '100' }).className).toContain('active')
+  })
+
+  it('never snaps a typed weight, even at step 100', () => {
+    loadRealData()
+    fireEvent.click(screen.getByRole('button', { name: '100' }))
+
+    const cell = document.querySelector('.grid-row .col-weight .gcell') as HTMLElement
+    fireEvent.mouseDown(cell)
+    fireEvent.doubleClick(cell)
+    const input = document.querySelector('.grid-row .col-weight input') as HTMLInputElement
+    fireEvent.change(input, { target: { value: '12345' } })
+    fireEvent.keyDown(input, { key: 'Enter' })
+
+    expect(document.querySelector('.grid-row .col-weight .gcell')!.textContent).toBe('12,345')
+  })
+
+  it('restores the step on redo after undoing it', () => {
+    loadRealData()
+    fireEvent.click(screen.getByRole('button', { name: '100' }))
+
+    fireEvent.click(screen.getByRole('button', { name: /Undo/ }))
+    expect(screen.getByRole('button', { name: 'free' }).className).toContain('active')
+
+    fireEvent.click(screen.getByRole('button', { name: /Redo/ }))
     expect(screen.getByRole('button', { name: '100' }).className).toContain('active')
   })
 })
