@@ -16,6 +16,8 @@ export interface Workspace {
   columnWidths: Record<string, number>
   chart: ChartSettings
   exportFilename: string
+  /** Optional — absent in workspaces saved before the simulation existed. */
+  simSpins?: number
 }
 
 const isObject = (v: unknown): v is Record<string, unknown> =>
@@ -66,7 +68,8 @@ function isWorkspace(v: unknown): v is Workspace {
     isFiniteNumber(v.curve) &&
     isObject(v.columnWidths) &&
     isChart(v.chart) &&
-    typeof v.exportFilename === 'string'
+    typeof v.exportFilename === 'string' &&
+    (v.simSpins === undefined || isFiniteNumber(v.simSpins))
   )
 }
 

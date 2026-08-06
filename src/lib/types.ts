@@ -91,6 +91,12 @@ export interface ChartSettings {
   logY: boolean
   logX: boolean
   aggregate: boolean
+  /**
+   * Weights-mode drag behaviour: on, the grand total is preserved and other
+   * buckets compensate; off, only the dragged bar moves. Chance-mode drags
+   * are always relative — chances must sum to 1.
+   */
+  relative: boolean
 }
 
 export const DEFAULT_CHART: ChartSettings = {
@@ -98,6 +104,7 @@ export const DEFAULT_CHART: ChartSettings = {
   logY: true,
   logX: false,
   aggregate: true,
+  relative: true,
 }
 
 export const DEFAULT_EXPORT_FILENAME = 'ref-weights-regular.tsv'

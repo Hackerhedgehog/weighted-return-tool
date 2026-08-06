@@ -19,10 +19,13 @@ import { DEFAULT_WIDTHS, sortRows } from './lib/columns'
 import { parseTsv, SAMPLE_TSV } from './lib/parse'
 import { rescaleToTotal, retargetRtp, solveWeights, statsOf } from './lib/distribute'
 import { buildTsv, copyTsv, downloadTsv } from './lib/exportTsv'
+import { groupRows } from './lib/groups'
 import { emptyHistory, pushHistory, redo, undo, type HistoryState } from './lib/history'
+import { DEFAULT_SPINS } from './lib/sim'
 import { clearWorkspace, loadWorkspace, saveWorkspace } from './lib/storage'
 import { BucketTable } from './components/BucketTable'
 import { DistributionChart } from './components/DistributionChart'
+import { SimulationPanel } from './components/SimulationPanel'
 import { TargetsPanel } from './components/TargetsPanel'
 
 /** Used only when a fresh paste carries no weights of its own. */
@@ -74,11 +77,23 @@ export default function App() {
   const [columnWidths, setColumnWidths] = useState<Record<string, number>>(() =>
     saved === null ? DEFAULT_WIDTHS : { ...DEFAULT_WIDTHS, ...saved.columnWidths },
   )
-  const [chart, setChart] = useState<ChartSettings>(saved?.chart ?? DEFAULT_CHART)
+  // Merged over the defaults so a workspace saved before a setting existed
+  // still loads — the new field just takes its default.
+  const [chart, setChart] = useState<ChartSettings>(
+    saved?.chart === undefined ? DEFAULT_CHART : { ...DEFAULT_CHART, ...saved.chart },
+  )
   const [exportFilename, setExportFilename] = useState(
     saved?.exportFilename ?? DEFAULT_EXPORT_FILENAME,
   )
+  const [simSpins, setSimSpins] = useState(saved?.simSpins ?? DEFAULT_SPINS)
   const [sort, setSort] = useState<SortState>({ key: 'id', dir: 1 })
+
+  /**
+   * Live rows during a chart drag. Not undoable: previews stream while the
+   * pointer moves, then the drag commits once. Everything visual renders
+   * from `viewRows`; the document itself only changes on commit.
+   */
+  const [preview, setPreview] = useState<BucketRow[] | null>(null)
 
   const [pasteOpen, setPasteOpen] = useState(false)
   const [pasteText, setPasteText] = useState('')
@@ -124,10 +139,11 @@ export default function App() {
         columnWidths,
         chart,
         exportFilename,
+        simSpins,
       })
     }, SAVE_DEBOUNCE_MS)
     return () => window.clearTimeout(t)
-  }, [doc, columnWidths, chart, exportFilename])
+  }, [doc, columnWidths, chart, exportFilename, simSpins])
 
   // ---- global keyboard ----
 
@@ -154,9 +170,11 @@ export default function App() {
 
   // ---- derived ----
 
-  const totalWeight = useMemo(() => doc.rows.reduce((a, r) => a + r.weight, 0), [doc.rows])
-  const achieved = useMemo(() => statsOf(doc.rows, totalWeight), [doc.rows, totalWeight])
+  const viewRows = preview ?? doc.rows
+  const totalWeight = useMemo(() => viewRows.reduce((a, r) => a + r.weight, 0), [viewRows])
+  const achieved = useMemo(() => statsOf(viewRows, totalWeight), [viewRows, totalWeight])
   const lockedCount = useMemo(() => doc.rows.filter((r) => r.locked).length, [doc.rows])
+  const grouping = useMemo(() => groupRows(viewRows), [viewRows])
 
   // ---- actions ----
 
@@ -238,6 +256,14 @@ export default function App() {
     setSort((prev) => (prev.key === key ? { key, dir: prev.dir === 1 ? -1 : 1 } : { key, dir: 1 }))
   }, [])
 
+  const handleDragCommit = useCallback(
+    (rows: BucketRow[]) => {
+      setPreview(null)
+      commit((d) => ({ ...d, rows }))
+    },
+    [commit],
+  )
+
   const exportText = useCallback(
     () => buildTsv(sortRows(docRef.current.rows, sort, totalWeight), totalWeight),
     [sort, totalWeight],
@@ -314,7 +340,7 @@ export default function App() {
               </span>
             </div>
             <BucketTable
-              rows={doc.rows}
+              rows={viewRows}
               totalWeight={totalWeight}
               sort={sort}
               columnWidths={columnWidths}
@@ -331,10 +357,30 @@ export default function App() {
               <h2>Distribution</h2>
             </div>
             <DistributionChart
-              rows={doc.rows}
+              rows={viewRows}
               totalWeight={totalWeight}
               chart={chart}
+              grouping={grouping}
               onChart={setChart}
+              onPreview={setPreview}
+              onCommit={handleDragCommit}
+            />
+          </section>
+
+          <section className="panel">
+            <div className="panel-head">
+              <h2>Simulation</h2>
+              <span className="panel-hint">
+                spins the current table with a fast Monte Carlo run — edits during a run don't
+                change it
+              </span>
+            </div>
+            <SimulationPanel
+              rows={doc.rows}
+              totalWeight={totalWeight}
+              expectedRtp={achieved.rtp}
+              spins={simSpins}
+              onSpins={setSimSpins}
             />
           </section>
         </main>

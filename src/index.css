@@ -722,7 +722,42 @@ input.gcell.editing {
 }
 
 .bar.hover {
-  fill: var(--bar-hover);
+  filter: brightness(0.82);
+}
+
+/* ---------- group handles (right edge of the distribution chart) ---------- */
+
+.group-handle {
+  cursor: ns-resize;
+  user-select: none;
+}
+
+.group-handle.disabled {
+  cursor: not-allowed;
+  opacity: 0.55;
+}
+
+.handle-connector {
+  stroke: var(--line-strong);
+  stroke-width: 1;
+}
+
+.handle-chip {
+  stroke: var(--line-strong);
+  stroke-width: 0.5;
+}
+
+.handle-name {
+  fill: var(--text);
+  font-family: var(--font-mono);
+  font-size: 11px;
+  font-weight: 600;
+}
+
+.handle-sub {
+  fill: var(--text-faint);
+  font-family: var(--font-mono);
+  font-size: 10px;
 }
 
 .chart-tooltip {

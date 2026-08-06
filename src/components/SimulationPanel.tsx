@@ -67,16 +67,19 @@ export function SimulationPanel({
 }: SimulationPanelProps) {
   const [run, setRun] = useState<Run | null>(null)
   const [spinsText, setSpinsText] = useState(() => fmtWeight(spins))
+  // Re-derive the field text when the setting changes from outside —
+  // the render-time adjustment pattern, not an effect.
+  const [lastSpins, setLastSpins] = useState(spins)
+  if (spins !== lastSpins) {
+    setLastSpins(spins)
+    setSpinsText(fmtWeight(spins))
+  }
 
   const workerRef = useRef<SimWorkerLike | null>(null)
   const pointsRef = useRef<number[]>([])
   const aggRef = useRef<SimAggregate>(emptyAggregate())
   const flushTimer = useRef<number | null>(null)
   const lastFlush = useRef(0)
-
-  useEffect(() => {
-    setSpinsText(fmtWeight(spins))
-  }, [spins])
 
   // A leftover worker must not outlive the panel.
   useEffect(
