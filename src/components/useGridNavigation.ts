@@ -183,8 +183,10 @@ export function useGridNavigation(opts: Options): GridNav {
       if (isLockCol(sel.col) || !isEditable(sel)) return
 
       e.preventDefault()
-      if (isNumericCol(sel.col) && '+-*/('.includes(k)) startEdit({ mode: 'append', text: k })
-      else startEdit({ mode: 'replace', text: k })
+      // The numpad decimal key emits ',' on many layouts; number cells read '.'.
+      const ch = isNumericCol(sel.col) && k === ',' && e.code === 'NumpadDecimal' ? '.' : k
+      if (isNumericCol(sel.col) && '+-*/('.includes(ch)) startEdit({ mode: 'append', text: ch })
+      else startEdit({ mode: 'replace', text: ch })
     },
     [
       editing,

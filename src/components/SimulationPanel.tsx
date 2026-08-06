@@ -11,6 +11,7 @@ import {
 } from '../lib/sim'
 import { fmtPayout, fmtPct, fmtRtp, fmtWeight } from '../lib/format'
 import { SimChart } from './SimChart'
+import { remapNumpadComma } from './numpadDecimal'
 
 /**
  * Monte Carlo panel: spins input, Run/Cancel, live stat tiles and the
@@ -201,6 +202,10 @@ export function SimulationPanel({
             onChange={(e) => setSpinsText(e.target.value)}
             onBlur={commitSpins}
             onKeyDown={(e) => {
+              if (remapNumpadComma(e)) {
+                setSpinsText(e.currentTarget.value)
+                return
+              }
               if (e.key === 'Enter') commitSpins()
               if (e.key === 'Escape') setSpinsText(fmtWeight(spins))
             }}

@@ -264,3 +264,63 @@ describe('weight step', () => {
     expect(screen.getByRole('button', { name: '100' }).className).toContain('active')
   })
 })
+
+describe('numpad decimal', () => {
+  const numpadComma = { key: ',', code: 'NumpadDecimal' }
+
+  it('types a dot into an open cell editor', () => {
+    loadRealData()
+    const cell = [...document.querySelectorAll('tbody .col-weight .gcell')][0]
+    fireEvent.doubleClick(cell)
+    const input = document.querySelector('input.gcell.editing') as HTMLInputElement
+    input.setSelectionRange(input.value.length, input.value.length)
+    const before = input.value
+    fireEvent.keyDown(input, numpadComma)
+    expect(input.value).toBe(`${before}.`)
+  })
+
+  it('seeds an edit with a dot when typed on a selected numeric cell', () => {
+    loadRealData()
+    const cell = [...document.querySelectorAll('tbody .col-weight .gcell')][0]
+    fireEvent.mouseDown(cell)
+    fireEvent.keyDown(cell, numpadComma)
+    const input = document.querySelector('input.gcell.editing') as HTMLInputElement
+    expect(input.value).toBe('.')
+  })
+
+  it('keeps the comma when typing into a label cell', () => {
+    loadRealData()
+    const cell = [...document.querySelectorAll('tbody .col-label .gcell')][0]
+    fireEvent.mouseDown(cell)
+    fireEvent.keyDown(cell, numpadComma)
+    const input = document.querySelector('input.gcell.editing') as HTMLInputElement
+    expect(input.value).toBe(',')
+  })
+
+  it('leaves a main-row comma alone in the cell editor', () => {
+    loadRealData()
+    const cell = [...document.querySelectorAll('tbody .col-weight .gcell')][0]
+    fireEvent.doubleClick(cell)
+    const input = document.querySelector('input.gcell.editing') as HTMLInputElement
+    const before = input.value
+    fireEvent.keyDown(input, { key: ',', code: 'Comma' })
+    expect(input.value).toBe(before)
+  })
+
+  it('types a dot into a panel number field', () => {
+    loadRealData()
+    const rtp = screen.getByLabelText('Target RTP') as HTMLInputElement
+    fireEvent.focus(rtp)
+    rtp.setSelectionRange(rtp.value.length, rtp.value.length)
+    fireEvent.keyDown(rtp, numpadComma)
+    expect(rtp.value.endsWith('.')).toBe(true)
+  })
+
+  it('types a dot into the spins field', () => {
+    loadRealData()
+    const spins = screen.getByLabelText('Spins') as HTMLInputElement
+    spins.setSelectionRange(spins.value.length, spins.value.length)
+    fireEvent.keyDown(spins, numpadComma)
+    expect(spins.value.endsWith('.')).toBe(true)
+  })
+})

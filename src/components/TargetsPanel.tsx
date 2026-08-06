@@ -11,6 +11,7 @@ import {
 } from '../lib/types'
 import type { Stats } from '../lib/distribute'
 import { RtpGauge } from './RtpGauge'
+import { remapNumpadComma } from './numpadDecimal'
 
 interface TargetsPanelProps {
   targets: Targets
@@ -79,6 +80,10 @@ function PanelNumber({
       onChange={(e) => setDraft(e.target.value)}
       onBlur={commit}
       onKeyDown={(e) => {
+        if (remapNumpadComma(e)) {
+          setDraft(e.currentTarget.value)
+          return
+        }
         if (e.key === 'Enter') e.currentTarget.blur()
         else if (e.key === 'Escape') {
           setDraft(null)
