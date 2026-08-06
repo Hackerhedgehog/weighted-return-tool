@@ -130,6 +130,16 @@ from very high to very low.
 can feel the shape out against the log-log chart. Once you know the values you
 want, put them in `CURVE_PRESETS` in `src/lib/types.ts`.
 
+### Weight step
+
+The **Weight step** switch (`free` · `10` · `100`) sets the granularity of
+every tool-distributed weight: Auto-Distribute, rescaling the total, RTP
+retargeting, the chance/value cell solves, and chart drags all land their
+results on a multiple of the step. Typed weight cells are never snapped —
+type any integer and it sticks. An operation that cannot keep the total on
+the step is blocked rather than fudged: it leaves the weights unchanged and
+the panel names the nearest totals that would work.
+
 ### Locks
 
 Click the padlock column (or press Space on it) to freeze a row's weight.

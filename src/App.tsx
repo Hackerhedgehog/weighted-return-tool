@@ -7,17 +7,19 @@ import type {
   SortState,
   Targets,
   Volatility,
+  WeightStep,
 } from './lib/types'
 import {
   CURVE_PRESETS,
   DEFAULT_CHART,
   DEFAULT_EXPORT_FILENAME,
   DEFAULT_TARGETS,
+  DEFAULT_WEIGHT_STEP,
   volatilityForCurve,
 } from './lib/types'
 import { DEFAULT_WIDTHS, sortRows } from './lib/columns'
 import { parseTsv, SAMPLE_TSV } from './lib/parse'
-import { rescaleToTotal, retargetRtp, solveWeights, statsOf } from './lib/distribute'
+import { rescaleToTotal, retargetRtp, solveWeights, statsOf, stepBlockWarning } from './lib/distribute'
 import { buildTsv, copyTsv, downloadTsv } from './lib/exportTsv'
 import { groupRows } from './lib/groups'
 import { emptyHistory, pushHistory, redo, undo, type HistoryState } from './lib/history'
@@ -32,12 +34,16 @@ import { TargetsPanel } from './components/TargetsPanel'
 const SEED_TOTAL_WEIGHT = 1_000_000
 const SAVE_DEBOUNCE_MS = 300
 
+const offStepNotice = (step: number) =>
+  `The current weights are not multiples of ${step} — run Auto-Distribute first, or set the weight step to free.`
+
 /** Everything undo covers. View state deliberately lives outside. */
 interface Doc {
   rows: BucketRow[]
   targets: Targets
   volatility: Volatility
   curve: number
+  weightStep: WeightStep
 }
 
 const emptyDoc = (): Doc => ({
@@ -45,6 +51,7 @@ const emptyDoc = (): Doc => ({
   targets: DEFAULT_TARGETS,
   volatility: 'medium',
   curve: CURVE_PRESETS.medium,
+  weightStep: DEFAULT_WEIGHT_STEP,
 })
 
 export default function App() {
@@ -55,7 +62,13 @@ export default function App() {
   const [doc, setDocState] = useState<Doc>(() =>
     saved === null
       ? emptyDoc()
-      : { rows: saved.rows, targets: saved.targets, volatility: saved.volatility, curve: saved.curve },
+      : {
+          rows: saved.rows,
+          targets: saved.targets,
+          volatility: saved.volatility,
+          curve: saved.curve,
+          weightStep: saved.weightStep ?? DEFAULT_WEIGHT_STEP,
+        },
   )
   const [history, setHistoryState] = useState<HistoryState<Doc>>(emptyHistory<Doc>)
 
@@ -140,6 +153,7 @@ export default function App() {
         chart,
         exportFilename,
         simSpins,
+        weightStep: doc.weightStep,
       })
     }, SAVE_DEBOUNCE_MS)
     return () => window.clearTimeout(t)
@@ -190,7 +204,13 @@ export default function App() {
       if (outcome.hasWeights) {
         setNotices([])
       } else {
-        const res = solveWeights(rows, SEED_TOTAL_WEIGHT, docRef.current.targets, docRef.current.curve)
+        const res = solveWeights(
+          rows,
+          SEED_TOTAL_WEIGHT,
+          docRef.current.targets,
+          docRef.current.curve,
+          docRef.current.weightStep,
+        )
         rows = rows.map((r, i) => ({ ...r, weight: res.weights[i] }))
         setNotices(res.warnings)
       }
@@ -207,7 +227,7 @@ export default function App() {
     const d = docRef.current
     if (d.rows.length === 0) return
     const total = totalWeight > 0 ? totalWeight : SEED_TOTAL_WEIGHT
-    const res = solveWeights(d.rows, total, d.targets, d.curve)
+    const res = solveWeights(d.rows, total, d.targets, d.curve, d.weightStep)
     setNotices(res.warnings)
     commit({ ...d, rows: d.rows.map((r, i) => ({ ...r, weight: res.weights[i] })) })
   }, [commit, totalWeight])
@@ -225,14 +245,18 @@ export default function App() {
   const changeTotalWeight = useCallback(
     (next: number) => {
       const d = docRef.current
-      const scaled = rescaleToTotal(d.rows, next)
+      const scaled = rescaleToTotal(d.rows, next, d.weightStep)
       if (scaled === null) {
-        setNotices([
-          `Total weight cannot be set below the locked weight (${d.rows
-            .filter((r) => r.locked)
-            .reduce((a, r) => a + r.weight, 0)
-            .toLocaleString('en-US')}).`,
-        ])
+        const lockedSum = d.rows
+          .filter((r) => r.locked)
+          .reduce((a, r) => a + r.weight, 0)
+        if (next < lockedSum) {
+          setNotices([
+            `Total weight cannot be set below the locked weight (${lockedSum.toLocaleString('en-US')}).`,
+          ])
+        } else {
+          setNotices([stepBlockWarning(Math.round(next) - lockedSum, lockedSum, d.weightStep)])
+        }
         return
       }
       setNotices([])
@@ -245,7 +269,11 @@ export default function App() {
     (next: number) => {
       const d = docRef.current
       if (d.rows.length === 0 || totalWeight <= 0) return
-      const weights = retargetRtp(d.rows, totalWeight, next)
+      const weights = retargetRtp(d.rows, totalWeight, next, d.weightStep)
+      if (weights === null) {
+        setNotices([offStepNotice(d.weightStep)])
+        return
+      }
       setNotices([])
       commit({ ...d, rows: d.rows.map((r, i) => ({ ...r, weight: weights[i] })) })
     },
@@ -263,6 +291,10 @@ export default function App() {
     },
     [commit],
   )
+
+  const handleDragBlocked = useCallback(() => {
+    setNotices([offStepNotice(docRef.current.weightStep)])
+  }, [])
 
   const exportText = useCallback(
     () => buildTsv(sortRows(docRef.current.rows, sort, totalWeight, grouping.rank), totalWeight),
@@ -311,6 +343,7 @@ export default function App() {
             targets={doc.targets}
             volatility={doc.volatility}
             curve={doc.curve}
+            weightStep={doc.weightStep}
             achieved={achieved}
             warnings={notices}
             bucketCount={doc.rows.length}
@@ -322,6 +355,7 @@ export default function App() {
             onTargets={(t) => commit((d) => ({ ...d, targets: t }))}
             onVolatility={(v) => commit((d) => ({ ...d, volatility: v, curve: CURVE_PRESETS[v] }))}
             onCurve={(c) => commit((d) => ({ ...d, curve: c, volatility: volatilityForCurve(c) }))}
+            onWeightStep={(s) => commit((d) => ({ ...d, weightStep: s }))}
             onAutoDistribute={autoDistribute}
             onUndo={doUndo}
             onRedo={doRedo}
@@ -353,6 +387,7 @@ export default function App() {
               sort={sort}
               columnWidths={columnWidths}
               grouping={grouping}
+              weightStep={doc.weightStep}
               onSort={handleSort}
               onPatch={patchRow}
               onWidths={setColumnWidths}
@@ -370,9 +405,11 @@ export default function App() {
               totalWeight={totalWeight}
               chart={chart}
               grouping={grouping}
+              weightStep={doc.weightStep}
               onChart={setChart}
               onPreview={setPreview}
               onCommit={handleDragCommit}
+              onDragBlocked={handleDragBlocked}
             />
           </section>
 

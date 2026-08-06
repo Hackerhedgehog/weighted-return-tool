@@ -4,8 +4,10 @@ import { fmtFixed3, fmtPct, fmtRtp } from '../lib/format'
 import {
   CURVE_PRESETS,
   VOLATILITY_STEPS,
+  WEIGHT_STEPS,
   type Targets,
   type Volatility,
+  type WeightStep,
 } from '../lib/types'
 import type { Stats } from '../lib/distribute'
 import { RtpGauge } from './RtpGauge'
@@ -14,6 +16,7 @@ interface TargetsPanelProps {
   targets: Targets
   volatility: Volatility
   curve: number
+  weightStep: WeightStep
   achieved: Stats
   warnings: string[]
   bucketCount: number
@@ -25,6 +28,7 @@ interface TargetsPanelProps {
   onTargets: (t: Targets) => void
   onVolatility: (v: Exclude<Volatility, 'custom'>) => void
   onCurve: (c: number) => void
+  onWeightStep: (s: WeightStep) => void
   onAutoDistribute: () => void
   onUndo: () => void
   onRedo: () => void
@@ -136,6 +140,7 @@ export function TargetsPanel(props: TargetsPanelProps) {
     targets,
     volatility,
     curve,
+    weightStep,
     achieved,
     warnings,
     bucketCount,
@@ -147,6 +152,7 @@ export function TargetsPanel(props: TargetsPanelProps) {
     onTargets,
     onVolatility,
     onCurve,
+    onWeightStep,
     onAutoDistribute,
     onUndo,
     onRedo,
@@ -263,6 +269,26 @@ export function TargetsPanel(props: TargetsPanelProps) {
           />
           <div className="field-meta">
             <span className="field-hint">0 = straight line on a log-log chart · higher bends the tail down</span>
+          </div>
+        </div>
+
+        <div className="target-field">
+          <label className="field-label">Weight step</label>
+          <div className="seg">
+            {WEIGHT_STEPS.map((s) => (
+              <button
+                key={s}
+                type="button"
+                className={`seg-btn ${weightStep === s ? 'active' : ''}`}
+                onClick={() => onWeightStep(s)}
+                title={s === 1 ? 'Weights land on any integer' : `Distributed weights land on multiples of ${s}`}
+              >
+                {s === 1 ? 'free' : s}
+              </button>
+            ))}
+          </div>
+          <div className="field-meta">
+            <span className="field-hint">granularity of distributed weights — typed cells are never snapped</span>
           </div>
         </div>
 

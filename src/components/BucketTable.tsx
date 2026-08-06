@@ -1,5 +1,5 @@
 import { useCallback, useMemo, useRef } from 'react'
-import type { BucketRow, ColumnKey, RowPatch, SortKey, SortState } from '../lib/types'
+import type { BucketRow, ColumnKey, RowPatch, SortKey, SortState, WeightStep } from '../lib/types'
 import type { Grouping } from '../lib/groups'
 import { COLUMNS, sortRows, type Column } from '../lib/columns'
 import { fmtDecimal, fmtPayout, fmtWeight } from '../lib/format'
@@ -17,6 +17,7 @@ interface BucketTableProps {
   columnWidths: Record<string, number>
   /** Colors each row by its bucket group and drives the group sort. */
   grouping: Grouping
+  weightStep: WeightStep
   onSort: (key: SortKey) => void
   onPatch: (uid: string, patch: RowPatch) => void
   onWidths: (widths: Record<string, number>) => void
@@ -40,6 +41,7 @@ export function BucketTable({
   sort,
   columnWidths,
   grouping,
+  weightStep,
   onSort,
   onPatch,
   onWidths,
@@ -304,7 +306,7 @@ export function BucketTable({
                       : 'A zero-payout bucket always returns 0'
                   }
                   onCommitValue={(n) => {
-                    const w = weightForValue(row.weight, totalWeight, row.payout, n)
+                    const w = weightForValue(row.weight, totalWeight, row.payout, n, weightStep)
                     if (w !== null) onPatch(row.uid, { weight: w })
                   }}
                 />
@@ -320,7 +322,7 @@ export function BucketTable({
                   validate={(n) => n >= 0 && n < 1}
                   title="Fraction of total weight — the same value the export writes"
                   onCommitValue={(n) => {
-                    const w = weightForChance(row.weight, totalWeight, n)
+                    const w = weightForChance(row.weight, totalWeight, n, weightStep)
                     if (w !== null) onPatch(row.uid, { weight: w })
                   }}
                 />

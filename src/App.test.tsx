@@ -3,6 +3,8 @@ import { describe, it, expect, beforeEach, afterEach } from 'vitest'
 import { cleanup, fireEvent, render, screen, within } from '@testing-library/react'
 import App from './App'
 import { readFileSync } from 'node:fs'
+import { saveWorkspace } from './lib/storage'
+import { DEFAULT_CHART, DEFAULT_TARGETS } from './lib/types'
 
 const INPUT = readFileSync('example-input-data.tsv', 'utf8')
 
@@ -178,5 +180,43 @@ describe('App', () => {
         resolve()
       }, 400)
     })
+  })
+})
+
+describe('weight step', () => {
+  it('snaps Auto-Distribute to the chosen step', () => {
+    loadRealData()
+    fireEvent.click(screen.getByRole('button', { name: '100' }))
+    fireEvent.click(screen.getByRole('button', { name: 'Auto-Distribute' }))
+
+    const weights = [...document.querySelectorAll('tbody .col-weight .gcell')].map((c) =>
+      Number((c.textContent ?? '').replace(/,/g, '')),
+    )
+    expect(weights).toHaveLength(30)
+    expect(weights.every((w) => w % 100 === 0)).toBe(true)
+  })
+
+  it('is undoable', () => {
+    loadRealData()
+    fireEvent.click(screen.getByRole('button', { name: '100' }))
+    expect(screen.getByRole('button', { name: '100' }).className).toContain('active')
+    fireEvent.click(screen.getByRole('button', { name: /Undo/ }))
+    expect(screen.getByRole('button', { name: 'free' }).className).toContain('active')
+  })
+
+  it('restores from a saved workspace', () => {
+    saveWorkspace({
+      version: 1,
+      rows: [{ uid: 'b1', bucketId: 0, payout: 2, label: 'x', weight: 500, locked: false }],
+      targets: DEFAULT_TARGETS,
+      volatility: 'medium',
+      curve: 0.09,
+      columnWidths: {},
+      chart: DEFAULT_CHART,
+      exportFilename: 'f.tsv',
+      weightStep: 100,
+    })
+    render(<App />)
+    expect(screen.getByRole('button', { name: '100' }).className).toContain('active')
   })
 })
