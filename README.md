@@ -4,6 +4,34 @@ A spreadsheet for distributing weight across slot-engine payout buckets. Paste
 the engine's bucket list, set the targets you want, and the tool solves the
 weights — then exports a `.tsv` the engine can read back.
 
+## Contents
+
+- [Requirements](#requirements)
+- [Install](#install)
+- [Usage](#usage)
+- [Data formats](#data-formats)
+  - [Input — what you paste](#input--what-you-paste)
+  - [Output — what you export](#output--what-you-export)
+- [Features](#features)
+  - [Getting started](#getting-started)
+  - [The solver](#the-solver)
+  - [Tolerance](#tolerance)
+  - [Volatility](#volatility)
+  - [Weight step](#weight-step)
+  - [The targets panel](#the-targets-panel)
+  - [Locks](#locks)
+  - [Keyboard](#keyboard)
+  - [In-cell arithmetic](#in-cell-arithmetic)
+  - [The totals row](#the-totals-row)
+  - [Bucket groups](#bucket-groups)
+  - [Dragging the distribution chart](#dragging-the-distribution-chart)
+  - [Simulation](#simulation)
+  - [Columns](#columns)
+  - [Export](#export)
+  - [Persistence](#persistence)
+- [Project layout](#project-layout)
+- [Tests](#tests)
+
 ## Requirements
 
 - Node.js 20.19+ or 22.12+ (Vite 8)
@@ -65,6 +93,14 @@ header and totals rows are ignored — so you can export, adjust in Excel, and
 paste the result back without editing anything out.
 
 ## Features
+
+### Getting started
+
+First launch opens the paste screen. `Load sample` builds the table from the
+bundled 30-bucket reference data; `Paste TSV data` takes your own bucket list
+and stays available in the top bar afterwards. `Clear workspace` in the
+targets panel wipes everything and returns to the paste screen, after
+confirming.
 
 ### The solver
 
@@ -140,6 +176,14 @@ type any integer and it sticks. An operation that cannot keep the total on
 the step is blocked rather than fudged: it leaves the weights unchanged and
 the panel names the nearest totals that would work.
 
+### The targets panel
+
+Each target shows its achieved value beside it as a badge, flagged when the
+solve could not keep it inside the band. The RTP field adds an exact "off by"
+readout and a small gauge of achieved against target. The `= current` button
+under each chance copies the achieved figure into the target — handy after
+hand-editing weights, to adopt the current state as the new goal.
+
 ### Locks
 
 Click the padlock column (or press Space on it) to freeze a row's weight.
@@ -172,7 +216,9 @@ Number cells accept `+ - * / ( )`. Two ways in:
 - Type a digit and it **replaces**, as in any spreadsheet.
 
 A leading `=` is accepted, thousands separators are ignored, and invalid input
-reverts the cell rather than silently becoming `0`.
+reverts the cell rather than silently becoming `0`. The numpad decimal key
+always types `.`, even on layouts where it emits a comma — in every numeric
+field, not just the grid.
 
 ### The totals row
 
@@ -214,6 +260,11 @@ Bars are draggable: press and move vertically to set the bucket's weight
 the grand total is preserved: other unlocked buckets absorb the change, and
 chances keep summing to 1. Switch it off (weights mode only) to move a single
 bar and let the total drift. Chance mode is always relative.
+
+The view has its own controls: **Weights / % Chance** switches the metric,
+**Log Y** and **Log X** flip the axes to log scale, and **Aggregate equal
+payouts** merges buckets sharing a payout into one bar (the reference data's
+two 200x buckets, for instance).
 
 Every group also gets a **handle on the chart's right edge**, sitting at the
 height of the group's total in the current metric and axis mode, labelled with
@@ -282,6 +333,7 @@ src/
   components/
     BucketTable.tsx      the grid, totals row, column resizing, group tints
     cells.tsx            cell rendering and edit lifecycle
+    numpadDecimal.ts     numpad ',' → '.' remap shared by every numeric input
     useGridNavigation.ts selection and edit state machine
     TargetsPanel.tsx     targets, volatility, export, undo
     DistributionChart.tsx draggable bars, group handles
