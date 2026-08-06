@@ -157,6 +157,24 @@ export function statsFromAggregate(agg: SimAggregate): SimStats {
   }
 }
 
+export const MAX_SPINS = 1_000_000_000
+export const DEFAULT_SPINS = 100_000_000
+
+/**
+ * Spin-count field: plain integers with , or space or _ separators, plus
+ * k / m / b shorthand ("100m" → 100,000,000). Null when unreadable; clamped
+ * to [1, 1e9] — a billion spins is ~25s of worker time, a sane ceiling.
+ */
+export function parseSpinsInput(text: string): number | null {
+  const cleaned = text.replace(/[,\s_]/g, '')
+  const m = /^(\d+(?:\.\d+)?)([kmb])?$/i.exec(cleaned)
+  if (m === null) return null
+  const mult = { k: 1e3, m: 1e6, b: 1e9 }[m[2]?.toLowerCase() as 'k' | 'm' | 'b'] ?? 1
+  const n = Math.round(Number(m[1]) * mult)
+  if (!Number.isFinite(n)) return null
+  return Math.min(Math.max(n, 1), MAX_SPINS)
+}
+
 /**
  * One chart point per 0.1% of the requested spins — 100M spins → 1000 points
  * of 100K spins each. Small runs bottom out at one spin per block. The last

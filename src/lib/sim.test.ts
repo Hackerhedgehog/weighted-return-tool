@@ -1,5 +1,6 @@
 import { describe, it, expect } from 'vitest'
 import {
+  parseSpinsInput,
   blockPlan,
   buildAlias,
   emptyAggregate,
@@ -138,5 +139,29 @@ describe('aggregates and stats', () => {
     expect(agg.hits).toBe(50)
     expect(agg.wins).toBe(50)
     expect(agg.maxWin).toBe(7)
+  })
+})
+
+describe('parseSpinsInput', () => {
+  it('reads plain integers with separators', () => {
+    expect(parseSpinsInput('100000000')).toBe(100_000_000)
+    expect(parseSpinsInput('100,000,000')).toBe(100_000_000)
+    expect(parseSpinsInput('1 000 000')).toBe(1_000_000)
+  })
+
+  it('reads k / m / b shorthand, case-insensitively', () => {
+    expect(parseSpinsInput('100m')).toBe(100_000_000)
+    expect(parseSpinsInput('100M')).toBe(100_000_000)
+    expect(parseSpinsInput('250k')).toBe(250_000)
+    expect(parseSpinsInput('1.5m')).toBe(1_500_000)
+    expect(parseSpinsInput('1b')).toBe(1_000_000_000)
+  })
+
+  it('clamps to the supported range and rejects junk', () => {
+    expect(parseSpinsInput('0')).toBe(1)
+    expect(parseSpinsInput('2b')).toBe(1_000_000_000)
+    expect(parseSpinsInput('')).toBeNull()
+    expect(parseSpinsInput('spin')).toBeNull()
+    expect(parseSpinsInput('-5')).toBeNull()
   })
 })
