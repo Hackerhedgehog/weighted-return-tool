@@ -177,6 +177,62 @@ Total weight is always the sum of the column, so there is no drift to reconcile.
 Editing a single bucket's Chance or Weighted Value solves for the weight that
 makes the typed figure true *after* the total moves with it.
 
+### Bucket groups
+
+Buckets are grouped automatically from payout and label, in priority order:
+
+1. **payout = 0** → the `0x` group. This beats every name rule, so a
+   `joker2-tease` that pays nothing sits with the other duds, not with
+   `joker3`.
+2. Label contains **"bonus"** → the bonus group.
+3. Label is a pure **win range** (`0-1x`, `8-16x`, `512-1024x`) → the wins
+   group.
+4. Labels sharing an **alpha+digits stem** (`joker3`/`joker4`/`joker5`, or
+   `diamond3`/`diamond4` in another game) → one group per stem, two members
+   minimum.
+5. Everything else → other.
+
+Each group has a fixed color: rows get a light tint of it (locked rows keep
+the lock color), chart bars get the full strength. The **Group sort** button
+above the table orders rows by group, then payout; exports follow the visible
+order as always.
+
+### Dragging the distribution chart
+
+Bars are draggable: press and move vertically to set the bucket's weight
+(weights mode) or chance (% mode). With **Relative drag** on — the default —
+the grand total is preserved: other unlocked buckets absorb the change, and
+chances keep summing to 1. Switch it off (weights mode only) to move a single
+bar and let the total drift. Chance mode is always relative.
+
+Every group also gets a **handle on the chart's right edge**, sitting at the
+height of the group's total in the current metric and axis mode, labelled with
+its total and its weighted value. Dragging a handle rescales the whole group
+while proportions inside the group are preserved.
+
+Aggregated bars that span several groups draw as stacked segments; a drag
+moves all their rows together. Locked rows never move; a fully locked group's
+handle is disabled. A drag previews live in the table and commits as **one
+undo step** on release. Escape cancels a drag in flight.
+
+### Simulation
+
+The Simulation panel (bottom of the page) spins the current table with a
+Monte Carlo run in a Web Worker — alias-method sampling, so 100M spins take a
+few seconds without freezing the page. It reports **RTP, standard deviation,
+hit rate, win rate and max win × bet**, live while the run progresses.
+
+The spins field accepts plain numbers or `250k` / `100m` / `1b` shorthand
+(default 100,000,000, persisted). The chart stores one point per **0.1% of
+the requested spins** — the block's mean payout — and draws the block means,
+the cumulative RTP converging on it, and the table's expected RTP as a dashed
+reference. Block means that spike above the 95th percentile are pinned to the
+top edge and counted in the legend; the crosshair tooltip always shows true
+values.
+
+The run snapshots the table when Run is clicked, so edits made mid-run don't
+bend an in-flight simulation. Cancel keeps the partial statistics.
+
 ### Columns
 
 Drag a header edge to resize; double-click it to fit the content. Click a header
@@ -190,9 +246,10 @@ editable and remembered.
 
 ### Persistence
 
-The table, targets, volatility, column widths, chart settings and export
-filename autosave to `localStorage` and come back on reload. `Clear workspace`
-wipes it after confirming. Undo history is not persisted.
+The table, targets, volatility, column widths, chart settings, export
+filename and simulation spin count autosave to `localStorage` and come back on
+reload. `Clear workspace` wipes it after confirming. Undo history and
+simulation results are not persisted.
 
 ## Project layout
 
@@ -205,26 +262,36 @@ src/
     format.ts       plain-decimal display, 10-sig-digit export
     expr.ts         in-cell arithmetic parser
     distribute.ts   the solver, rescaling, RTP retargeting
+    groups.ts       bucket grouping heuristics and colors
+    interact.ts     relative/absolute subset scaling for chart drags
+    sim.ts          Monte Carlo core: PRNG, alias sampling, aggregates
+    sim.worker.ts   worker shell around sim.ts
     exportTsv.ts    TSV out, clipboard, download
     history.ts      bounded undo/redo
     storage.ts      localStorage workspace
   components/
-    BucketTable.tsx      the grid, totals row, column resizing
+    BucketTable.tsx      the grid, totals row, column resizing, group tints
     cells.tsx            cell rendering and edit lifecycle
     useGridNavigation.ts selection and edit state machine
     TargetsPanel.tsx     targets, volatility, export, undo
-    DistributionChart.tsx
+    DistributionChart.tsx draggable bars, group handles
+    SimulationPanel.tsx  spins, run control, live stats
+    SimChart.tsx         realtime simulation chart
+    chartUtils.ts        shared axis/width helpers
     RtpGauge.tsx
-  App.tsx           document state, undo wiring, autosave
+  App.tsx           document state, undo wiring, drag previews, autosave
 ```
 
 ## Tests
 
-`src/lib` is covered by Vitest — the solver, parser, formatter and expression
-evaluator are where the real risk is. The key one is the export acceptance test,
-which parses `example-input-data.tsv`, applies the weights from
-`example-output-data.tsv`, and asserts the generated text matches the reference
-file byte for byte.
+`src/lib` is covered by Vitest — the solver, parser, formatter, expression
+evaluator, grouping rules, drag operations and simulation core are where the
+real risk is. The key one is the export acceptance test, which parses
+`example-input-data.tsv`, applies the weights from `example-output-data.tsv`,
+and asserts the generated text matches the reference file byte for byte.
+Component tests drive the chart's drag interactions and the simulation panel
+against a faked worker; the App smoke test covers grouping, sorting and the
+simulation panel end to end.
 
 ```bash
 npm run test:run
