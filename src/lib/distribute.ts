@@ -516,6 +516,8 @@ export function solveWeights(
  *   chance c:  w = c·other / (1 − c)        where other = total − w_current
  *   value  v:  w = v·other / (payout − v)
  *
+ * Solved weights land on the nearest multiple of `step`, so the typed figure is met as closely as the step allows.
+ *
  * Null means the request is unsatisfiable: no finite weight reaches a chance
  * of 1 alongside other buckets, and no weight makes a bucket return more than
  * its own payout.
@@ -524,10 +526,11 @@ export function weightForChance(
   currentWeight: number,
   totalWeight: number,
   chance: number,
+  step: WeightStep = 1,
 ): number | null {
   const other = totalWeight - currentWeight
   if (!(other > 0) || !(chance >= 0) || chance >= 1) return null
-  return Math.round((chance * other) / (1 - chance))
+  return Math.round((chance * other) / (1 - chance) / step) * step
 }
 
 export function weightForValue(
@@ -535,10 +538,11 @@ export function weightForValue(
   totalWeight: number,
   payout: number,
   value: number,
+  step: WeightStep = 1,
 ): number | null {
   const other = totalWeight - currentWeight
   if (!(other > 0) || !(value >= 0) || !(payout > value)) return null
-  return Math.round((value * other) / (payout - value))
+  return Math.round((value * other) / (payout - value) / step) * step
 }
 
 /**

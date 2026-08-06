@@ -206,6 +206,20 @@ describe('single-cell solves', () => {
   })
 })
 
+describe('single-cell solves with a weight step', () => {
+  it('rounds the solved weight to the nearest step multiple', () => {
+    // exact answer is 0.3·900/0.7 ≈ 385.7 → 400 on the 100-step
+    expect(weightForChance(100, 1000, 0.3, 100)).toBe(400)
+    // exact answer is 300 — already on the step
+    expect(weightForValue(100, 1000, 2, 0.5, 100)).toBe(300)
+  })
+
+  it('keeps its refusals regardless of the step', () => {
+    expect(weightForChance(100, 1000, 1, 100)).toBeNull()
+    expect(weightForValue(100, 1000, 2, 5, 100)).toBeNull()
+  })
+})
+
 describe('rescaleToTotal', () => {
   const start = solveWeights(rows, T, DEFAULT_TARGETS, CURVE_PRESETS.medium).weights
 
