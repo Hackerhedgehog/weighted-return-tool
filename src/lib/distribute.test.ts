@@ -279,3 +279,46 @@ describe('largestRemainder with a step', () => {
     expect(sum(largestRemainder([1, 1, 1], 10, false))).toBe(10)
   })
 })
+
+describe('solveWeights with a weight step', () => {
+  // T = 1,200,350 divides by 10 but not by 100
+  const T100 = 1200300
+
+  it('lands every weight on a multiple of 10 and still sums exactly', () => {
+    const r = solveWeights(rows, T, DEFAULT_TARGETS, CURVE_PRESETS.medium, 10)
+    expect(r.weights.every((w) => w % 10 === 0)).toBe(true)
+    expect(sum(r.weights)).toBe(T)
+    expect(r.warnings).toHaveLength(0)
+  })
+
+  it('hits RTP to step granularity and keeps the chances in band', () => {
+    const r = solveWeights(rows, T100, DEFAULT_TARGETS, CURVE_PRESETS.medium, 100)
+    expect(r.weights.every((w) => w % 100 === 0)).toBe(true)
+    expect(sum(r.weights)).toBe(T100)
+    expect(Math.min(...r.weights)).toBeGreaterThanOrEqual(100)
+    const s = statsOf(withWeights(r.weights), T100)
+    expect(s.rtp).toBeCloseTo(0.95, 4)
+    expect(s.hitChance).toBeCloseTo(0.3, 3)
+    expect(s.winChance).toBeCloseTo(0.12, 3)
+  })
+
+  it('blocks with a warning when the free weight does not divide', () => {
+    const r = solveWeights(rows, T, DEFAULT_TARGETS, CURVE_PRESETS.medium, 100)
+    expect(r.weights).toEqual(rows.map((row) => Math.max(0, Math.round(row.weight))))
+    expect(r.warnings.some((w) => w.includes('not divisible by 100'))).toBe(true)
+    expect(r.warnings.some((w) => w.includes('1,200,300') && w.includes('1,200,400'))).toBe(true)
+  })
+
+  it('allows an off-step locked weight when the free budget still divides', () => {
+    const zi = rows.findIndex((r) => r.payout === 0)
+    const locked = rows.map((r, i) => (i === zi ? { ...r, weight: 107421, locked: true } : r))
+    const total = 107421 + T100 // free budget stays a multiple of 100
+    const r = solveWeights(locked, total, DEFAULT_TARGETS, CURVE_PRESETS.medium, 100)
+    expect(r.weights[zi]).toBe(107421)
+    expect(sum(r.weights)).toBe(total)
+    locked.forEach((row, i) => {
+      if (!row.locked) expect(r.weights[i] % 100).toBe(0)
+    })
+    expect(r.warnings).toHaveLength(0)
+  })
+})

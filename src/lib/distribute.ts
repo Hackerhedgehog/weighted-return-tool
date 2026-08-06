@@ -1,4 +1,4 @@
-import type { BucketRow, Targets } from './types'
+import type { BucketRow, Targets, WeightStep } from './types'
 
 /**
  * Weight distribution solver.
@@ -41,6 +41,13 @@ const BISECTION_STEPS = 200
 /** Band resolution: 100 steps per side is far finer than a ±3.5% band needs. */
 const BAND_STEPS = 100
 const GROUP_NAMES = ['zero-payout', 'small-win', 'win'] as const
+
+/** Blocked-operation message naming the nearest totals that would divide. */
+export function stepBlockWarning(free: number, lockedSum: number, step: number): string {
+  const fmt = (n: number) => n.toLocaleString('en-US')
+  const lo = lockedSum + Math.floor(free / step) * step
+  return `Free weight ${fmt(free)} is not divisible by ${step} — set the total weight to ${fmt(lo)} or ${fmt(lo + step)}.`
+}
 
 function clamp(v: number, lo: number, hi: number): number {
   return Math.min(Math.max(v, lo), hi)
@@ -273,7 +280,7 @@ function bandCandidates(): number[] {
 }
 
 /** Round the continuous solution to integers, exact per group and overall. */
-function allocate(ctx: Ctx, cont: number[]): number[] {
+function allocate(ctx: Ctx, cont: number[], step: number): number[] {
   const out = new Array<number>(ctx.n).fill(0)
   for (let i = 0; i < ctx.n; i++) if (ctx.locked[i]) out[i] = ctx.current[i]
 
@@ -282,7 +289,7 @@ function allocate(ctx: Ctx, cont: number[]): number[] {
   if (active.length === 0) return out
 
   const groupSums = active.map((g) => ctx.freeIdx[g].reduce((a, i) => a + cont[i], 0))
-  const groupBudgets = largestRemainder(groupSums, free, false)
+  const groupBudgets = largestRemainder(groupSums, free, false, step)
 
   active.forEach((g, k) => {
     const idx = ctx.freeIdx[g]
@@ -290,6 +297,7 @@ function allocate(ctx: Ctx, cont: number[]): number[] {
       idx.map((i) => cont[i]),
       groupBudgets[k],
       true,
+      step,
     )
     idx.forEach((i, j) => {
       out[i] = alloc[j]
@@ -332,17 +340,23 @@ function payoutPairs(ctx: Ctx, idx: number[]): [number, number][] {
 }
 
 /** Move weight between one pair until RTP stops improving. */
-function transfer(ctx: Ctx, w: number[], target: number, pair: [number, number] | null): void {
+function transfer(
+  ctx: Ctx,
+  w: number[],
+  target: number,
+  pair: [number, number] | null,
+  step: number,
+): void {
   if (pair === null) return
   const [lo, hi] = pair
   const span = ctx.payouts[hi] - ctx.payouts[lo]
   if (!(span > 0)) return
 
-  const minLo = w[lo] >= 1 ? 1 : 0
-  const minHi = w[hi] >= 1 ? 1 : 0
+  const minLo = w[lo] >= step ? step : 0
+  const minHi = w[hi] >= step ? step : 0
   const err = () => (target - rtpOf(ctx, w)) * ctx.total
 
-  const d = clamp(Math.round(err() / span), -(w[hi] - minHi), w[lo] - minLo)
+  const d = clamp(Math.round(err() / span / step) * step, -(w[hi] - minHi), w[lo] - minLo)
   if (d !== 0) {
     w[lo] -= d
     w[hi] += d
@@ -352,13 +366,13 @@ function transfer(ctx: Ctx, w: number[], target: number, pair: [number, number] 
     const before = Math.abs(err())
     if (before === 0) return
     const dir = err() > 0 ? 1 : -1
-    if (dir === 1 && w[lo] - 1 < minLo) return
-    if (dir === -1 && w[hi] - 1 < minHi) return
-    w[lo] -= dir
-    w[hi] += dir
+    if (dir === 1 && w[lo] - step < minLo) return
+    if (dir === -1 && w[hi] - step < minHi) return
+    w[lo] -= dir * step
+    w[hi] += dir * step
     if (Math.abs(err()) >= before) {
-      w[lo] += dir
-      w[hi] -= dir
+      w[lo] += dir * step
+      w[hi] -= dir * step
       return
     }
   }
@@ -367,17 +381,17 @@ function transfer(ctx: Ctx, w: number[], target: number, pair: [number, number] 
 /**
  * Integer rounding drifts RTP off target. Shuffle units between unlocked win
  * buckets, which leaves every group sum — and therefore hit and win chance —
- * untouched. Accuracy bottoms out at half the finest payout gap divided by the
- * total: about 2e-8 on the reference ladder.
+ * untouched. Accuracy bottoms out at step × half the finest payout gap divided
+ * by the total: about 2e-8 on the reference ladder (or step × 2e-8 when step > 1).
  */
-function repairRtp(ctx: Ctx, w: number[], target: number): void {
+function repairRtp(ctx: Ctx, w: number[], target: number, step: number): void {
   const idx = ctx.freeIdx[2]
   if (idx.length < 2) return
 
   const err = () => Math.abs(target - rtpOf(ctx, w)) * ctx.total
   for (const pair of payoutPairs(ctx, idx)) {
     if (err() < 1e-9) return
-    transfer(ctx, w, target, pair)
+    transfer(ctx, w, target, pair, step)
   }
 }
 
@@ -386,6 +400,7 @@ export function solveWeights(
   totalWeight: number,
   targets: Targets,
   curve: number,
+  step: WeightStep = 1,
 ): SolveResult {
   const empty: SolveResult = {
     weights: rows.map((r) => Math.max(0, Math.round(r.weight))),
@@ -401,6 +416,11 @@ export function solveWeights(
 
   if (ctx.freeIdx.every((g) => g.length === 0)) {
     return { ...empty, warnings: ['Every row is locked — nothing left to distribute.'] }
+  }
+
+  const freeWeight = Math.round(ctx.total - ctx.totalLocked)
+  if (freeWeight % step !== 0) {
+    return { ...empty, warnings: [stepBlockWarning(freeWeight, ctx.totalLocked, step)] }
   }
 
   // Spend as little of the tolerance band as the targets allow.
@@ -444,8 +464,8 @@ export function solveWeights(
   }
 
   const gamma = solveGamma(ctx, chosen.budgets, targets.rtp)
-  const weights = allocate(ctx, continuousWeights(ctx, chosen.budgets, gamma))
-  repairRtp(ctx, weights, targets.rtp)
+  const weights = allocate(ctx, continuousWeights(ctx, chosen.budgets, gamma), step)
+  repairRtp(ctx, weights, targets.rtp, step)
 
   const achieved = statsOf(
     rows.map((r, i) => ({ ...r, weight: weights[i] })),
@@ -604,6 +624,6 @@ export function retargetRtp(rows: BucketRow[], totalWeight: number, targetRtp: n
     })
   })
 
-  repairRtp(ctx, result, targetRtp)
+  repairRtp(ctx, result, targetRtp, 1)
   return result
 }
