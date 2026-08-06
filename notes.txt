@@ -1,0 +1,2 @@
+1. option for calibrating STD - similar weighted value for all?
+2. Gen rtp90 amd rtp98 versions
