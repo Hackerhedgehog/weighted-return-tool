@@ -2,6 +2,8 @@ import { describe, it, expect } from 'vitest'
 import { readFileSync } from 'node:fs'
 import { parseTsv } from './parse'
 import { buildTsv, withTsvExtension, EXPORT_HEADER } from './exportTsv'
+import { solveWeights, statsOf } from './distribute'
+import { CURVE_PRESETS, DEFAULT_TARGETS } from './types'
 
 const INPUT = readFileSync('example-input-data.tsv', 'utf8')
 const OUTPUT = readFileSync('example-output-data.tsv', 'utf8')
@@ -52,6 +54,50 @@ describe('buildTsv acceptance', () => {
     expect(lines[1].split('\t')[1]).toBe('1000')
     expect(lines[2].split('\t')[1]).toBe('18.7')
     expect(lines[3].split('\t')[1]).toBe('0')
+  })
+})
+
+describe('end-to-end workflow', () => {
+  it('paste raw data, auto-distribute, export, paste back, unchanged', () => {
+    // 1. paste the engine's file
+    const pasted = parseTsv(INPUT)
+    expect(pasted.rows).toHaveLength(30)
+    expect(pasted.hasWeights).toBe(false)
+
+    // 2. auto-distribute at the default targets
+    const solved = solveWeights(pasted.rows, 1_000_000, DEFAULT_TARGETS, CURVE_PRESETS.medium)
+    const rows = pasted.rows.map((r, i) => ({ ...r, weight: solved.weights[i] }))
+    const total = rows.reduce((a, r) => a + r.weight, 0)
+    expect(total).toBe(1_000_000)
+
+    const before = statsOf(rows, total)
+    expect(before.rtp).toBeCloseTo(0.95, 5)
+
+    // 3. export
+    const text = buildTsv(rows, total)
+
+    // 4. paste the export straight back in
+    const round = parseTsv(text)
+    expect(round.hasWeights).toBe(true)
+    expect(round.rows).toHaveLength(30)
+
+    // 5. nothing moved
+    const roundTotal = round.rows.reduce((a, r) => a + r.weight, 0)
+    expect(roundTotal).toBe(total)
+    round.rows.forEach((r, i) => {
+      expect(r.bucketId).toBe(rows[i].bucketId)
+      expect(r.payout).toBe(rows[i].payout)
+      expect(r.label).toBe(rows[i].label)
+      expect(r.weight).toBe(rows[i].weight)
+    })
+
+    const after = statsOf(round.rows, roundTotal)
+    expect(after.rtp).toBeCloseTo(before.rtp, 10)
+    expect(after.hitChance).toBeCloseTo(before.hitChance, 10)
+    expect(after.winChance).toBeCloseTo(before.winChance, 10)
+
+    // and exporting the re-imported data is byte-identical
+    expect(buildTsv(round.rows, roundTotal)).toBe(text)
   })
 })
 
