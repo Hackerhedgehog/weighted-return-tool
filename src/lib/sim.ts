@@ -157,6 +157,19 @@ export function statsFromAggregate(agg: SimAggregate): SimStats {
   }
 }
 
+/** Worker protocol. Lives here so the panel and the worker share one shape. */
+export interface SimRunRequest {
+  payouts: number[]
+  weights: number[]
+  spins: number
+  seed: number
+}
+
+export type SimWorkerMessage =
+  | { type: 'block'; blockIndex: number; blockMean: number; agg: SimAggregate }
+  | { type: 'done'; agg: SimAggregate }
+  | { type: 'error'; message: string }
+
 export const MAX_SPINS = 1_000_000_000
 export const DEFAULT_SPINS = 100_000_000
 

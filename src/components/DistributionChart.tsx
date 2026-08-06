@@ -1,6 +1,7 @@
-import { useLayoutEffect, useMemo, useRef, useState } from 'react'
+import { useMemo, useState } from 'react'
 import type { BucketRow, ChartSettings } from '../lib/types'
 import { fmtPayout, fmtPct, fmtWeight } from '../lib/format'
+import { niceCeil, useContainerWidth } from './chartUtils'
 
 interface DistributionChartProps {
   rows: BucketRow[]
@@ -18,30 +19,6 @@ interface Bar {
 
 const HEIGHT = 340
 const MARGIN = { top: 18, right: 16, bottom: 46, left: 76 }
-
-function useContainerWidth(): [React.RefObject<HTMLDivElement | null>, number] {
-  const ref = useRef<HTMLDivElement>(null)
-  const [width, setWidth] = useState(900)
-  useLayoutEffect(() => {
-    const el = ref.current
-    if (!el) return
-    const obs = new ResizeObserver((entries) => {
-      setWidth(Math.max(320, entries[0].contentRect.width))
-    })
-    obs.observe(el)
-    return () => obs.disconnect()
-  }, [])
-  return [ref, width]
-}
-
-function niceCeil(v: number): number {
-  if (v <= 0) return 1
-  const exp = Math.floor(Math.log10(v))
-  const base = Math.pow(10, exp)
-  const m = v / base
-  const nice = m <= 1 ? 1 : m <= 2 ? 2 : m <= 2.5 ? 2.5 : m <= 5 ? 5 : 10
-  return nice * base
-}
 
 export function DistributionChart({ rows, totalWeight, chart, onChart }: DistributionChartProps) {
   const [containerRef, width] = useContainerWidth()

@@ -21,6 +21,28 @@
   --bar: #4f8ecc;
   --bar-hover: #0969da;
 
+  /* Group series colors — validated categorical palette (dataviz skill).
+     Slots are fixed per group kind: 0 wins, 1 bonus, 2–5 stems, 6 zero,
+     7 other. The tints are the same hues washed out for table rows. */
+  --series-0: #2a78d6;
+  --series-1: #eb6834;
+  --series-2: #1baf7a;
+  --series-3: #eda100;
+  --series-4: #e87ba4;
+  --series-5: #4a3aa7;
+  --series-6: #898781;
+  --series-7: #c3c2b7;
+  --series-0-tint: rgba(42, 120, 214, 0.12);
+  --series-1-tint: rgba(235, 104, 52, 0.12);
+  --series-2-tint: rgba(27, 175, 122, 0.12);
+  --series-3-tint: rgba(237, 161, 0, 0.12);
+  --series-4-tint: rgba(232, 123, 164, 0.14);
+  --series-5-tint: rgba(74, 58, 167, 0.1);
+  --series-6-tint: rgba(137, 135, 129, 0.12);
+  --series-7-tint: rgba(195, 194, 183, 0.2);
+  /* Sim chart noise series — a lighter step of the cumulative line's blue. */
+  --sim-noise: #9ec5f4;
+
   --font-mono: 'IBM Plex Mono', ui-monospace, 'Cascadia Mono', Consolas, monospace;
   --row-h: 26px;
 }
@@ -741,6 +763,156 @@ input.gcell.editing {
 .tt-row b {
   color: var(--text);
   font-variant-numeric: tabular-nums;
+}
+
+/* ---------- simulation panel ---------- */
+
+.sim-controls {
+  display: flex;
+  align-items: center;
+  gap: 14px;
+  flex-wrap: wrap;
+  padding: 10px 14px;
+  border-bottom: 1px solid var(--line);
+}
+
+.sim-field {
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+  font-size: 12px;
+  color: var(--text-dim);
+}
+
+.sim-spins {
+  width: 130px;
+  text-align: right;
+}
+
+.sim-progress {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  flex: 1;
+  min-width: 230px;
+}
+
+.sim-progress-track {
+  flex: 1;
+  max-width: 340px;
+  height: 6px;
+  border-radius: 3px;
+  background: var(--header);
+  overflow: hidden;
+}
+
+.sim-progress-fill {
+  height: 100%;
+  background: var(--accent);
+  border-radius: 3px;
+  transition: width 0.12s linear;
+}
+
+.sim-progress-text {
+  font-size: 11px;
+  color: var(--text-faint);
+  white-space: nowrap;
+}
+
+.sim-stats {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(150px, 1fr));
+  gap: 10px;
+  padding: 12px 14px 2px;
+}
+
+.sim-tile {
+  background: var(--surface-alt);
+  border: 1px solid var(--line);
+  border-radius: 6px;
+  padding: 10px 12px;
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+}
+
+.sim-tile-value {
+  font-size: 17px;
+  font-weight: 600;
+  color: var(--text);
+  font-variant-numeric: tabular-nums;
+}
+
+.sim-tile-label {
+  font-size: 11px;
+  color: var(--text-faint);
+}
+
+.sim-legend {
+  display: flex;
+  align-items: center;
+  gap: 16px;
+  flex-wrap: wrap;
+  padding: 2px 8px 6px;
+  font-size: 11px;
+  color: var(--text-dim);
+}
+
+.legend-item {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+}
+
+.legend-line {
+  display: inline-block;
+  width: 16px;
+  height: 0;
+  border-top: 2px solid;
+}
+
+.legend-line.noise {
+  border-color: var(--sim-noise);
+}
+
+.legend-line.cumulative {
+  border-color: var(--series-0);
+}
+
+.legend-line.expected {
+  border-top-width: 1px;
+  border-top-style: dashed;
+  border-color: var(--text-dim);
+}
+
+.legend-note {
+  color: var(--warn);
+}
+
+.sim-mean-path {
+  fill: none;
+  stroke: var(--sim-noise);
+  stroke-width: 1;
+  opacity: 0.65;
+}
+
+.sim-cum-path {
+  fill: none;
+  stroke: var(--series-0);
+  stroke-width: 2;
+  stroke-linejoin: round;
+  stroke-linecap: round;
+}
+
+.sim-expected-line {
+  stroke: var(--text-dim);
+  stroke-width: 1;
+  stroke-dasharray: 5 4;
+}
+
+.sim-crosshair {
+  stroke: var(--line-strong);
+  stroke-width: 1;
 }
 
 /* ---------- paste panel ---------- */
