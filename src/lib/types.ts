@@ -75,6 +75,10 @@ export type ColumnKey =
   | 'weightedValue'
   | 'chance'
 
+export type RowPatch = Partial<
+  Pick<BucketRow, 'bucketId' | 'payout' | 'label' | 'weight' | 'locked'>
+>
+
 export type SortKey = Exclude<ColumnKey, 'lock'>
 
 export interface SortState {

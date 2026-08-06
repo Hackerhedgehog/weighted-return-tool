@@ -1,119 +1,276 @@
-import { useCallback, useMemo, useState } from 'react'
-import type { BucketRow, SortKey, SortState } from './lib/types'
+import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
+import type {
+  BucketRow,
+  ChartSettings,
+  RowPatch,
+  SortKey,
+  SortState,
+  Targets,
+  Volatility,
+} from './lib/types'
+import {
+  CURVE_PRESETS,
+  DEFAULT_CHART,
+  DEFAULT_EXPORT_FILENAME,
+  DEFAULT_TARGETS,
+  volatilityForCurve,
+} from './lib/types'
+import { DEFAULT_WIDTHS, sortRows } from './lib/columns'
 import { parseTsv, SAMPLE_TSV } from './lib/parse'
-import { rescaleToTotal, solveWeights } from './lib/distribute'
-import { CURVE_PRESETS, DEFAULT_TARGETS } from './lib/types'
-import { fmtWeight, fmtRtp } from './lib/format'
-import { BucketTable, type RowPatch } from './components/BucketTable'
+import { rescaleToTotal, retargetRtp, solveWeights, statsOf } from './lib/distribute'
+import { buildTsv, copyTsv, downloadTsv } from './lib/exportTsv'
+import { emptyHistory, pushHistory, redo, undo, type HistoryState } from './lib/history'
+import { clearWorkspace, loadWorkspace, saveWorkspace } from './lib/storage'
+import { BucketTable } from './components/BucketTable'
 import { DistributionChart } from './components/DistributionChart'
-import { RtpGauge } from './components/RtpGauge'
-import { NumCell } from './components/cells'
+import { TargetsPanel } from './components/TargetsPanel'
 
-const DEFAULT_TOTAL_WEIGHT = 1_000_000
-const DEFAULT_TARGET_RTP = 0.95
-const RTP_BAND: [number, number] = [0.92, 0.98]
+/** Used only when a fresh paste carries no weights of its own. */
+const SEED_TOTAL_WEIGHT = 1_000_000
+const SAVE_DEBOUNCE_MS = 300
+
+/** Everything undo covers. View state deliberately lives outside. */
+interface Doc {
+  rows: BucketRow[]
+  targets: Targets
+  volatility: Volatility
+  curve: number
+}
+
+const emptyDoc = (): Doc => ({
+  rows: [],
+  targets: DEFAULT_TARGETS,
+  volatility: 'medium',
+  curve: CURVE_PRESETS.medium,
+})
 
 export default function App() {
-  const [rows, setRows] = useState<BucketRow[]>([])
-  const [totalWeight, setTotalWeight] = useState(DEFAULT_TOTAL_WEIGHT)
-  const [targetRtp, setTargetRtp] = useState(DEFAULT_TARGET_RTP)
+  // Read once, synchronously, as the initial state. Restoring inside an effect
+  // instead would kick off a second render pass on every load.
+  const [saved] = useState(loadWorkspace)
+
+  const [doc, setDocState] = useState<Doc>(() =>
+    saved === null
+      ? emptyDoc()
+      : { rows: saved.rows, targets: saved.targets, volatility: saved.volatility, curve: saved.curve },
+  )
+  const [history, setHistoryState] = useState<HistoryState<Doc>>(emptyHistory<Doc>)
+
+  // Mirrors, so a handler can read the live value without re-subscribing.
+  const docRef = useRef(doc)
+  const historyRef = useRef(history)
+
+  const setDoc = useCallback((d: Doc) => {
+    docRef.current = d
+    setDocState(d)
+  }, [])
+
+  const setHistory = useCallback((h: HistoryState<Doc>) => {
+    historyRef.current = h
+    setHistoryState(h)
+  }, [])
+
+  // view state — not undoable, but persisted
+  const [columnWidths, setColumnWidths] = useState<Record<string, number>>(() =>
+    saved === null ? DEFAULT_WIDTHS : { ...DEFAULT_WIDTHS, ...saved.columnWidths },
+  )
+  const [chart, setChart] = useState<ChartSettings>(saved?.chart ?? DEFAULT_CHART)
+  const [exportFilename, setExportFilename] = useState(
+    saved?.exportFilename ?? DEFAULT_EXPORT_FILENAME,
+  )
   const [sort, setSort] = useState<SortState>({ key: 'id', dir: 1 })
-  const [pasteOpen, setPasteOpen] = useState(true)
+
+  const [pasteOpen, setPasteOpen] = useState(false)
   const [pasteText, setPasteText] = useState('')
   const [pasteError, setPasteError] = useState<string | null>(null)
-  const [aggregate, setAggregate] = useState(false)
-  const [logScale, setLogScale] = useState(false)
+  const [notices, setNotices] = useState<string[]>([])
+  const [copyState, setCopyState] = useState<'idle' | 'ok' | 'fail'>('idle')
+
+  /** Every document mutation goes through here, so undo can never miss one. */
+  const commit = useCallback(
+    (next: Doc | ((d: Doc) => Doc)) => {
+      const prev = docRef.current
+      const value = typeof next === 'function' ? next(prev) : next
+      setHistory(pushHistory(historyRef.current, prev))
+      setDoc(value)
+    },
+    [setDoc, setHistory],
+  )
+
+  const doUndo = useCallback(() => {
+    const step = undo(historyRef.current, docRef.current)
+    if (step === null) return
+    setHistory(step.history)
+    setDoc(step.present)
+  }, [setDoc, setHistory])
+
+  const doRedo = useCallback(() => {
+    const step = redo(historyRef.current, docRef.current)
+    if (step === null) return
+    setHistory(step.history)
+    setDoc(step.present)
+  }, [setDoc, setHistory])
+
+  // ---- persistence ----
+
+  useEffect(() => {
+    const t = window.setTimeout(() => {
+      saveWorkspace({
+        version: 1,
+        rows: doc.rows,
+        targets: doc.targets,
+        volatility: doc.volatility,
+        curve: doc.curve,
+        columnWidths,
+        chart,
+        exportFilename,
+      })
+    }, SAVE_DEBOUNCE_MS)
+    return () => window.clearTimeout(t)
+  }, [doc, columnWidths, chart, exportFilename])
+
+  // ---- global keyboard ----
+
+  useEffect(() => {
+    const onKey = (e: KeyboardEvent) => {
+      if (!(e.ctrlKey || e.metaKey)) return
+      // Inside a text field, Ctrl+Z belongs to the field's own undo.
+      const el = e.target as HTMLElement | null
+      if (el && (el.tagName === 'INPUT' || el.tagName === 'TEXTAREA')) return
+
+      const k = e.key.toLowerCase()
+      if (k === 'z') {
+        e.preventDefault()
+        if (e.shiftKey) doRedo()
+        else doUndo()
+      } else if (k === 'y') {
+        e.preventDefault()
+        doRedo()
+      }
+    }
+    window.addEventListener('keydown', onKey)
+    return () => window.removeEventListener('keydown', onKey)
+  }, [doUndo, doRedo])
+
+  // ---- derived ----
+
+  const totalWeight = useMemo(() => doc.rows.reduce((a, r) => a + r.weight, 0), [doc.rows])
+  const achieved = useMemo(() => statsOf(doc.rows, totalWeight), [doc.rows, totalWeight])
+  const lockedCount = useMemo(() => doc.rows.filter((r) => r.locked).length, [doc.rows])
+
+  // ---- actions ----
 
   const loadData = useCallback(
     (text: string) => {
       const outcome = parseTsv(text)
-      if (outcome.error) {
+      if (outcome.error !== undefined) {
         setPasteError(outcome.error)
         return
       }
-      const { weights } = solveWeights(
-        outcome.rows,
-        totalWeight,
-        { ...DEFAULT_TARGETS, rtp: targetRtp },
-        CURVE_PRESETS.medium,
-      )
-      setRows(outcome.rows.map((r, i) => ({ ...r, weight: weights[i] })))
-      setPasteError(null)
+
+      let rows = outcome.rows
+      if (outcome.hasWeights) {
+        setNotices([])
+      } else {
+        const res = solveWeights(rows, SEED_TOTAL_WEIGHT, docRef.current.targets, docRef.current.curve)
+        rows = rows.map((r, i) => ({ ...r, weight: res.weights[i] }))
+        setNotices(res.warnings)
+      }
+
+      commit((d) => ({ ...d, rows }))
       setPasteOpen(false)
       setPasteText('')
+      setPasteError(null)
     },
-    [totalWeight, targetRtp],
+    [commit],
   )
 
   const autoDistribute = useCallback(() => {
-    setRows((prev) => {
-      const { weights } = solveWeights(
-        prev,
-        totalWeight,
-        { ...DEFAULT_TARGETS, rtp: targetRtp },
-        CURVE_PRESETS.medium,
-      )
-      return prev.map((r, i) => ({ ...r, weight: weights[i] }))
-    })
-  }, [totalWeight, targetRtp])
+    const d = docRef.current
+    if (d.rows.length === 0) return
+    const total = totalWeight > 0 ? totalWeight : SEED_TOTAL_WEIGHT
+    const res = solveWeights(d.rows, total, d.targets, d.curve)
+    setNotices(res.warnings)
+    commit({ ...d, rows: d.rows.map((r, i) => ({ ...r, weight: res.weights[i] })) })
+  }, [commit, totalWeight])
 
-  const changeTotalWeight = useCallback((newTotal: number) => {
-    setTotalWeight(newTotal)
-    // Rescale existing weights proportionally so RTP and chances are preserved.
-    setRows((prev) => {
-      const scaled = rescaleToTotal(prev, newTotal)
-      return scaled === null ? prev : prev.map((r, i) => ({ ...r, weight: scaled[i] }))
-    })
-  }, [])
+  const patchRow = useCallback(
+    (uid: string, patch: RowPatch) => {
+      commit((d) => ({
+        ...d,
+        rows: d.rows.map((r) => (r.uid === uid ? { ...r, ...patch } : r)),
+      }))
+    },
+    [commit],
+  )
 
-  const patchRow = useCallback((uid: string, patch: RowPatch) => {
-    setRows((prev) => prev.map((r) => (r.uid === uid ? { ...r, ...patch } : r)))
-  }, [])
+  const changeTotalWeight = useCallback(
+    (next: number) => {
+      const d = docRef.current
+      const scaled = rescaleToTotal(d.rows, next)
+      if (scaled === null) {
+        setNotices([
+          `Total weight cannot be set below the locked weight (${d.rows
+            .filter((r) => r.locked)
+            .reduce((a, r) => a + r.weight, 0)
+            .toLocaleString('en-US')}).`,
+        ])
+        return
+      }
+      setNotices([])
+      commit({ ...d, rows: d.rows.map((r, i) => ({ ...r, weight: scaled[i] })) })
+    },
+    [commit],
+  )
+
+  const changeTotalRtp = useCallback(
+    (next: number) => {
+      const d = docRef.current
+      if (d.rows.length === 0 || totalWeight <= 0) return
+      const weights = retargetRtp(d.rows, totalWeight, next)
+      setNotices([])
+      commit({ ...d, rows: d.rows.map((r, i) => ({ ...r, weight: weights[i] })) })
+    },
+    [commit, totalWeight],
+  )
 
   const handleSort = useCallback((key: SortKey) => {
     setSort((prev) => (prev.key === key ? { key, dir: prev.dir === 1 ? -1 : 1 } : { key, dir: 1 }))
   }, [])
 
-  const stats = useMemo(() => {
-    const sumWeights = rows.reduce((a, r) => a + r.weight, 0)
-    const rtp = totalWeight > 0 ? rows.reduce((a, r) => a + (r.payout * r.weight) / totalWeight, 0) : NaN
-    const hitChance =
-      totalWeight > 0 ? rows.filter((r) => r.payout > 0).reduce((a, r) => a + r.weight / totalWeight, 0) : NaN
-    return { sumWeights, rtp, hitChance, delta: totalWeight - sumWeights }
-  }, [rows, totalWeight])
+  const exportText = useCallback(
+    () => buildTsv(sortRows(docRef.current.rows, sort, totalWeight), totalWeight),
+    [sort, totalWeight],
+  )
 
-  const rtpStatus = !Number.isFinite(stats.rtp)
-    ? 'na'
-    : stats.rtp >= RTP_BAND[0] && stats.rtp <= RTP_BAND[1]
-      ? 'ok'
-      : 'off'
+  const handleCopy = useCallback(async () => {
+    const ok = await copyTsv(exportText())
+    setCopyState(ok ? 'ok' : 'fail')
+    window.setTimeout(() => setCopyState('idle'), 1800)
+  }, [exportText])
 
-  const absorbDelta = useCallback(() => {
-    setRows((prev) => {
-      if (prev.length === 0) return prev
-      let biggest = 0
-      for (let i = 1; i < prev.length; i++) {
-        if (prev[i].weight > prev[biggest].weight) biggest = i
-      }
-      const sum = prev.reduce((a, r) => a + r.weight, 0)
-      const delta = totalWeight - sum
-      return prev.map((r, i) =>
-        i === biggest ? { ...r, weight: Math.max(0, r.weight + delta) } : r,
-      )
-    })
-  }, [totalWeight])
+  const handleClear = useCallback(() => {
+    if (!window.confirm('Clear the workspace? The table and its settings are deleted permanently.')) {
+      return
+    }
+    clearWorkspace()
+    setHistory(emptyHistory<Doc>())
+    setDoc(emptyDoc())
+    setNotices([])
+    setPasteOpen(true)
+  }, [setDoc, setHistory])
+
+  const hasRows = doc.rows.length > 0
 
   return (
     <div className="app">
       <header className="topbar">
         <div className="brand">
-          <span className="brand-mark">◆</span>
-          <h1>
-            Weighted Return <span className="brand-sub">/ slot engine calculator</span>
-          </h1>
+          <h1>Weighted Return</h1>
+          <span className="brand-sub">slot engine bucket weights</span>
         </div>
         <div className="topbar-actions">
-          <button type="button" className="btn ghost" onClick={() => loadData(SAMPLE_TSV)}>
+          <button type="button" className="btn" onClick={() => loadData(SAMPLE_TSV)}>
             Load sample
           </button>
           <button type="button" className="btn" onClick={() => setPasteOpen(true)}>
@@ -122,131 +279,85 @@ export default function App() {
         </div>
       </header>
 
-      {rows.length > 0 && (
-        <>
-          <section className="stats-strip">
-            <div className={`stat rtp ${rtpStatus}`}>
-              <span className="stat-label">Total RTP</span>
-              <span className="stat-value">{fmtRtp(stats.rtp)}</span>
-              <RtpGauge rtp={stats.rtp} />
-              <span className="stat-hint">
-                target band {RTP_BAND[0].toFixed(2)} – {RTP_BAND[1].toFixed(2)}
-              </span>
-            </div>
+      {hasRows && (
+        <main className="content">
+          <TargetsPanel
+            targets={doc.targets}
+            volatility={doc.volatility}
+            curve={doc.curve}
+            achieved={achieved}
+            warnings={notices}
+            bucketCount={doc.rows.length}
+            lockedCount={lockedCount}
+            canUndo={history.past.length > 0}
+            canRedo={history.future.length > 0}
+            exportFilename={exportFilename}
+            copyState={copyState}
+            onTargets={(t) => commit((d) => ({ ...d, targets: t }))}
+            onVolatility={(v) => commit((d) => ({ ...d, volatility: v, curve: CURVE_PRESETS[v] }))}
+            onCurve={(c) => commit((d) => ({ ...d, curve: c, volatility: volatilityForCurve(c) }))}
+            onAutoDistribute={autoDistribute}
+            onUndo={doUndo}
+            onRedo={doRedo}
+            onCopy={handleCopy}
+            onDownload={() => downloadTsv(exportText(), exportFilename)}
+            onFilename={setExportFilename}
+            onClear={handleClear}
+          />
 
-            <div className="stat">
-              <span className="stat-label">Total weight</span>
-              <NumCell
-                className="stat-input"
-                value={totalWeight}
-                display={fmtWeight(totalWeight)}
-                validate={(n) => Number.isInteger(n) && n > 0}
-                onCommit={(n) => changeTotalWeight(Math.round(n))}
-              />
-              <span className={`stat-hint ${stats.delta !== 0 ? 'warn' : ''}`}>
-                Σ weights {fmtWeight(stats.sumWeights)}
-                {stats.delta !== 0 && (
-                  <>
-                    {' '}
-                    (Δ {stats.delta > 0 ? '+' : ''}
-                    {fmtWeight(stats.delta)}){' '}
-                    <button type="button" className="link-btn" onClick={absorbDelta}>
-                      fix
-                    </button>
-                  </>
-                )}
+          <section className="panel">
+            <div className="panel-head">
+              <h2>Buckets</h2>
+              <span className="panel-hint">
+                Arrow keys to move · type an operator to adjust (200 then +500 → 700) · drag a header
+                edge to resize
               </span>
             </div>
-
-            <div className="stat">
-              <span className="stat-label">Target RTP</span>
-              <NumCell
-                className="stat-input"
-                value={targetRtp}
-                display={targetRtp.toFixed(2)}
-                validate={(n) => n > 0 && n < 5}
-                onCommit={(n) => setTargetRtp(n)}
-              />
-              <button type="button" className="btn small" onClick={autoDistribute}>
-                Auto-distribute
-              </button>
-            </div>
-
-            <div className="stat">
-              <span className="stat-label">Buckets</span>
-              <span className="stat-value small">{rows.length}</span>
-              <span className="stat-label" style={{ marginTop: 6 }}>
-                Hit chance
-              </span>
-              <span className="stat-value small">
-                {Number.isFinite(stats.hitChance) ? `${(stats.hitChance * 100).toFixed(2)}%` : '—'}
-              </span>
-            </div>
+            <BucketTable
+              rows={doc.rows}
+              totalWeight={totalWeight}
+              sort={sort}
+              columnWidths={columnWidths}
+              onSort={handleSort}
+              onPatch={patchRow}
+              onWidths={setColumnWidths}
+              onTotalWeight={changeTotalWeight}
+              onTotalRtp={changeTotalRtp}
+            />
           </section>
 
-          <main className="content">
-            <section className="panel">
-              <div className="panel-head">
-                <h2>Buckets</h2>
-                <span className="panel-hint">Click a header to sort · edit any cell, everything recalculates live</span>
-              </div>
-              <BucketTable
-                rows={rows}
-                totalWeight={totalWeight}
-                sort={sort}
-                onSort={handleSort}
-                onPatch={patchRow}
-              />
-            </section>
-
-            <section className="panel">
-              <div className="panel-head">
-                <h2>Chance distribution</h2>
-                <div className="chart-controls">
-                  <label className="checkbox">
-                    <input
-                      type="checkbox"
-                      checked={aggregate}
-                      onChange={(e) => setAggregate(e.target.checked)}
-                    />
-                    <span>Aggregate equal payouts</span>
-                  </label>
-                  <label className="switch">
-                    <input
-                      type="checkbox"
-                      checked={logScale}
-                      onChange={(e) => setLogScale(e.target.checked)}
-                    />
-                    <span className="switch-track" aria-hidden="true" />
-                    <span>Logarithmic Y</span>
-                  </label>
-                </div>
-              </div>
-              <DistributionChart
-                rows={rows}
-                totalWeight={totalWeight}
-                aggregate={aggregate}
-                logScale={logScale}
-              />
-            </section>
-          </main>
-        </>
+          <section className="panel">
+            <div className="panel-head">
+              <h2>Distribution</h2>
+            </div>
+            <DistributionChart
+              rows={doc.rows}
+              totalWeight={totalWeight}
+              chart={chart}
+              onChart={setChart}
+            />
+          </section>
+        </main>
       )}
 
-      {(pasteOpen || rows.length === 0) && (
-        <div className={rows.length === 0 ? 'paste-hero' : 'paste-overlay'} onClick={(e) => {
-          if (rows.length > 0 && e.target === e.currentTarget) setPasteOpen(false)
-        }}>
+      {(pasteOpen || !hasRows) && (
+        <div
+          className={hasRows ? 'paste-overlay' : 'paste-hero'}
+          onClick={(e) => {
+            if (hasRows && e.target === e.currentTarget) setPasteOpen(false)
+          }}
+        >
           <div className="paste-card">
             <h2>Paste bucket data</h2>
             <p className="paste-desc">
-              Copy the contents of your engine&rsquo;s <code>.tsv</code> file and paste it below.
-              Expected columns: <b>bucket ID</b> ⇥ <b>bucket label</b> ⇥ <b>payout bet multiplier</b>.
+              Three tab-separated columns, no header needed: <b>ID</b> ⇥ <b>Avg Payout</b> ⇥{' '}
+              <b>Label</b>. An exported <code>.tsv</code> from this tool can be pasted back too —
+              its weights are picked up and the header and totals rows are ignored.
             </p>
             <textarea
               className="paste-area"
               spellCheck={false}
-              placeholder={'0\tNo Win\t0\n1\tSmall Win\t2\n2\tBig Win\t50\n…'}
+              placeholder={'0\t1000.00\tjoker5-maxwin\n1\t200.00\tjoker4-stacks\n2\t0.00\t0x\n…'}
               value={pasteText}
               onChange={(e) => {
                 setPasteText(e.target.value)
@@ -254,14 +365,14 @@ export default function App() {
               }}
               autoFocus
             />
-            {pasteError && <div className="paste-error">{pasteError}</div>}
+            {pasteError !== null && <div className="paste-error">{pasteError}</div>}
             <div className="paste-actions">
-              {rows.length > 0 && (
-                <button type="button" className="btn ghost" onClick={() => setPasteOpen(false)}>
+              {hasRows && (
+                <button type="button" className="btn" onClick={() => setPasteOpen(false)}>
                   Cancel
                 </button>
               )}
-              <button type="button" className="btn ghost" onClick={() => loadData(SAMPLE_TSV)}>
+              <button type="button" className="btn" onClick={() => loadData(SAMPLE_TSV)}>
                 Use sample data
               </button>
               <button

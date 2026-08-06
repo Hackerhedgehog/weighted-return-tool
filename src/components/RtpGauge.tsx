@@ -1,32 +1,39 @@
-const GAUGE_MIN = 0.8
-const GAUGE_MAX = 1.1
-const BAND_LO = 0.92
-const BAND_HI = 0.98
+const BAND = 0.03
+const SPAN = 0.2
 
-/** Horizontal RTP gauge: 0.80–1.10 scale with the 0.92–0.98 target band. */
-export function RtpGauge({ rtp }: { rtp: number }) {
-  const clamp = (v: number) => Math.min(Math.max(v, GAUGE_MIN), GAUGE_MAX)
-  const pos = (v: number) => ((clamp(v) - GAUGE_MIN) / (GAUGE_MAX - GAUGE_MIN)) * 100
+/**
+ * RTP gauge, scaled around the user's target rather than a fixed band —
+ * a hardcoded 0.92–0.98 window contradicts a target the user sets themselves.
+ */
+export function RtpGauge({ rtp, target }: { rtp: number; target: number }) {
+  const safeTarget = Number.isFinite(target) && target > 0 ? target : 1
+  const min = Math.max(0, safeTarget - SPAN)
+  const max = safeTarget + SPAN
 
-  const inBand = rtp >= BAND_LO && rtp <= BAND_HI
-  const markerPos = Number.isFinite(rtp) ? pos(rtp) : 0
+  const pos = (v: number) => ((Math.min(Math.max(v, min), max) - min) / (max - min)) * 100
+
+  const lo = Math.max(min, safeTarget - BAND)
+  const hi = Math.min(max, safeTarget + BAND)
+  const inBand = rtp >= lo && rtp <= hi
 
   return (
-    <div className="rtp-gauge" title={`Target band ${BAND_LO.toFixed(2)} – ${BAND_HI.toFixed(2)}`}>
+    <div className="rtp-gauge" title={`Target ${safeTarget} ±${BAND}`}>
       <div className="gauge-track">
         <div
           className="gauge-band"
-          style={{ left: `${pos(BAND_LO)}%`, width: `${pos(BAND_HI) - pos(BAND_LO)}%` }}
+          style={{ left: `${pos(lo)}%`, width: `${pos(hi) - pos(lo)}%` }}
         />
         {Number.isFinite(rtp) && (
-          <div className={`gauge-marker ${inBand ? 'ok' : 'off'}`} style={{ left: `${markerPos}%` }} />
+          <div
+            className={`gauge-marker ${inBand ? 'ok' : 'off'}`}
+            style={{ left: `${pos(rtp)}%` }}
+          />
         )}
       </div>
       <div className="gauge-scale">
-        <span>{GAUGE_MIN.toFixed(2)}</span>
-        <span className="band-label">{BAND_LO.toFixed(2)}</span>
-        <span className="band-label">{BAND_HI.toFixed(2)}</span>
-        <span>{GAUGE_MAX.toFixed(2)}</span>
+        <span>{min.toFixed(2)}</span>
+        <span className="band-label">{safeTarget.toFixed(2)}</span>
+        <span>{max.toFixed(2)}</span>
       </div>
     </div>
   )

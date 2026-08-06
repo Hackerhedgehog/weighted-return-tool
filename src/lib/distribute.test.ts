@@ -1,7 +1,15 @@
 import { describe, it, expect } from 'vitest'
 import { readFileSync } from 'node:fs'
 import { parseTsv } from './parse'
-import { groupOf, rescaleToTotal, retargetRtp, solveWeights, statsOf } from './distribute'
+import {
+  groupOf,
+  rescaleToTotal,
+  retargetRtp,
+  solveWeights,
+  statsOf,
+  weightForChance,
+  weightForValue,
+} from './distribute'
 import { CURVE_PRESETS, DEFAULT_TARGETS, VOLATILITY_STEPS, type BucketRow } from './types'
 
 const rows = parseTsv(readFileSync('example-input-data.tsv', 'utf8')).rows
@@ -150,6 +158,50 @@ describe('the tolerance band', () => {
     const r = solveWeights(rows, T, impossible, CURVE_PRESETS.medium)
     expect(r.warnings.length).toBeGreaterThan(0)
     expect(sum(r.weights)).toBe(T)
+  })
+})
+
+describe('single-cell solves', () => {
+  const start = solveWeights(rows, T, DEFAULT_TARGETS, CURVE_PRESETS.medium).weights
+
+  // Weights are integers, so "exactly" means within one weight unit: 1/total
+  // for a chance, payout/total for a weighted value. Scaling by the stale
+  // total, which is what these replace, misses by far more than that.
+  it('makes a typed chance land, despite the total moving with it', () => {
+    const i = 10
+    const w = weightForChance(start[i], T, 0.25)!
+    const after = withWeights(start).map((r, k) => (k === i ? { ...r, weight: w } : r))
+    const newTotal = after.reduce((a, r) => a + r.weight, 0)
+    expect(after[i].weight / newTotal).toBeCloseTo(0.25, 5)
+  })
+
+  it('makes a typed weighted value land', () => {
+    const i = 10
+    const payout = rows[i].payout
+    const w = weightForValue(start[i], T, payout, 0.05)!
+    const after = withWeights(start).map((r, k) => (k === i ? { ...r, weight: w } : r))
+    const newTotal = after.reduce((a, r) => a + r.weight, 0)
+    expect((payout * after[i].weight) / newTotal).toBeCloseTo(0.05, 5)
+  })
+
+  it('beats scaling by the stale total, which is why it exists', () => {
+    const i = 10
+    const naive = Math.round(0.25 * T) // the obvious-but-wrong approach
+    const after = withWeights(start).map((r, k) => (k === i ? { ...r, weight: naive } : r))
+    const newTotal = after.reduce((a, r) => a + r.weight, 0)
+    // lands near 0.20, not 0.25 — visibly wrong in the cell just typed into
+    expect(Math.abs(after[i].weight / newTotal - 0.25)).toBeGreaterThan(0.01)
+  })
+
+  it('refuses the unsatisfiable', () => {
+    // no finite weight gives one bucket all the probability while others exist
+    expect(weightForChance(100, 1000, 1)).toBeNull()
+    expect(weightForChance(100, 1000, -0.1)).toBeNull()
+    // a bucket cannot return more than its own payout
+    expect(weightForValue(100, 1000, 2, 2)).toBeNull()
+    expect(weightForValue(100, 1000, 2, 5)).toBeNull()
+    // a lone bucket has no other weight to balance against
+    expect(weightForChance(1000, 1000, 0.5)).toBeNull()
   })
 })
 

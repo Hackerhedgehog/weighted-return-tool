@@ -476,6 +476,40 @@ export function solveWeights(
 }
 
 /**
+ * Total weight is the sum of the weight column, so changing one bucket's
+ * weight also moves the total. Typing a chance of 0.25 and scaling by the
+ * stale total would therefore land somewhere else; these solve for the weight
+ * that makes the typed figure true *after* the total shifts.
+ *
+ *   chance c:  w = c·other / (1 − c)        where other = total − w_current
+ *   value  v:  w = v·other / (payout − v)
+ *
+ * Null means the request is unsatisfiable: no finite weight reaches a chance
+ * of 1 alongside other buckets, and no weight makes a bucket return more than
+ * its own payout.
+ */
+export function weightForChance(
+  currentWeight: number,
+  totalWeight: number,
+  chance: number,
+): number | null {
+  const other = totalWeight - currentWeight
+  if (!(other > 0) || !(chance >= 0) || chance >= 1) return null
+  return Math.round((chance * other) / (1 - chance))
+}
+
+export function weightForValue(
+  currentWeight: number,
+  totalWeight: number,
+  payout: number,
+  value: number,
+): number | null {
+  const other = totalWeight - currentWeight
+  if (!(other > 0) || !(value >= 0) || !(payout > value)) return null
+  return Math.round((value * other) / (payout - value))
+}
+
+/**
  * Scale to a new total, preserving locks and the current shape.
  * Returns null when the new total cannot hold the locked weight.
  */
