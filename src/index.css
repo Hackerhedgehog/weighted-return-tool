@@ -16,8 +16,6 @@
   --warn-soft: #fff8c5;
   --danger: #cf222e;
   --danger-soft: #ffebe9;
-  --lock: #fff4d6;
-  --lock-line: #d4a72c;
   --bar: #4f8ecc;
   --bar-hover: #0969da;
 
@@ -687,13 +685,9 @@ body {
   background: var(--accent-soft);
 }
 
-.grid-row.locked {
-  background: var(--lock);
-}
-
-.grid-row.locked:hover {
-  background: #fdecc0;
-}
+/* A locked row is tinted inline, not here: it keeps its group's hue at a
+   deeper alpha, so a lock never repaints a green-grouped bucket yellow. The
+   🔒 in the lock column is what identifies the state. */
 
 .gcell {
   display: block;
@@ -721,10 +715,6 @@ body {
   outline: 2px solid var(--accent);
   outline-offset: -2px;
   background: #fff;
-}
-
-.grid-row.locked .gcell.selected {
-  background: var(--lock);
 }
 
 .gcell.readonly {

@@ -54,3 +54,22 @@ export function withAlpha(hex: string, alpha: number): string {
 
 /** Row tint strength — visible as a band, still readable under body text. */
 export const TINT_ALPHA = 0.22
+
+/**
+ * Row tint strength when the row is locked: the same group hue, one step
+ * deeper. A locked row used to take a single yellow, which overwrote the group
+ * color and made a green-grouped bucket impossible to place at a glance — the
+ * 🔒 glyph already says "locked", so the row only has to say "and still mine".
+ */
+export const LOCK_TINT_ALPHA = 0.44
+
+/** Stand-in hue for a row whose group has no color, so lock still reads. */
+const NEUTRAL_TINT = '#9aa5b1'
+
+/** Background for a table row: its group's tint, deepened while locked. */
+export function rowTint(color: string | undefined, locked: boolean): string | undefined {
+  if (color === undefined) {
+    return locked ? withAlpha(NEUTRAL_TINT, LOCK_TINT_ALPHA - TINT_ALPHA) : undefined
+  }
+  return withAlpha(color, locked ? LOCK_TINT_ALPHA : TINT_ALPHA)
+}

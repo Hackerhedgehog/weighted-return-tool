@@ -228,7 +228,8 @@ new goal.
 Click the padlock column (or press Space on it) to freeze a row's weight.
 Auto-Distribute, rescaling and RTP retargeting all work around locked rows. If
 locks overrun a group's share of the total, the panel says so rather than
-missing the target silently.
+missing the target silently. A locked row keeps its group color and only
+deepens a shade, so the grouping stays readable while rows are pinned.
 
 ### Keyboard
 

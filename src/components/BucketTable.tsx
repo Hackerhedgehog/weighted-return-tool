@@ -11,6 +11,7 @@ import type {
 import type { Grouping } from '../lib/groups'
 import { COLUMNS, sortRows, type Column } from '../lib/columns'
 import { fmtDecimal, fmtPayout, fmtWeight } from '../lib/format'
+import { rowTint } from '../lib/palette'
 import { weightForChance, weightForValue } from '../lib/distribute'
 import { GridCell, LockCell } from './cells'
 import { useGridNavigation, type CellPos } from './useGridNavigation'
@@ -245,9 +246,10 @@ export function BucketTable({
             <tr
               key={row.uid}
               className={`grid-row ${row.locked ? 'locked' : ''}`}
-              // group tint only — spacing must stay identical across groups,
-              // and the locked highlight (a class style) must stay visible
-              style={row.locked ? undefined : { background: grouping.byUid.get(row.uid)?.tint }}
+              // color only — spacing must stay identical across groups, and a
+              // locked row keeps its group hue, just deepened, so grouping
+              // stays readable while rows are pinned
+              style={{ background: rowTint(grouping.byUid.get(row.uid)?.color, row.locked) }}
             >
               <td className="col-lock">
                 <LockCell

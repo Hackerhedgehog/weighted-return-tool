@@ -172,6 +172,21 @@ describe('App', () => {
     for (const s of styles) expect(s).not.toContain('--series-')
   })
 
+  it('keeps a locked row on its group color, only deeper', () => {
+    loadRealData()
+    const row = document.querySelector('.grid-row')!
+    const rgb = (el: Element) => /rgba\((\d+, \d+, \d+)/.exec(el.getAttribute('style') ?? '')?.[1]
+    const hue = rgb(row)
+    const alphaOf = (el: Element) => Number(/rgba\([\d, ]+, ([\d.]+)\)/.exec(el.getAttribute('style')!)![1])
+    const before = alphaOf(row)
+
+    fireEvent.click(row.querySelector('.gcell.lock')!)
+
+    const locked = document.querySelector('.grid-row.locked')!
+    expect(rgb(locked)).toBe(hue)
+    expect(alphaOf(locked)).toBeGreaterThan(before)
+  })
+
   it('sorts by group when the Group sort button is clicked', () => {
     loadRealData()
     fireEvent.click(screen.getByRole('button', { name: 'Group sort' }))
