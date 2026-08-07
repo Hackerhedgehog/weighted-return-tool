@@ -20,6 +20,9 @@ export interface Workspace {
   simSpins?: number
   /** Optional — absent in workspaces saved before the weight step existed. */
   weightStep?: WeightStep
+  /** Optional — absent in workspaces saved before charts could be resized. */
+  chartHeight?: number
+  simChartHeight?: number
 }
 
 const isObject = (v: unknown): v is Record<string, unknown> =>
@@ -72,7 +75,12 @@ function isWorkspace(v: unknown): v is Workspace {
     isChart(v.chart) &&
     typeof v.exportFilename === 'string' &&
     (v.simSpins === undefined || isFiniteNumber(v.simSpins)) &&
-    (v.weightStep === undefined || v.weightStep === 1 || v.weightStep === 10 || v.weightStep === 100)
+    (v.weightStep === undefined ||
+      v.weightStep === 1 ||
+      v.weightStep === 10 ||
+      v.weightStep === 100) &&
+    (v.chartHeight === undefined || isFiniteNumber(v.chartHeight)) &&
+    (v.simChartHeight === undefined || isFiniteNumber(v.simChartHeight))
   )
 }
 

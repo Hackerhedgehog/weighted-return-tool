@@ -108,4 +108,22 @@ describe('storage', () => {
     store.set(STORAGE_KEY, JSON.stringify({ ...workspace, weightStep: 7 }))
     expect(loadWorkspace()).toBeNull()
   })
+
+  it('round-trips both chart heights', () => {
+    saveWorkspace({ ...workspace, chartHeight: 520, simChartHeight: 300 })
+    const loaded = loadWorkspace()
+    expect(loaded?.chartHeight).toBe(520)
+    expect(loaded?.simChartHeight).toBe(300)
+  })
+
+  it('accepts a heightless workspace but rejects a non-numeric height', () => {
+    saveWorkspace(workspace)
+    expect(loadWorkspace()).toEqual(workspace)
+
+    store.set(STORAGE_KEY, JSON.stringify({ ...workspace, chartHeight: 'tall' }))
+    expect(loadWorkspace()).toBeNull()
+
+    store.set(STORAGE_KEY, JSON.stringify({ ...workspace, simChartHeight: null }))
+    expect(loadWorkspace()).toBeNull()
+  })
 })
