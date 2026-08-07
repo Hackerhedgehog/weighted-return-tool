@@ -25,7 +25,7 @@ weights — then exports a `.tsv` the engine can read back.
   - [The totals row](#the-totals-row)
   - [Bucket groups](#bucket-groups)
   - [Dragging the distribution chart](#dragging-the-distribution-chart)
-  - [The readout, and chart height](#the-readout-and-chart-height)
+  - [The tooltip, and chart height](#the-tooltip-and-chart-height)
   - [Simulation](#simulation)
   - [Layout](#layout)
   - [Columns](#columns)
@@ -174,15 +174,32 @@ The **Weight step** switch (`free` · `×10` · `×100`) sets the granularity of
 every tool-distributed weight: Auto-Distribute, rescaling the total, RTP
 retargeting, the chance/value cell solves, and chart drags all land their
 results on a multiple of the step. Typed weight cells are never snapped —
-type any integer and it sticks. An operation that cannot keep the total on
-the step is blocked rather than fudged: it leaves the weights unchanged and
-the panel names the nearest totals that would work.
+type any integer and it sticks.
+
+When the free weight is not a multiple of the step, **Auto-Distribute goes
+ahead anyway**: it distributes the divisible part on-step and parks the
+leftover on a single bucket, so the grand total stays exact and every other
+weight stays clean. The leftover goes to the lowest-payout unlocked bucket,
+where it moves the solved RTP least — nowhere at all when there is a 0x
+bucket — and a notice says how much went where.
+
+The other step-bound operations — rescaling the total, RTP retargeting, chart
+drags — are still blocked rather than fudged: they leave the weights unchanged
+and the panel names the nearest totals that would work.
 
 ### The targets panel
 
-Every setting sits on one row — Target RTP, Preferred Hit Chance, Preferred
-Win Chance, Chance tolerance, Volatility, Curve c — with the weight step and
-`Auto-Distribute` on the row below.
+Everything sits on one wrapping row — Target RTP, Preferred Hit Chance,
+Preferred Win Chance, Chance tolerance, Volatility, Curve c, the weight step,
+then `Auto-Distribute` and undo/redo.
+
+The panel **sticks to the top of the viewport** as you scroll, and
+**collapses**: the ▾ toggle at its left folds the inputs away, leaving a slim
+bar that keeps the achieved RTP / hit / win badges and the `Auto-Distribute`,
+`Undo` and `Redo` buttons. So you can still act on the table from the bottom
+of a long page; only editing the targets needs an expand. The collapsed state
+is remembered with the workspace. The table header and the chart panel offset
+themselves by the panel's measured height, so nothing slides underneath it.
 
 Each target shows its achieved value beside it as a badge, flagged when the
 solve could not keep it inside the band. Hover a badge for the detail: the
@@ -221,7 +238,7 @@ on the **main** keyboard row keeps its thousands-separator meaning, so
 `1,200,350` still pastes and parses as one number.
 
 The table above is the grid's. The chart resize grips carry their own keys —
-see [The readout, and chart height](#the-readout-and-chart-height).
+see [The tooltip, and chart height](#the-tooltip-and-chart-height).
 
 ### In-cell arithmetic
 
@@ -292,20 +309,25 @@ moves all their rows together. Locked rows never move; a fully locked group's
 handle is disabled. A drag previews live in the table and commits as **one
 undo step** on release. Escape cancels a drag in flight.
 
-### The readout, and chart height
+### The tooltip, and chart height
 
-Hovering a bar fills the **readout strip below the chart**: every bucket in
-that bar on its own line in its group color, then the bar's payout, weight,
-chance and weighted value (its share of RTP). The readout sits under the plot
-rather than over it, so it never hides the bars it describes and no bar near
-an edge gets its numbers clipped. Its height is fixed, so moving between bars
-never shifts the page. A bar aggregating more than four buckets lists three
-and counts the rest.
+Hovering a bar raises a **tooltip anchored under it**: every bucket in that bar
+on its own line in its group color, then the bar's payout, weight, chance and
+weighted value (its share of RTP). A bar aggregating more than four buckets
+lists three and counts the rest.
 
-Both charts can be made **taller**: drag the grip below the readout, or focus
-it and use ↑/↓ (16px), PageUp/PageDown (64px), or Home to reset. The
-distribution chart runs 220–900px and the simulation chart 160–800px; both
-heights are remembered with the rest of the workspace.
+The tooltip floats in a reserved band *below* the plot, at the hovered bar's x.
+Below is the only place it can go without hiding data — anywhere inside the
+plot covers either the bar it describes or that bar's taller neighbours. Near
+an edge it slides just far enough to stay whole, clamped against its own
+measured width rather than an assumed one, so a wide tooltip never overhangs
+the panel. The band is always in the layout, so a hover never shifts the page.
+
+Both charts can be made **taller**: drag the grip below the tooltip band, or
+focus it and use ↑/↓ (16px), PageUp/PageDown (64px), or Home to reset. The
+distribution chart runs 220–900px and the simulation chart 160–800px — the
+simulation grip works before a run too — and both heights are remembered with
+the rest of the workspace.
 
 ### Simulation
 
@@ -319,11 +341,11 @@ The spins field accepts plain numbers or `250k` / `100m` / `1b` shorthand
 the requested spins** — the block's mean payout — and draws the block means,
 the cumulative RTP converging on it, and the table's expected RTP as a dashed
 reference. The legend states how many spins a block covers, so you can judge
-how much smoothing the noise series carries; the readout below the chart adds
-the hovered block's own spin count, which is smaller for the final block when
-the run does not divide evenly. Block means that spike above the 95th
-percentile are pinned to the top edge and counted in the legend; the readout
-always shows true values.
+how much smoothing the noise series carries; the tooltip adds the hovered
+block's own spin count, which is smaller for the final block when the run does
+not divide evenly. Block means that spike above the 95th percentile are pinned
+to the top edge and counted in the legend; the tooltip always shows true
+values.
 
 The run snapshots the table when Run is clicked, so edits made mid-run don't
 bend an in-flight simulation. Cancel keeps the partial statistics.
@@ -331,17 +353,23 @@ bend an in-flight simulation. Cancel keeps the partial statistics.
 ### Layout
 
 The page runs at 95% of the viewport width with the **table and the
-distribution chart side by side**, half each. The chart panel sticks as you
-scroll, so the bars stay beside whichever rows you are editing. Targets sit
-across the top and the simulation across the bottom, both full width.
+distribution chart side by side**. The table takes exactly the width its
+columns need and sits against the right of its half, so the numbers stay next
+to the chart they are read against and any slack falls on the left. The chart
+takes the rest. The chart panel sticks as you scroll, so the bars stay beside
+whichever rows you are editing. Targets sit across the top and the simulation
+across the bottom, both full width.
 
 **The bucket table has no scroll box of its own.** However many buckets there
 are, it renders every row and grows the page instead — so there is never a
-little window to scroll inside a taller page. The header row stays pinned to
-the top of the viewport and the editable totals row to the bottom while you
+little window to scroll inside a taller page. The header row stays pinned
+below the targets panel and the editable totals row to the bottom while you
 scroll a long table.
 
-Below 1200px the two columns stack and the chart stops sticking.
+**The chart wraps below the table when it no longer fits beside it** — not at
+a fixed breakpoint, but at whatever width the table's own columns imply. Widen
+a column and the wrap happens sooner; narrow them and the two stay side by
+side for longer. Below 1200px the chart also stops sticking.
 
 ### Columns
 
@@ -360,8 +388,8 @@ them — it is remembered with the workspace.
 ### Persistence
 
 The table, targets, volatility, weight step, column widths, chart settings,
-both chart heights, export filename and simulation spin count autosave to
-`localStorage` and come back on reload. `Clear workspace`, at the right of the top bar, wipes it after
+both chart heights, whether the targets panel is collapsed, export filename
+and simulation spin count autosave to `localStorage` and come back on reload. `Clear workspace`, at the right of the top bar, wipes it after
 confirming. Undo history and simulation results are not persisted.
 
 ## Project layout
@@ -391,7 +419,7 @@ src/
     DistributionChart.tsx draggable bars, group handles
     SimulationPanel.tsx  spins, run control, live stats
     SimChart.tsx         realtime simulation chart
-    ChartReadout.tsx     the hover detail strip under both charts
+    ChartReadout.tsx     the hover tooltip anchored under both charts
     ChartResizeGrip.tsx  drag or key a chart taller
     chartUtils.ts        shared axis, width, bar-geometry and height helpers
     RtpGauge.tsx
@@ -406,10 +434,11 @@ evaluator, grouping rules, drag operations and simulation core are where the
 real risk is. The key one is the export acceptance test, which parses
 `example-input-data.tsv`, applies the weights from `example-output-data.tsv`,
 and asserts the generated text matches the reference file byte for byte.
-Component tests drive the chart's drag interactions, the readout's contents
-and colors, the resize grip's pointer and keyboard paths, and the simulation
-panel against a faked worker; the App smoke test covers grouping, sorting and
-the simulation panel end to end.
+Component tests drive the chart's drag interactions, the tooltip's contents,
+colors and edge clamping, the resize grip's pointer and keyboard paths, and
+the simulation panel against a faked worker; the App smoke test covers
+grouping, sorting, the targets panel's collapse and the simulation panel end
+to end.
 
 ```bash
 npm run test:run
