@@ -175,9 +175,10 @@ export function numpadChar(e: { code: string; key: string }): string
 export function applyNumpadDecimal(e: React.KeyboardEvent<HTMLInputElement>): boolean
 ```
 
-`applyNumpadDecimal` calls `preventDefault()` then `setRangeText('.', start,
-end, 'end')` on `e.currentTarget`, so the caret lands after the point and any
-selection is replaced. It declines the event when a modifier is held.
+`applyNumpadDecimal` calls `preventDefault()`, splices a `.` over the current
+selection in `e.currentTarget.value`, and puts the caret after it, so any
+selected text is replaced. It declines the event when a modifier is held or
+the key already produced a point.
 
 Call sites:
 

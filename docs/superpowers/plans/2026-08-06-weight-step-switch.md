@@ -799,7 +799,7 @@ In `src/components/TargetsPanel.tsx`:
 
 1. Extend the types import: `import { CURVE_PRESETS, VOLATILITY_STEPS, WEIGHT_STEPS, type Targets, type Volatility, type WeightStep } from '../lib/types'`.
 2. Add to `TargetsPanelProps`: `weightStep: WeightStep` and `onWeightStep: (s: WeightStep) => void` (destructure both in the component).
-3. Insert this field as the **first** field of the second `targets-row`, before the actions field (Curve c has moved up to the first row — see `2026-08-07-compact-layout-design.md`):
+3. Insert this field as the **first** field of the second `targets-row`, before the "Curve c" field:
 
 ```tsx
         <div className="target-field">
