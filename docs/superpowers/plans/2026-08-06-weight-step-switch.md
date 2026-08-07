@@ -750,7 +750,7 @@ Add to `src/App.test.tsx` (new imports: `import { saveWorkspace } from './lib/st
 describe('weight step', () => {
   it('snaps Auto-Distribute to the chosen step', () => {
     loadRealData()
-    fireEvent.click(screen.getByRole('button', { name: '100' }))
+    fireEvent.click(screen.getByRole('button', { name: '×100' }))
     fireEvent.click(screen.getByRole('button', { name: 'Auto-Distribute' }))
 
     const weights = [...document.querySelectorAll('tbody .col-weight .gcell')].map((c) =>
@@ -762,8 +762,8 @@ describe('weight step', () => {
 
   it('is undoable', () => {
     loadRealData()
-    fireEvent.click(screen.getByRole('button', { name: '100' }))
-    expect(screen.getByRole('button', { name: '100' }).className).toContain('active')
+    fireEvent.click(screen.getByRole('button', { name: '×100' }))
+    expect(screen.getByRole('button', { name: '×100' }).className).toContain('active')
     fireEvent.click(screen.getByRole('button', { name: /Undo/ }))
     expect(screen.getByRole('button', { name: 'free' }).className).toContain('active')
   })
@@ -781,7 +781,7 @@ describe('weight step', () => {
       weightStep: 100,
     })
     render(<App />)
-    expect(screen.getByRole('button', { name: '100' }).className).toContain('active')
+    expect(screen.getByRole('button', { name: '×100' }).className).toContain('active')
   })
 })
 ```
@@ -791,7 +791,7 @@ describe('weight step', () => {
 - [ ] **Step 2: Run tests to verify they fail**
 
 Run: `npx vitest run src/App.test.tsx`
-Expected: FAIL — no button named "100" exists yet.
+Expected: FAIL — no button named "×100" exists yet.
 
 - [ ] **Step 3: Implement the TargetsPanel control**
 
@@ -799,7 +799,7 @@ In `src/components/TargetsPanel.tsx`:
 
 1. Extend the types import: `import { CURVE_PRESETS, VOLATILITY_STEPS, WEIGHT_STEPS, type Targets, type Volatility, type WeightStep } from '../lib/types'`.
 2. Add to `TargetsPanelProps`: `weightStep: WeightStep` and `onWeightStep: (s: WeightStep) => void` (destructure both in the component).
-3. Insert this field in the second `targets-row`, between the "Curve c" field and the actions field:
+3. Insert this field as the **first** field of the second `targets-row`, before the actions field (Curve c has moved up to the first row — see `2026-08-07-compact-layout-design.md`):
 
 ```tsx
         <div className="target-field">
@@ -813,7 +813,7 @@ In `src/components/TargetsPanel.tsx`:
                 onClick={() => onWeightStep(s)}
                 title={s === 1 ? 'Weights land on any integer' : `Distributed weights land on multiples of ${s}`}
               >
-                {s === 1 ? 'free' : s}
+                {s === 1 ? 'free' : `×${s}`}
               </button>
             ))}
           </div>

@@ -25,10 +25,14 @@ computes lands on a multiple of the chosen step.
 
 ## UI
 
-A segmented control labeled **Weight step** with options `free · 10 · 100`,
-styled like the Volatility segments, in the second row of the targets panel
-next to Curve c. Switching the step changes nothing immediately — it only
-governs subsequent operations.
+A segmented control labeled **Weight step** with options `free · ×10 · ×100`,
+styled like the Volatility segments, as the first field of the second targets
+row. Switching the step changes nothing immediately — it only governs
+subsequent operations.
+
+*(Amended 2026-08-07 by `2026-08-07-compact-layout-design.md`: the placement
+moved from "next to Curve c" when Curve c moved up to the first row, and the
+labels gained their `×`.)*
 
 ## State
 
