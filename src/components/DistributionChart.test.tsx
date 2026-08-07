@@ -262,6 +262,62 @@ describe('DistributionChart readout', () => {
   })
 })
 
+describe('DistributionChart group bars', () => {
+  it('draws one bar for a collapsed group and none for its buckets', () => {
+    renderChart({ metric: 'weights', groupBars: ['bonus'] })
+    // 0x, 0-1x and the collapsed bonus group
+    expect(document.querySelectorAll('.bar')).toHaveLength(3)
+  })
+
+  it('labels a group bar with the group name instead of a payout', () => {
+    renderChart({ metric: 'weights', groupBars: ['bonus'] })
+    const labels = [...document.querySelectorAll('.axis-label')].map((el) => el.textContent)
+    expect(labels).toContain('bonus')
+  })
+
+  it('reports the payout range and the mean in the readout', () => {
+    renderChart({ metric: 'weights', groupBars: ['bonus'] })
+    // bars ascend: 0x, 0-1x, then bonus at its weighted mean of ×31
+    fireEvent.mouseOver(document.querySelectorAll('.bar-hit')[2])
+    const stats = readoutStats()
+    expect(stats.payout).toBe('×8 – ×100')
+    expect(stats.avg).toBe('×31')
+    expect(stats.weight).toBe('200,000')
+    // Σ(payout × weight) / total = (8×150,000 + 100×50,000) / 1,000,000
+    expect(stats.weighted).toBe('6.2000')
+  })
+
+  it('names every bucket of a collapsed group in the readout', () => {
+    renderChart({ metric: 'weights', groupBars: ['bonus'] })
+    fireEvent.mouseOver(document.querySelectorAll('.bar-hit')[2])
+    const lines = [...document.querySelectorAll('.readout-title')].map((el) => el.textContent)
+    expect(lines).toEqual(['bonus3', 'bonus4'])
+  })
+
+  it('rescales the whole group when its bar is dragged', () => {
+    const { onPreview, onCommit } = renderChart({ metric: 'weights', groupBars: ['bonus'] })
+    const hit = document.querySelectorAll('.bar-hit')[2]
+
+    fireEvent.pointerDown(hit, { pointerId: 1, clientY: 250 })
+    fireEvent.pointerMove(hit, { pointerId: 1, clientY: 150 })
+
+    const preview = lastRows(onPreview)
+    expect(sum(weightsOf(preview))).toBe(1_000_000)
+    expect(preview[2].weight + preview[3].weight).not.toBe(200_000)
+    // in-group proportions hold at ≈ 3:1
+    expect(preview[2].weight / preview[3].weight).toBeGreaterThan(2.7)
+    expect(preview[2].weight / preview[3].weight).toBeLessThan(3.3)
+
+    fireEvent.pointerUp(hit, { pointerId: 1, clientY: 150 })
+    expect(onCommit).toHaveBeenCalledTimes(1)
+  })
+
+  it('still draws the group handle for a collapsed group', () => {
+    renderChart({ metric: 'weights', groupBars: ['bonus'] })
+    expect(screen.getByRole('slider', { name: 'bonus group' })).toBeDefined()
+  })
+})
+
 describe('DistributionChart height', () => {
   it('draws at the height it is given', () => {
     renderChart({ metric: 'weights' }, baseRows(), 500)

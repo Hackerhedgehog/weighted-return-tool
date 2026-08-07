@@ -138,6 +138,12 @@ export interface ChartSettings {
    * are always relative — chances must sum to 1.
    */
   relative: boolean
+  /**
+   * Group ids drawn as a single aggregated bar instead of their buckets.
+   * View state, so it is persisted but not undoable. Never mutated in place —
+   * DEFAULT_CHART's empty array is shared by every fresh workspace.
+   */
+  groupBars: string[]
 }
 
 export const DEFAULT_CHART: ChartSettings = {
@@ -146,6 +152,7 @@ export const DEFAULT_CHART: ChartSettings = {
   logX: false,
   aggregate: true,
   relative: true,
+  groupBars: [],
 }
 
 export const DEFAULT_EXPORT_FILENAME = 'ref-weights-regular.tsv'

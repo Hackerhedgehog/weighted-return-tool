@@ -307,6 +307,9 @@ export default function App() {
 
       const seeded = seedGroups(rows)
       commit((d) => ({ ...d, rows: seeded.rows, groups: seeded.groups }))
+      // New data means new groups; a collapsed id from the old table would
+      // either dangle or, worse, collapse an unrelated group of the same name.
+      setChart((c) => ({ ...c, groupBars: [] }))
       setPasteOpen(false)
       setPasteText('')
       setPasteError(null)

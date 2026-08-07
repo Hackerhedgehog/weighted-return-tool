@@ -134,4 +134,19 @@ describe('storage', () => {
     store.set(STORAGE_KEY, JSON.stringify({ ...workspace, targetsCollapsed: 'yes' }))
     expect(loadWorkspace()).toBeNull()
   })
+
+  it('rejects a workspace whose groupBars is not a list of strings', () => {
+    store.set(
+      STORAGE_KEY,
+      JSON.stringify({ ...workspace, chart: { ...DEFAULT_CHART, groupBars: 'bonus' } }),
+    )
+    expect(loadWorkspace()).toBeNull()
+  })
+
+  it('accepts a workspace saved before groupBars existed', () => {
+    const chart: Record<string, unknown> = { ...DEFAULT_CHART }
+    delete chart.groupBars
+    store.set(STORAGE_KEY, JSON.stringify({ ...workspace, chart }))
+    expect(loadWorkspace()).not.toBeNull()
+  })
 })

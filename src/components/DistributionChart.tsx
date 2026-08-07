@@ -1,6 +1,7 @@
 import { useEffect, useMemo, useRef, useState } from 'react'
 import type { BucketRow, ChartSettings, WeightStep } from '../lib/types'
 import type { Grouping } from '../lib/groups'
+import { buildBars, type ChartBar, type Segment } from '../lib/bars'
 import { scaleSubset, setSubsetTotal } from '../lib/interact'
 import { fmtPayout, fmtPct, fmtRtp, fmtWeight } from '../lib/format'
 import { ChartReadout, type ReadoutStat, type ReadoutTitle } from './ChartReadout'
@@ -39,23 +40,6 @@ interface DistributionChartProps {
   onPreview: (rows: BucketRow[] | null) => void
   onCommit: (rows: BucketRow[]) => void
   onDragBlocked: () => void
-}
-
-interface Segment {
-  color: string
-  weight: number
-  chance: number
-}
-
-interface Bar {
-  payout: number
-  chance: number
-  weight: number
-  labels: string[]
-  uids: string[]
-  /** One per group present in the bar, in group order — stacked bottom-up. */
-  segments: Segment[]
-  allLocked: boolean
 }
 
 interface Scale {
@@ -151,7 +135,7 @@ export function DistributionChart({
    */
   const [dragScale, setDragScale] = useState<Scale | null>(null)
 
-  const { metric, logY, logX, aggregate, relative } = chart
+  const { metric, logY, logX, aggregate, relative, groupBars } = chart
   const set = (patch: Partial<ChartSettings>) => onChart({ ...chart, ...patch })
 
   useEffect(() => {
@@ -166,61 +150,16 @@ export function DistributionChart({
     return () => window.removeEventListener('keydown', onKey)
   }, [onPreview])
 
-  const allBars: Bar[] = useMemo(() => {
-    const chanceOf = (w: number) => (totalWeight > 0 ? w / totalWeight : 0)
-    const rankOf = (uid: string) => grouping.rank.get(uid) ?? Number.MAX_SAFE_INTEGER
-    const colorOf = (uid: string) => grouping.byUid.get(uid)?.color ?? 'var(--bar)'
-
-    const toBar = (members: BucketRow[]): Bar => {
-      const byRank = new Map<number, Segment>()
-      for (const r of [...members].sort((a, b) => rankOf(a.uid) - rankOf(b.uid))) {
-        const seg = byRank.get(rankOf(r.uid))
-        if (seg) {
-          seg.weight += r.weight
-          seg.chance += chanceOf(r.weight)
-        } else {
-          byRank.set(rankOf(r.uid), {
-            color: colorOf(r.uid),
-            weight: r.weight,
-            chance: chanceOf(r.weight),
-          })
-        }
-      }
-      return {
-        payout: members[0].payout,
-        weight: members.reduce((a, r) => a + r.weight, 0),
-        chance: chanceOf(members.reduce((a, r) => a + r.weight, 0)),
-        labels: members.map((r) => r.label),
-        uids: members.map((r) => r.uid),
-        segments: [...byRank.values()],
-        allLocked: members.every((r) => r.locked),
-      }
-    }
-
-    if (aggregate) {
-      const byPayout = new Map<number, BucketRow[]>()
-      for (const r of rows) {
-        const list = byPayout.get(r.payout)
-        if (list === undefined) byPayout.set(r.payout, [r])
-        else list.push(r)
-      }
-      return [...byPayout.values()].map(toBar).sort((a, b) => a.payout - b.payout)
-    }
-
-    return [...rows]
-      .sort((a, b) => a.payout - b.payout || a.bucketId - b.bucketId)
-      .map((r) => toBar([r]))
-  }, [rows, totalWeight, aggregate, grouping])
-
-  // A logarithmic payout axis has nowhere to put a 0x bucket.
-  const bars = useMemo(() => (logX ? allBars.filter((b) => b.payout > 0) : allBars), [allBars, logX])
-  const droppedZero = logX ? allBars.length - bars.length : 0
+  const { bars, droppedZero } = useMemo(
+    () => buildBars(rows, grouping, totalWeight, { aggregate, groupBars, logX }),
+    [rows, grouping, totalWeight, aggregate, groupBars, logX],
+  )
 
   const plotW = width - MARGIN.left - MARGIN.right
   const plotH = height - MARGIN.top - MARGIN.bottom
   const plotRight = width - MARGIN.right
 
-  const valueOf = (b: Bar) => (metric === 'weights' ? b.weight : b.chance)
+  const valueOf = (b: ChartBar) => (metric === 'weights' ? b.weight : b.chance)
 
   /** Group totals drive the handles and stretch the axis to hold them. */
   const groupStats = useMemo(() => {
@@ -376,10 +315,20 @@ export function DistributionChart({
     hovered === null
       ? []
       : [
-          { label: 'payout', value: `×${fmtPayout(hovered.payout)}` },
+          hovered.kind === 'group'
+            ? {
+                label: 'payout',
+                value: `×${fmtPayout(hovered.payoutRange[0])} – ×${fmtPayout(hovered.payoutRange[1])}`,
+              }
+            : { label: 'payout', value: `×${fmtPayout(hovered.payout)}` },
+          ...(hovered.kind === 'group'
+            ? [{ label: 'avg', value: `×${fmtPayout(Math.round(hovered.payout * 100) / 100)}` }]
+            : []),
           { label: 'weight', value: fmtWeight(hovered.weight) },
           { label: 'chance', value: fmtPct(hovered.chance, 4) },
-          // The bar's slice of RTP — the table's Weighted Value column.
+          // payout × chance is Σ(payout × weight) / total either way: a group
+          // bar's payout is already weight-weighted, so the product still lands
+          // on the group's true slice of RTP.
           { label: 'weighted', value: fmtRtp(hovered.payout * hovered.chance) },
         ]
 
@@ -512,7 +461,9 @@ export function DistributionChart({
               })}
 
               {bars.map((b, i) =>
-                i % labelEvery === 0 ? (
+                // Group bars are the coarse landmarks of the view and there are
+                // few of them, so they are never thinned out.
+                b.kind === 'group' || i % labelEvery === 0 ? (
                   <text
                     key={i}
                     className="axis-label"
@@ -520,7 +471,7 @@ export function DistributionChart({
                     y={height - MARGIN.bottom + 18}
                     textAnchor="middle"
                   >
-                    ×{fmtPayout(b.payout)}
+                    {b.kind === 'group' ? b.name : `×${fmtPayout(b.payout)}`}
                   </text>
                 ) : null,
               )}
