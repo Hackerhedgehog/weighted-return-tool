@@ -25,6 +25,7 @@ weights — then exports a `.tsv` the engine can read back.
   - [The totals row](#the-totals-row)
   - [Bucket groups](#bucket-groups)
   - [Dragging the distribution chart](#dragging-the-distribution-chart)
+  - [The readout, and chart height](#the-readout-and-chart-height)
   - [Simulation](#simulation)
   - [Layout](#layout)
   - [Columns](#columns)
@@ -288,6 +289,21 @@ moves all their rows together. Locked rows never move; a fully locked group's
 handle is disabled. A drag previews live in the table and commits as **one
 undo step** on release. Escape cancels a drag in flight.
 
+### The readout, and chart height
+
+Hovering a bar fills the **readout strip below the chart**: every bucket in
+that bar on its own line in its group color, then the bar's payout, weight,
+chance and weighted value (its share of RTP). The readout sits under the plot
+rather than over it, so it never hides the bars it describes and no bar near
+an edge gets its numbers clipped. Its height is fixed, so moving between bars
+never shifts the page. A bar aggregating more than four buckets lists three
+and counts the rest.
+
+Both charts can be made **taller**: drag the grip below the readout, or focus
+it and use ↑/↓ (16px), PageUp/PageDown (64px), or Home to reset. The
+distribution chart runs 220–900px and the simulation chart 160–800px; both
+heights are remembered with the rest of the workspace.
+
 ### Simulation
 
 The Simulation panel (bottom of the page) spins the current table with a
@@ -299,9 +315,12 @@ The spins field accepts plain numbers or `250k` / `100m` / `1b` shorthand
 (default 100,000,000, persisted). The chart stores one point per **0.1% of
 the requested spins** — the block's mean payout — and draws the block means,
 the cumulative RTP converging on it, and the table's expected RTP as a dashed
-reference. Block means that spike above the 95th percentile are pinned to the
-top edge and counted in the legend; the crosshair tooltip always shows true
-values.
+reference. The legend states how many spins a block covers, so you can judge
+how much smoothing the noise series carries; the readout below the chart adds
+the hovered block's own spin count, which is smaller for the final block when
+the run does not divide evenly. Block means that spike above the 95th
+percentile are pinned to the top edge and counted in the legend; the readout
+always shows true values.
 
 The run snapshots the table when Run is clicked, so edits made mid-run don't
 bend an in-flight simulation. Cancel keeps the partial statistics.
@@ -338,8 +357,8 @@ them — it is remembered with the workspace.
 ### Persistence
 
 The table, targets, volatility, weight step, column widths, chart settings,
-export filename and simulation spin count autosave to `localStorage` and come
-back on reload. `Clear workspace`, at the right of the top bar, wipes it after
+both chart heights, export filename and simulation spin count autosave to
+`localStorage` and come back on reload. `Clear workspace`, at the right of the top bar, wipes it after
 confirming. Undo history and simulation results are not persisted.
 
 ## Project layout
@@ -369,7 +388,9 @@ src/
     DistributionChart.tsx draggable bars, group handles
     SimulationPanel.tsx  spins, run control, live stats
     SimChart.tsx         realtime simulation chart
-    chartUtils.ts        shared axis, width and bar-geometry helpers
+    ChartReadout.tsx     the hover detail strip under both charts
+    ChartResizeGrip.tsx  drag or key a chart taller
+    chartUtils.ts        shared axis, width, bar-geometry and height helpers
     RtpGauge.tsx
   App.tsx           document state, undo wiring, drag previews, autosave,
                     the top bar and its export controls
