@@ -16,12 +16,13 @@ export interface Column {
 export const COLUMNS: Column[] = [
   { key: 'lock', label: '', sortable: false, numeric: false, width: 34 },
   { key: 'id', label: 'ID', sortable: true, numeric: true, width: 62 },
-  { key: 'payout', label: 'Avg Payout', sortable: true, numeric: true, width: 110 },
-  { key: 'label', label: 'Label', sortable: true, numeric: false, width: 190 },
+  { key: 'payout', label: 'Avg Payout', sortable: true, numeric: true, width: 92 },
+  { key: 'label', label: 'Label', sortable: true, numeric: false, width: 150 },
   { key: 'weight', label: 'Weights', sortable: true, numeric: true, width: 118 },
-  { key: 'weightedValue', label: 'Weighted Value', sortable: true, numeric: true, width: 152 },
-  // wide enough for a 15-decimal chance without wrapping
-  { key: 'chance', label: 'Chance', sortable: true, numeric: true, width: 200 },
+  { key: 'weightedValue', label: 'Weighted Value', sortable: true, numeric: true, width: 124 },
+  // Sized so the whole table fits beside the chart. Chances run to 15
+  // decimals — double-click the header edge to fit the column to them.
+  { key: 'chance', label: 'Chance', sortable: true, numeric: true, width: 132 },
 ]
 
 export const DEFAULT_WIDTHS: Record<string, number> = Object.fromEntries(

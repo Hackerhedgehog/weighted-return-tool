@@ -327,6 +327,19 @@ describe('numpad decimal', () => {
   })
 })
 
+describe('page layout', () => {
+  it('lays the table and the chart out side by side', () => {
+    loadRealData()
+    const content = document.querySelector('.content')!
+    expect([...content.children].map((el) => el.className)).toEqual([
+      'targets',
+      'panel buckets',
+      'panel chart',
+      'panel full',
+    ])
+  })
+})
+
 describe('targets panel layout', () => {
   it('keeps every target setting on one row', () => {
     loadRealData()

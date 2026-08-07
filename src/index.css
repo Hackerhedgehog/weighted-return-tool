@@ -67,9 +67,9 @@ body {
 }
 
 .app {
-  max-width: 1600px;
+  width: 95vw;
   margin: 0 auto;
-  padding: 0 20px 56px;
+  padding: 0 0 48px;
 }
 
 /* ---------- top bar ---------- */
@@ -433,10 +433,18 @@ body {
 
 /* ---------- panels ---------- */
 
+/* The table and the chart share the width; targets and simulation span both.
+   The chart sticks so it stays beside whichever rows are on screen. */
 .content {
-  display: flex;
-  flex-direction: column;
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) minmax(0, 1fr);
   gap: 16px;
+  align-items: start;
+}
+
+.content > .targets,
+.content > .panel.full {
+  grid-column: 1 / -1;
 }
 
 .panel {
@@ -444,6 +452,17 @@ body {
   border: 1px solid var(--line);
   border-radius: 6px;
   overflow: hidden;
+}
+
+.panel.chart {
+  position: sticky;
+  top: 8px;
+  align-self: start;
+}
+
+/* A table widened past its half must overflow, not be clipped out of reach. */
+.panel.buckets {
+  overflow: visible;
 }
 
 .panel-head {
@@ -470,9 +489,11 @@ body {
 
 /* ---------- the grid ---------- */
 
+/* No max-height and no scrolling: the table renders every row at full height
+   and the page scrolls instead. That also promotes the sticky header row and
+   the sticky totals row from a dead 620px window to the viewport itself. */
 .grid-wrap {
-  overflow: auto;
-  max-height: 620px;
+  overflow: visible;
 }
 
 .grid-table {
@@ -1056,6 +1077,18 @@ input.gcell.editing {
 }
 
 /* ---------- responsive ---------- */
+
+/* A half-width table stops fitting here, so the columns stack — and a sticky
+   chart in a one-column flow would only get in the way. */
+@media (max-width: 1200px) {
+  .content {
+    grid-template-columns: minmax(0, 1fr);
+  }
+
+  .panel.chart {
+    position: static;
+  }
+}
 
 @media (max-width: 900px) {
   .targets-row {

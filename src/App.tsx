@@ -390,12 +390,11 @@ export default function App() {
             onRedo={doRedo}
           />
 
-          <section className="panel">
+          <section className="panel buckets">
             <div className="panel-head">
               <h2>Buckets</h2>
               <span className="panel-hint">
-                Arrow keys to move · type an operator to adjust (200 then +500 → 700) · drag a header
-                edge to resize
+                arrow keys to move · type +500 to add · drag a header edge to resize
               </span>
               <button
                 type="button"
@@ -421,7 +420,7 @@ export default function App() {
             />
           </section>
 
-          <section className="panel">
+          <section className="panel chart">
             <div className="panel-head">
               <h2>Distribution</h2>
             </div>
@@ -438,7 +437,7 @@ export default function App() {
             />
           </section>
 
-          <section className="panel">
+          <section className="panel full">
             <div className="panel-head">
               <h2>Simulation</h2>
               <span className="panel-hint">
