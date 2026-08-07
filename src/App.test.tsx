@@ -341,11 +341,11 @@ describe('page layout', () => {
 })
 
 describe('targets panel layout', () => {
-  it('keeps every target setting on one row', () => {
+  it('keeps every setting, the weight step and the actions on one row', () => {
     loadRealData()
     const rows = document.querySelectorAll('.targets-row')
-    const first = rows[0] as HTMLElement
-    const second = rows[1] as HTMLElement
+    expect(rows).toHaveLength(1)
+    const row = rows[0] as HTMLElement
 
     for (const label of [
       'Target RTP',
@@ -354,20 +354,83 @@ describe('targets panel layout', () => {
       'Chance tolerance',
       'Volatility',
       'Curve c',
+      'Weight step',
     ]) {
-      expect(within(first).getByText(label)).toBeDefined()
+      expect(within(row).getByText(label)).toBeDefined()
     }
 
-    expect(within(second).getByText('Weight step')).toBeDefined()
-    expect(within(second).getByRole('button', { name: 'Auto-Distribute' })).toBeDefined()
+    expect(within(row).getByRole('button', { name: 'Auto-Distribute' })).toBeDefined()
+    expect(within(row).getByRole('button', { name: /Undo/ })).toBeDefined()
+    expect(within(row).getByRole('button', { name: /Redo/ })).toBeDefined()
   })
 
   it('labels the weight steps as multipliers', () => {
     loadRealData()
-    const names = [...document.querySelectorAll('.targets-row')[1].querySelectorAll('.seg-btn')].map(
-      (b) => b.textContent,
-    )
+    const step = [...document.querySelectorAll('.target-field')].find(
+      (f) => f.querySelector('.field-label')?.textContent === 'Weight step',
+    )!
+    const names = [...step.querySelectorAll('.seg-btn')].map((b) => b.textContent)
     expect(names).toEqual(['free', '×10', '×100'])
+  })
+})
+
+describe('targets panel collapse', () => {
+  const toggle = () => screen.getByRole('button', { name: /Targets/ })
+
+  it('starts expanded', () => {
+    loadRealData()
+    expect(toggle().getAttribute('aria-expanded')).toBe('true')
+    expect(screen.getByLabelText('Target RTP')).toBeDefined()
+  })
+
+  it('hides the inputs but keeps the readouts and the actions', () => {
+    loadRealData()
+    fireEvent.click(toggle())
+
+    expect(toggle().getAttribute('aria-expanded')).toBe('false')
+    expect(screen.queryByLabelText('Target RTP')).toBeNull()
+    expect(document.querySelectorAll('.targets-row')).toHaveLength(0)
+
+    const summary = document.querySelector('.targets-summary') as HTMLElement
+    expect(within(summary).getByText('RTP')).toBeDefined()
+    expect(within(summary).getByText('hit')).toBeDefined()
+    expect(within(summary).getByText('win')).toBeDefined()
+
+    const actions = document.querySelector('.targets-head-actions') as HTMLElement
+    expect(within(actions).getByRole('button', { name: 'Auto-Distribute' })).toBeDefined()
+    expect(within(actions).getByRole('button', { name: /Undo/ })).toBeDefined()
+  })
+
+  it('still distributes while collapsed', () => {
+    loadRealData()
+    const before = document.querySelector('.grid-row .col-weight .gcell')!.textContent
+    fireEvent.click(toggle())
+    fireEvent.click(screen.getByRole('button', { name: 'Auto-Distribute' }))
+    expect(document.querySelector('.grid-row .col-weight .gcell')!.textContent).toBe(before)
+    expect(screen.queryByLabelText('Target RTP')).toBeNull()
+  })
+
+  it('expands again', () => {
+    loadRealData()
+    fireEvent.click(toggle())
+    fireEvent.click(toggle())
+    expect(screen.getByLabelText('Target RTP')).toBeDefined()
+  })
+
+  it('remembers the collapsed state across a reload', () => {
+    loadRealData()
+    fireEvent.click(toggle())
+
+    return new Promise<void>((resolve) => {
+      setTimeout(() => {
+        cleanup()
+        render(<App />)
+        expect(screen.getByRole('button', { name: /Targets/ }).getAttribute('aria-expanded')).toBe(
+          'false',
+        )
+        resolve()
+      }, 400)
+    })
   })
 })
 

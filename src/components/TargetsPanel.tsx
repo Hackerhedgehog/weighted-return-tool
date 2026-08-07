@@ -24,6 +24,10 @@ interface TargetsPanelProps {
   lockedCount: number
   canUndo: boolean
   canRedo: boolean
+  collapsed: boolean
+  /** App measures the panel to keep the other sticky offsets clear of it. */
+  panelRef: (el: HTMLElement | null) => void
+  onCollapsed: (c: boolean) => void
   onTargets: (t: Targets) => void
   onVolatility: (v: Exclude<Volatility, 'custom'>) => void
   onCurve: (c: number) => void
@@ -88,6 +92,15 @@ function PanelNumber({
   )
 }
 
+/** Shared by the expanded fields and the collapsed summary badges. */
+function withinBand(achieved: number, preferred: number, tolerance: number): boolean {
+  const tau = tolerance / 100
+  return (
+    !Number.isFinite(achieved) ||
+    (achieved >= preferred * (1 - tau) - 1e-9 && achieved <= preferred * (1 + tau) + 1e-9)
+  )
+}
+
 function ChanceTarget({
   label,
   preferred,
@@ -106,8 +119,7 @@ function ChanceTarget({
   const tau = tolerance / 100
   const lo = preferred * (1 - tau)
   const hi = preferred * (1 + tau)
-  const inBand =
-    !Number.isFinite(achieved) || (achieved >= lo - 1e-9 && achieved <= hi + 1e-9)
+  const inBand = withinBand(achieved, preferred, tolerance)
 
   return (
     <div className="target-field">
@@ -148,6 +160,9 @@ export function TargetsPanel(props: TargetsPanelProps) {
     lockedCount,
     canUndo,
     canRedo,
+    collapsed,
+    panelRef,
+    onCollapsed,
     onTargets,
     onVolatility,
     onCurve,
@@ -166,9 +181,75 @@ export function TargetsPanel(props: TargetsPanelProps) {
     targets.tolerance > 50
 
   const rtpDelta = achieved.rtp - targets.rtp
+  const rtpOk = Math.abs(rtpDelta) < 1e-6
+
+  /**
+   * Auto-Distribute and undo/redo appear in exactly one place at a time — the
+   * settings row when expanded, the head bar when collapsed — so acting on the
+   * table never needs an expand, and there is never a duplicate control.
+   */
+  const actions = (
+    <>
+      <button
+        type="button"
+        className="btn primary"
+        onClick={onAutoDistribute}
+        disabled={invalid || bucketCount === 0}
+        title={invalid ? 'Fix the targets first' : 'Redistribute unlocked weights to hit these targets'}
+      >
+        Auto-Distribute
+      </button>
+      <div className="btn-row">
+        <button type="button" className="btn" onClick={onUndo} disabled={!canUndo} title="Ctrl+Z">
+          ↶ Undo
+        </button>
+        <button type="button" className="btn" onClick={onRedo} disabled={!canRedo} title="Ctrl+Y">
+          ↷ Redo
+        </button>
+      </div>
+    </>
+  )
 
   return (
-    <section className="targets">
+    <section className={collapsed ? 'targets collapsed' : 'targets'} ref={panelRef}>
+      <div className="targets-head">
+        <button
+          type="button"
+          className="targets-toggle"
+          aria-expanded={!collapsed}
+          onClick={() => onCollapsed(!collapsed)}
+          title={collapsed ? 'Show the target settings' : 'Hide the target settings'}
+        >
+          <span className="chev" aria-hidden="true">
+            {collapsed ? '▸' : '▾'}
+          </span>
+          Targets
+        </button>
+
+        {collapsed && (
+          <>
+            <div className="targets-summary">
+              <span className={`badge ${rtpOk ? 'ok' : 'warn'}`}>{fmtRtp(achieved.rtp)}</span>
+              <span className="field-hint">RTP</span>
+              <span
+                className={`badge ${withinBand(achieved.hitChance, targets.hitChance, targets.tolerance) ? 'ok' : 'warn'}`}
+              >
+                {fmtFixed3(achieved.hitChance)}
+              </span>
+              <span className="field-hint">hit</span>
+              <span
+                className={`badge ${withinBand(achieved.winChance, targets.winChance, targets.tolerance) ? 'ok' : 'warn'}`}
+              >
+                {fmtFixed3(achieved.winChance)}
+              </span>
+              <span className="field-hint">win</span>
+            </div>
+            <div className="targets-head-actions">{actions}</div>
+          </>
+        )}
+      </div>
+
+      {!collapsed && (
       <div className="targets-row">
         <div className="target-field rtp">
           <label className="field-label">Target RTP</label>
@@ -263,9 +344,7 @@ export function TargetsPanel(props: TargetsPanelProps) {
             onCommit={onCurve}
           />
         </div>
-      </div>
 
-      <div className="targets-row">
         <div className="target-field">
           <label className="field-label">Weight step</label>
           <div className="seg small">
@@ -282,33 +361,18 @@ export function TargetsPanel(props: TargetsPanelProps) {
             ))}
           </div>
           <div className="field-meta">
-            <span className="field-hint">granularity of distributed weights — typed cells are never snapped</span>
+            <span className="field-hint">typed cells are never snapped</span>
           </div>
         </div>
 
         <div className="target-field actions">
-          <button
-            type="button"
-            className="btn primary"
-            onClick={onAutoDistribute}
-            disabled={invalid || bucketCount === 0}
-            title={invalid ? 'Fix the targets first' : 'Redistribute unlocked weights to hit these targets'}
-          >
-            Auto-Distribute
-          </button>
-          <div className="btn-row">
-            <button type="button" className="btn" onClick={onUndo} disabled={!canUndo} title="Ctrl+Z">
-              ↶ Undo
-            </button>
-            <button type="button" className="btn" onClick={onRedo} disabled={!canRedo} title="Ctrl+Y">
-              ↷ Redo
-            </button>
-          </div>
+          {actions}
           <span className="field-hint">
             {bucketCount} buckets{lockedCount > 0 && <> · {lockedCount} locked</>}
           </span>
         </div>
       </div>
+      )}
 
       {invalid && (
         <p className="notice error">

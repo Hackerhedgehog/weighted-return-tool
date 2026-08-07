@@ -126,4 +126,12 @@ describe('storage', () => {
     store.set(STORAGE_KEY, JSON.stringify({ ...workspace, simChartHeight: null }))
     expect(loadWorkspace()).toBeNull()
   })
+
+  it('round-trips the collapsed targets flag and rejects a non-boolean', () => {
+    saveWorkspace({ ...workspace, targetsCollapsed: true })
+    expect(loadWorkspace()?.targetsCollapsed).toBe(true)
+
+    store.set(STORAGE_KEY, JSON.stringify({ ...workspace, targetsCollapsed: 'yes' }))
+    expect(loadWorkspace()).toBeNull()
+  })
 })

@@ -107,7 +107,29 @@ export default function App() {
     saved?.exportFilename ?? DEFAULT_EXPORT_FILENAME,
   )
   const [simSpins, setSimSpins] = useState(saved?.simSpins ?? DEFAULT_SPINS)
+  const [targetsCollapsed, setTargetsCollapsed] = useState(saved?.targetsCollapsed ?? false)
   const [sort, setSort] = useState<SortState>({ key: 'id', dir: 1 })
+
+  /**
+   * The targets panel is sticky, and so are the grid header and the chart
+   * panel — they have to clear it or they slide underneath. Its height moves
+   * (collapse, row wrap, a warning appearing), so it is measured and published
+   * as a custom property rather than hardcoded in the stylesheet. A callback
+   * ref rather than an effect: this has to run when the panel mounts and
+   * unmounts, which is exactly when the ref fires.
+   */
+  const targetsRef = useCallback((el: HTMLElement | null) => {
+    const root = document.documentElement
+    if (el === null) {
+      root.style.removeProperty('--targets-h')
+      return
+    }
+    const publish = () => root.style.setProperty('--targets-h', `${el.offsetHeight}px`)
+    publish()
+    const obs = new ResizeObserver(publish)
+    obs.observe(el)
+    return () => obs.disconnect()
+  }, [])
 
   /**
    * Live rows during a chart drag. Not undoable: previews stream while the
@@ -164,10 +186,20 @@ export default function App() {
         weightStep: doc.weightStep,
         chartHeight,
         simChartHeight,
+        targetsCollapsed,
       })
     }, SAVE_DEBOUNCE_MS)
     return () => window.clearTimeout(t)
-  }, [doc, columnWidths, chart, exportFilename, simSpins, chartHeight, simChartHeight])
+  }, [
+    doc,
+    columnWidths,
+    chart,
+    exportFilename,
+    simSpins,
+    chartHeight,
+    simChartHeight,
+    targetsCollapsed,
+  ])
 
   // ---- global keyboard ----
 
@@ -381,6 +413,9 @@ export default function App() {
       {hasRows && (
         <main className="content">
           <TargetsPanel
+            panelRef={targetsRef}
+            collapsed={targetsCollapsed}
+            onCollapsed={setTargetsCollapsed}
             targets={doc.targets}
             volatility={doc.volatility}
             curve={doc.curve}

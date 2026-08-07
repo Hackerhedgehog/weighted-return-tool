@@ -194,12 +194,64 @@ body {
 
 /* ---------- targets panel ---------- */
 
+/* Sticky, so the targets stay reachable down a long table. Everything else
+   that sticks offsets by --targets-h, which App measures onto :root. */
 .targets {
+  position: sticky;
+  top: 0;
+  z-index: 6;
   background: var(--surface);
   border: 1px solid var(--line);
   border-radius: 6px;
-  padding: 10px 14px;
+  padding: 8px 14px 10px;
   margin-bottom: 0;
+  box-shadow: 0 2px 10px rgba(31, 35, 40, 0.06);
+}
+
+.targets-head {
+  display: flex;
+  align-items: center;
+  gap: 16px;
+  flex-wrap: wrap;
+  min-height: 24px;
+}
+
+.targets-toggle {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  padding: 2px 4px;
+  border: none;
+  border-radius: 4px;
+  background: none;
+  cursor: pointer;
+  font: inherit;
+  font-size: 11px;
+  font-weight: 600;
+  letter-spacing: 0.04em;
+  text-transform: uppercase;
+  color: var(--text-dim);
+}
+
+.targets-toggle:hover {
+  color: var(--text);
+  background: var(--surface-alt);
+}
+
+.targets-toggle .chev {
+  font-size: 9px;
+}
+
+.targets-summary,
+.targets-head-actions {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  flex-wrap: wrap;
+}
+
+.targets-head-actions {
+  margin-left: auto;
 }
 
 .targets-row {
@@ -207,12 +259,7 @@ body {
   flex-wrap: wrap;
   gap: 16px;
   align-items: flex-start;
-}
-
-.targets-row + .targets-row {
-  margin-top: 10px;
-  padding-top: 10px;
-  border-top: 1px dashed var(--line);
+  margin-top: 8px;
 }
 
 .target-field {
@@ -435,16 +482,30 @@ body {
 
 /* The table and the chart share the width; targets and simulation span both.
    The chart sticks so it stays beside whichever rows are on screen. */
+/* A wrapping flex row, not a grid: `min-width: min-content` on the table panel
+   stops flex shrinking it below its real column widths, so the chart wraps to
+   the next line the moment the two no longer fit. Columns are user-resizable,
+   so no fixed breakpoint could get this right. */
 .content {
-  display: grid;
-  grid-template-columns: minmax(0, 1fr) minmax(0, 1fr);
+  display: flex;
+  flex-wrap: wrap;
   gap: 16px;
-  align-items: start;
+  align-items: flex-start;
 }
 
 .content > .targets,
 .content > .panel.full {
-  grid-column: 1 / -1;
+  flex: 1 0 100%;
+}
+
+.content > .panel.buckets {
+  flex: 1 1 auto;
+  min-width: min-content;
+}
+
+.content > .panel.chart {
+  flex: 1 1 420px;
+  min-width: 0;
 }
 
 .panel {
@@ -456,7 +517,7 @@ body {
 
 .panel.chart {
   position: sticky;
-  top: 8px;
+  top: calc(var(--targets-h, 0px) + 8px);
   align-self: start;
 }
 
@@ -519,7 +580,8 @@ body {
 
 .grid-table thead th {
   position: sticky;
-  top: 0;
+  /* clears the sticky targets panel above it */
+  top: var(--targets-h, 0px);
   z-index: 3;
   background: var(--header);
   border-top: 1px solid var(--line);
@@ -1140,9 +1202,13 @@ input.gcell.editing {
 
 /* A half-width table stops fitting here, so the columns stack — and a sticky
    chart in a one-column flow would only get in the way. */
+/* Wrapping is handled by the flex layout, which reacts to the table's real
+   width. This only stops the chart sticking once the page is narrow enough
+   that it lands under the table rather than beside it. */
 @media (max-width: 1200px) {
-  .content {
-    grid-template-columns: minmax(0, 1fr);
+  .content > .panel.buckets,
+  .content > .panel.chart {
+    flex: 1 0 100%;
   }
 
   .panel.chart {

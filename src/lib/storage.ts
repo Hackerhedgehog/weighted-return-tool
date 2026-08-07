@@ -23,6 +23,8 @@ export interface Workspace {
   /** Optional — absent in workspaces saved before charts could be resized. */
   chartHeight?: number
   simChartHeight?: number
+  /** Optional — absent in workspaces saved before the panel could collapse. */
+  targetsCollapsed?: boolean
 }
 
 const isObject = (v: unknown): v is Record<string, unknown> =>
@@ -80,7 +82,8 @@ function isWorkspace(v: unknown): v is Workspace {
       v.weightStep === 10 ||
       v.weightStep === 100) &&
     (v.chartHeight === undefined || isFiniteNumber(v.chartHeight)) &&
-    (v.simChartHeight === undefined || isFiniteNumber(v.simChartHeight))
+    (v.simChartHeight === undefined || isFiniteNumber(v.simChartHeight)) &&
+    (v.targetsCollapsed === undefined || typeof v.targetsCollapsed === 'boolean')
   )
 }
 
