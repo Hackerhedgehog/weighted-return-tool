@@ -4,7 +4,8 @@ import type { Grouping } from '../lib/groups'
 import { scaleSubset, setSubsetTotal } from '../lib/interact'
 import { fmtPayout, fmtPct, fmtRtp, fmtWeight } from '../lib/format'
 import { ChartReadout, type ReadoutStat, type ReadoutTitle } from './ChartReadout'
-import { linearBarWidth, logBarWidth, niceCeil, useContainerWidth } from './chartUtils'
+import { ChartResizeGrip } from './ChartResizeGrip'
+import { DIST_HEIGHT, linearBarWidth, logBarWidth, niceCeil, useContainerWidth } from './chartUtils'
 
 /**
  * The distribution chart is now a control surface as well as a picture:
@@ -32,7 +33,9 @@ interface DistributionChartProps {
   chart: ChartSettings
   grouping: Grouping
   weightStep: WeightStep
+  height: number
   onChart: (c: ChartSettings) => void
+  onHeight: (h: number) => void
   onPreview: (rows: BucketRow[] | null) => void
   onCommit: (rows: BucketRow[]) => void
   onDragBlocked: () => void
@@ -71,7 +74,6 @@ interface DragState {
   blockedNotified: boolean
 }
 
-const HEIGHT = 340
 const MARGIN = { top: 18, right: 128, bottom: 46, left: 64 }
 const HANDLE_GAP = 30
 const SEGMENT_GAP = 2
@@ -131,7 +133,9 @@ export function DistributionChart({
   chart,
   grouping,
   weightStep,
+  height,
   onChart,
+  onHeight,
   onPreview,
   onCommit,
   onDragBlocked,
@@ -213,7 +217,7 @@ export function DistributionChart({
   const droppedZero = logX ? allBars.length - bars.length : 0
 
   const plotW = width - MARGIN.left - MARGIN.right
-  const plotH = HEIGHT - MARGIN.top - MARGIN.bottom
+  const plotH = height - MARGIN.top - MARGIN.bottom
   const plotRight = width - MARGIN.right
 
   const valueOf = (b: Bar) => (metric === 'weights' ? b.weight : b.chance)
@@ -432,7 +436,7 @@ export function DistributionChart({
           <div className="chart-empty">No buckets to plot.</div>
         ) : (
           <>
-            <svg width={width} height={HEIGHT} role="img" aria-label="Bucket distribution" ref={svgRef}>
+            <svg width={width} height={height} role="img" aria-label="Bucket distribution" ref={svgRef}>
               {scale.ticks.map((t, i) => {
                 const y = MARGIN.top + plotH * (1 - t.frac)
                 return (
@@ -513,7 +517,7 @@ export function DistributionChart({
                     key={i}
                     className="axis-label"
                     x={centres[i]}
-                    y={HEIGHT - MARGIN.bottom + 18}
+                    y={height - MARGIN.bottom + 18}
                     textAnchor="middle"
                   >
                     ×{fmtPayout(b.payout)}
@@ -524,7 +528,7 @@ export function DistributionChart({
               <text
                 className="axis-title"
                 x={MARGIN.left + plotW / 2}
-                y={HEIGHT - 8}
+                y={height - 8}
                 textAnchor="middle"
               >
                 payout × bet{logX ? ' (logarithmic)' : ' (ascending)'}
@@ -614,6 +618,13 @@ export function DistributionChart({
               titles={readoutTitles}
               stats={readoutStats}
               hint="hover a bar for its numbers"
+            />
+
+            <ChartResizeGrip
+              height={height}
+              range={DIST_HEIGHT}
+              label="Resize the distribution chart"
+              onHeight={onHeight}
             />
           </>
         )}

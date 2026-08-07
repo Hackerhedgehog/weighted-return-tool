@@ -26,6 +26,7 @@ import { emptyHistory, pushHistory, redo, undo, type HistoryState } from './lib/
 import { DEFAULT_SPINS } from './lib/sim'
 import { clearWorkspace, loadWorkspace, saveWorkspace } from './lib/storage'
 import { BucketTable } from './components/BucketTable'
+import { clampHeight, DIST_HEIGHT } from './components/chartUtils'
 import { DistributionChart } from './components/DistributionChart'
 import { SimulationPanel } from './components/SimulationPanel'
 import { TargetsPanel } from './components/TargetsPanel'
@@ -95,6 +96,10 @@ export default function App() {
   const [chart, setChart] = useState<ChartSettings>(
     saved?.chart === undefined ? DEFAULT_CHART : { ...DEFAULT_CHART, ...saved.chart },
   )
+  // Clamped on the way in as well as on drag — the stored value is user data.
+  const [chartHeight, setChartHeight] = useState(() =>
+    clampHeight(saved?.chartHeight ?? DIST_HEIGHT.fallback, DIST_HEIGHT),
+  )
   const [exportFilename, setExportFilename] = useState(
     saved?.exportFilename ?? DEFAULT_EXPORT_FILENAME,
   )
@@ -154,10 +159,11 @@ export default function App() {
         exportFilename,
         simSpins,
         weightStep: doc.weightStep,
+        chartHeight,
       })
     }, SAVE_DEBOUNCE_MS)
     return () => window.clearTimeout(t)
-  }, [doc, columnWidths, chart, exportFilename, simSpins])
+  }, [doc, columnWidths, chart, exportFilename, simSpins, chartHeight])
 
   // ---- global keyboard ----
 
@@ -430,7 +436,9 @@ export default function App() {
               chart={chart}
               grouping={grouping}
               weightStep={doc.weightStep}
+              height={chartHeight}
               onChart={setChart}
+              onHeight={setChartHeight}
               onPreview={setPreview}
               onCommit={handleDragCommit}
               onDragBlocked={handleDragBlocked}

@@ -22,11 +22,12 @@ beforeEach(() => {
 
 afterEach(cleanup)
 
-function renderChart(chart: Partial<ChartSettings>, rows = baseRows()) {
+function renderChart(chart: Partial<ChartSettings>, rows = baseRows(), height = 340) {
   const onChart = vi.fn()
   const onPreview = vi.fn()
   const onCommit = vi.fn()
   const onDragBlocked = vi.fn()
+  const onHeight = vi.fn()
   const total = rows.reduce((a, r) => a + r.weight, 0)
   render(
     <DistributionChart
@@ -35,13 +36,15 @@ function renderChart(chart: Partial<ChartSettings>, rows = baseRows()) {
       chart={{ ...DEFAULT_CHART, logY: false, aggregate: false, ...chart }}
       grouping={groupRows(rows)}
       weightStep={1}
+      height={height}
       onChart={onChart}
       onPreview={onPreview}
       onCommit={onCommit}
       onDragBlocked={onDragBlocked}
+      onHeight={onHeight}
     />,
   )
-  return { onChart, onPreview, onCommit, onDragBlocked, rows, total }
+  return { onChart, onPreview, onCommit, onDragBlocked, onHeight, rows, total }
 }
 
 const lastRows = (fn: ReturnType<typeof vi.fn>): BucketRow[] =>
@@ -239,5 +242,20 @@ describe('DistributionChart readout', () => {
     expect(document.querySelectorAll('.readout-title')).toHaveLength(1)
     fireEvent.mouseOut(hit)
     expect(screen.getByText('hover a bar for its numbers')).toBeDefined()
+  })
+})
+
+describe('DistributionChart height', () => {
+  it('draws at the height it is given', () => {
+    renderChart({ metric: 'weights' }, baseRows(), 500)
+    expect(document.querySelector('svg')!.getAttribute('height')).toBe('500')
+  })
+
+  it('reports a new height when the grip is dragged', () => {
+    const { onHeight } = renderChart({ metric: 'weights' }, baseRows(), 340)
+    const grip = screen.getByRole('separator', { name: 'Resize the distribution chart' })
+    fireEvent.pointerDown(grip, { pointerId: 1, clientY: 0 })
+    fireEvent.pointerMove(grip, { pointerId: 1, clientY: 60 })
+    expect(onHeight).toHaveBeenLastCalledWith(400)
   })
 })
