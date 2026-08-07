@@ -90,6 +90,11 @@ ID	Avg Payout 	Label	Weights	Weighted Value	Chance
 Header, one row per bucket in the table's current sort order, then a totals row
 with three empty leading fields. Computed columns carry 10 significant digits.
 
+**Weight ID rides as a trailing seventh column, and only when a table uses
+one** — a table that leaves the field empty exports exactly the six columns
+above, byte for byte. Trailing keeps the first six positional, so an export
+with the extra column still pastes back cleanly, Weight IDs included.
+
 **Exports paste straight back in.** The Weights column is picked up, and the
 header and totals rows are ignored — so you can export, adjust in Excel, and
 paste the result back without editing anything out.
@@ -114,6 +119,13 @@ resolved in this order of authority:
 3. **Preferred Hit Chance / Win Chance** are met exactly whenever RTP allows,
    otherwise inside a tolerance band.
 4. **Volatility** shapes whatever freedom remains.
+
+Steps 3 and 4 can each be **switched off** from the `Solve for` checkboxes.
+Off, the fields keep reporting what the table currently achieves — they simply
+stop being goals, so everything goes into RTP. With chance targets off the
+paying groups are pooled and the curve is free to move mass across the whole
+ladder; with volatility off the curvature term is dropped and the tail is a
+pure power law (`c = 0`), leaving γ alone to solve RTP.
 
 Hit chance counts buckets paying above `0`; **win chance** counts buckets paying
 above `1` — the wins that actually return more than the stake.
@@ -195,14 +207,16 @@ then `Auto-Distribute` and undo/redo.
 
 The panel **sticks to the top of the viewport** as you scroll, and
 **collapses**: the ▾ toggle at its left folds the inputs away, leaving a slim
-bar that keeps the achieved RTP / hit / win badges and the `Auto-Distribute`,
-`Undo` and `Redo` buttons. So you can still act on the table from the bottom
+bar that reads every setting back as `name: value` — RTP, hit, win, tolerance,
+volatility, curve and step — alongside the `Auto-Distribute`, `Undo` and
+`Redo` buttons. So you can still act on the table from the bottom
 of a long page; only editing the targets needs an expand. The collapsed state
 is remembered with the workspace. The table header and the chart panel offset
 themselves by the panel's measured height, so nothing slides underneath it.
 
-Each target shows its achieved value beside it as a badge, flagged when the
-solve could not keep it inside the band. Hover a badge for the detail: the
+A target that is switched off greys out and its badge stops being flagged; it
+is a readout, not a goal. Every other target shows its achieved value beside it
+as a badge, flagged when the solve could not keep it inside the band. Hover a badge for the detail: the
 chance badges give the tolerance band, the RTP badge the exact "off by"
 figure. The RTP field also carries a small gauge of achieved against target.
 The `= current` button under each chance copies the achieved figure into the
@@ -268,23 +282,28 @@ makes the typed figure true *after* the total moves with it.
 
 ### Bucket groups
 
-Buckets are grouped automatically from payout and label, in priority order:
+Every bucket belongs to a group, and groups drive the chart bar colors, the
+table row tints, the chart's group handles and the group sort.
 
-1. **payout = 0** → the `0x` group. This beats every name rule, so a
-   `joker2-tease` that pays nothing sits with the other duds, not with
-   `joker3`.
-2. Label contains **"bonus"** → the bonus group.
-3. Label is a pure **win range** (`0-1x`, `8-16x`, `512-1024x`) → the wins
-   group.
-4. Labels sharing an **alpha+digits stem** (`joker3`/`joker4`/`joker5`, or
-   `diamond3`/`diamond4` in another game) → one group per stem, two members
-   minimum.
-5. Everything else → other.
+Groups are **detected from the labels once, when data is imported**, then they
+are yours. The detector's rules, in priority order:
 
-Each group has a fixed color: rows get a light tint of it (locked rows keep
-the lock color), chart bars get the full strength. The **Group sort** button
-above the table orders rows by group, then payout; exports follow the visible
-order as always.
+1. `payout == 0` → the `0x` group, ahead of any name rule, so a
+   `joker2-tease` that pays nothing sits with the other duds.
+2. label contains `bonus` → the bonus group, case-insensitively.
+3. label is a pure range → the wins group (`0-1x`, `8-16x`, `512-1024x`).
+4. **shared leading token** → one group per stem with two or more members.
+   The stem is the label's first token with any trailing digits cut, so
+   `joker5-maxwin`/`joker4-stacks` → `joker`, and equally `lw-8-16`/`lw-16-32`
+   → `lw` and `fs-16-32`/`fs-32-64` → `fs`. A stem with one member is no group.
+5. anything else → other.
+
+After the import the heuristics never run again, so nothing you do can be
+silently undone by them. Change a bucket's group from the **Group** column's
+dropdown, and manage the groups themselves from **Group settings** in the top
+bar: add, rename, recolor from a palette of 20 pastels, or delete. Deleting a
+group never deletes buckets — they move to the first remaining group. All of
+it is undoable and saved with the workspace.
 
 ### Dragging the distribution chart
 
@@ -311,10 +330,11 @@ undo step** on release. Escape cancels a drag in flight.
 
 ### The tooltip, and chart height
 
-Hovering a bar raises a **tooltip anchored under it**: every bucket in that bar
-on its own line in its group color, then the bar's payout, weight, chance and
-weighted value (its share of RTP). A bar aggregating more than four buckets
-lists three and counts the rest.
+Hovering a bar raises a **tooltip anchored under it**, in two columns: the
+buckets in that bar on the left, one per line in its group color, and the
+bar's payout, weight, chance and weighted value (its share of RTP) on the
+right. Nothing is truncated — a bar holding more labels than fit scrolls the
+list slowly, pauses at the bottom, and starts again from the top.
 
 The tooltip floats in a reserved band *below* the plot, at the hovered bar's x.
 Below is the only place it can go without hiding data — anywhere inside the
@@ -369,9 +389,22 @@ scroll a long table.
 **The chart wraps below the table when it no longer fits beside it** — not at
 a fixed breakpoint, but at whatever width the table's own columns imply. Widen
 a column and the wrap happens sooner; narrow them and the two stay side by
-side for longer. Below 1200px the chart also stops sticking.
+side for longer. Once wrapped the table centres itself instead, since there is
+no chart beside it to sit against. Below 1200px the chart also stops sticking.
+
+Widening a column eats the table's own left-hand slack first: the two panels
+split the row by share rather than by content, so the chart only gives up
+width once the table genuinely needs more than its half.
+
+The sticky chart is bounded by the table's row, so it follows you down the
+table and then stops — it never rides over the simulation panel below.
 
 ### Columns
+
+The table carries **Group**, **ID**, **Weight ID**, **Avg Payout**, **Label**,
+**Weights**, **Weighted Value** and **Chance**, plus the lock toggle. Weight ID
+is free text the tool never interprets — somewhere to put your own identifier
+when the bucket id is not the one that matters downstream.
 
 Drag a header edge to resize; double-click it to fit the content. Click a header
 to sort. Widths persist with the workspace. The defaults are sized to fit the
@@ -388,8 +421,11 @@ them — it is remembered with the workspace.
 ### Persistence
 
 The table, targets, volatility, weight step, column widths, chart settings,
-both chart heights, whether the targets panel is collapsed, export filename
-and simulation spin count autosave to `localStorage` and come back on reload. `Clear workspace`, at the right of the top bar, wipes it after
+both chart heights, the groups and their colors, whether the targets panel is
+collapsed, export filename and simulation spin count autosave to
+`localStorage` and come back on reload. A workspace saved before groups became
+data is migrated on load — the detector seeds it once, exactly as an import
+would. `Clear workspace`, at the right of the top bar, wipes it after
 confirming. Undo history and simulation results are not persisted.
 
 ## Project layout
@@ -410,6 +446,7 @@ src/
     exportTsv.ts    TSV out, clipboard, download
     history.ts      bounded undo/redo
     storage.ts      localStorage workspace
+    palette.ts      the 20 pastel group colors and their row tints
   components/
     BucketTable.tsx      the grid, totals row, column resizing, group tints
     cells.tsx            cell rendering and edit lifecycle
@@ -420,6 +457,7 @@ src/
     SimulationPanel.tsx  spins, run control, live stats
     SimChart.tsx         realtime simulation chart
     ChartReadout.tsx     the hover tooltip anchored under both charts
+    GroupSettings.tsx    add, rename, recolor and delete bucket groups
     ChartResizeGrip.tsx  drag or key a chart taller
     chartUtils.ts        shared axis, width, bar-geometry and height helpers
     RtpGauge.tsx
