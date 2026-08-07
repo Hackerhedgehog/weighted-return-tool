@@ -176,3 +176,68 @@ describe('DistributionChart dragging', () => {
     expect(onPreview).not.toHaveBeenCalled()
   })
 })
+
+/** The readout's label/value pairs, as a plain object. */
+const readoutStats = (): Record<string, string> =>
+  Object.fromEntries(
+    [...document.querySelectorAll('.readout-stat')].map((el) => [
+      el.querySelector('span')!.textContent,
+      el.querySelector('b')!.textContent,
+    ]),
+  )
+
+describe('DistributionChart readout', () => {
+  it('shows the hint until a bar is hovered', () => {
+    renderChart({ metric: 'weights' })
+    expect(screen.getByText('hover a bar for its numbers')).toBeDefined()
+    expect(document.querySelectorAll('.readout-title')).toHaveLength(0)
+  })
+
+  it('names the hovered bucket in its group color', () => {
+    renderChart({ metric: 'weights' })
+    // bars run in ascending payout: 0x, 0-1x, bonus3, bonus4
+    fireEvent.mouseOver(document.querySelectorAll('.bar-hit')[2])
+    const line = document.querySelector('.readout-title')!
+    expect(line.textContent).toBe('bonus3')
+    expect(line.getAttribute('style')).toContain('--series-1')
+  })
+
+  it('gives each bucket of an aggregated bar its own colored line', () => {
+    const rows: BucketRow[] = [
+      { uid: 'x', bucketId: 0, payout: 5, label: 'hp-fullscreen', weight: 100, locked: false },
+      { uid: 'y', bucketId: 1, payout: 5, label: 'bonus9', weight: 100, locked: false },
+    ]
+    renderChart({ metric: 'weights', aggregate: true }, rows)
+    fireEvent.mouseOver(document.querySelector('.bar-hit')!)
+    const lines = [...document.querySelectorAll('.readout-title')]
+    expect(lines.map((el) => el.textContent)).toEqual(['hp-fullscreen', 'bonus9'])
+    expect(lines[0].getAttribute('style')).not.toBe(lines[1].getAttribute('style'))
+  })
+
+  it('reports payout, weight, chance and the weighted value', () => {
+    renderChart({ metric: 'weights' })
+    fireEvent.mouseOver(document.querySelectorAll('.bar-hit')[3]) // ×100, weight 50,000 of 1,000,000
+    expect(readoutStats()).toEqual({
+      payout: '×100',
+      weight: '50,000',
+      chance: '5%',
+      weighted: '5.0000',
+    })
+  })
+
+  it('no longer offers a drag row', () => {
+    renderChart({ metric: 'weights' })
+    fireEvent.mouseOver(document.querySelectorAll('.bar-hit')[3])
+    expect(screen.queryByText('drag')).toBeNull()
+    expect(screen.queryByText('↑↓')).toBeNull()
+  })
+
+  it('returns to the hint when the pointer leaves the bar', () => {
+    renderChart({ metric: 'weights' })
+    const hit = document.querySelectorAll('.bar-hit')[3]
+    fireEvent.mouseOver(hit)
+    expect(document.querySelectorAll('.readout-title')).toHaveLength(1)
+    fireEvent.mouseOut(hit)
+    expect(screen.getByText('hover a bar for its numbers')).toBeDefined()
+  })
+})

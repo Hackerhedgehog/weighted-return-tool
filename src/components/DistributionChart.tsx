@@ -3,6 +3,7 @@ import type { BucketRow, ChartSettings, WeightStep } from '../lib/types'
 import type { Grouping } from '../lib/groups'
 import { scaleSubset, setSubsetTotal } from '../lib/interact'
 import { fmtPayout, fmtPct, fmtRtp, fmtWeight } from '../lib/format'
+import { ChartReadout, type ReadoutStat, type ReadoutTitle } from './ChartReadout'
 import { linearBarWidth, logBarWidth, niceCeil, useContainerWidth } from './chartUtils'
 
 /**
@@ -354,6 +355,30 @@ export function DistributionChart({
   const labelEvery = Math.max(1, Math.ceil(n / Math.max(1, Math.floor(plotW / 62))))
   const hovered = hover !== null && hover < bars.length ? bars[hover] : null
 
+  /**
+   * Labels are colored per bucket, not per bar segment: segments are merged by
+   * group and reordered by rank, so an aggregated bar spanning two groups has
+   * to look each bucket's color up by uid to keep line and color in step.
+   */
+  const readoutTitles: ReadoutTitle[] =
+    hovered === null
+      ? []
+      : hovered.labels.map((text, i) => ({
+          text,
+          color: grouping.byUid.get(hovered.uids[i])?.color,
+        }))
+
+  const readoutStats: ReadoutStat[] =
+    hovered === null
+      ? []
+      : [
+          { label: 'payout', value: `×${fmtPayout(hovered.payout)}` },
+          { label: 'weight', value: fmtWeight(hovered.weight) },
+          { label: 'chance', value: fmtPct(hovered.chance, 4) },
+          // The bar's slice of RTP — the table's Weighted Value column.
+          { label: 'weighted', value: fmtRtp(hovered.payout * hovered.chance) },
+        ]
+
   return (
     <>
       <div className="chart-controls">
@@ -585,31 +610,11 @@ export function DistributionChart({
               ))}
             </svg>
 
-            {hovered && hover !== null && (
-              <div
-                className="chart-tooltip"
-                style={{ left: Math.min(Math.max(centres[hover], 100), width - 110) }}
-              >
-                <div className="tt-payout">×{fmtPayout(hovered.payout)}</div>
-                <div className="tt-labels">
-                  {hovered.labels.length > 3
-                    ? `${hovered.labels.slice(0, 3).join(', ')} +${hovered.labels.length - 3}`
-                    : hovered.labels.join(', ')}
-                </div>
-                <div className="tt-row">
-                  <span>weight</span>
-                  <b>{fmtWeight(hovered.weight)}</b>
-                </div>
-                <div className="tt-row">
-                  <span>chance</span>
-                  <b>{fmtPct(hovered.chance, 4)}</b>
-                </div>
-                <div className="tt-row">
-                  <span>drag</span>
-                  <b>{hovered.allLocked ? 'locked' : '↑↓'}</b>
-                </div>
-              </div>
-            )}
+            <ChartReadout
+              titles={readoutTitles}
+              stats={readoutStats}
+              hint="hover a bar for its numbers"
+            />
           </>
         )}
       </div>
