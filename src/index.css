@@ -76,12 +76,13 @@ body {
 
 .topbar {
   display: flex;
-  align-items: baseline;
+  /* centred, not baseline: the row carries the filename input now */
+  align-items: center;
   justify-content: space-between;
   gap: 16px;
-  padding: 16px 0 12px;
+  padding: 12px 0 10px;
   border-bottom: 1px solid var(--line);
-  margin-bottom: 16px;
+  margin-bottom: 12px;
 }
 
 .brand {
@@ -104,7 +105,17 @@ body {
 
 .topbar-actions {
   display: flex;
+  align-items: center;
+  flex-wrap: wrap;
   gap: 8px;
+}
+
+/* Thin rules grouping load · export · destructive actions. */
+.topbar-sep {
+  width: 1px;
+  align-self: stretch;
+  min-height: 20px;
+  background: var(--line);
 }
 
 /* ---------- buttons ---------- */
@@ -142,6 +153,16 @@ body {
 .btn.primary:hover:not(:disabled) {
   background: #0860c4;
   border-color: #0860c4;
+}
+
+.btn.danger {
+  color: var(--danger);
+  border-color: #f0b3ae;
+}
+
+.btn.danger:hover:not(:disabled) {
+  background: var(--danger-soft);
+  border-color: var(--danger);
 }
 
 .btn-row {
@@ -244,12 +265,17 @@ body {
   border: 1px solid var(--line);
   border-radius: 5px;
   padding: 5px 8px;
-  width: 100%;
   outline: none;
+}
+
+.panel-num {
+  /* five digits is the most any target shows */
+  width: 88px;
 }
 
 .filename-input {
   font-size: 12px;
+  width: 200px;
 }
 
 .panel-num:focus,

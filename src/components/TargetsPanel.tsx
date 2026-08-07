@@ -24,8 +24,6 @@ interface TargetsPanelProps {
   lockedCount: number
   canUndo: boolean
   canRedo: boolean
-  exportFilename: string
-  copyState: 'idle' | 'ok' | 'fail'
   onTargets: (t: Targets) => void
   onVolatility: (v: Exclude<Volatility, 'custom'>) => void
   onCurve: (c: number) => void
@@ -33,10 +31,6 @@ interface TargetsPanelProps {
   onAutoDistribute: () => void
   onUndo: () => void
   onRedo: () => void
-  onCopy: () => void
-  onDownload: () => void
-  onFilename: (s: string) => void
-  onClear: () => void
 }
 
 /** Small numeric field that also accepts arithmetic, like the grid cells do. */
@@ -152,8 +146,6 @@ export function TargetsPanel(props: TargetsPanelProps) {
     lockedCount,
     canUndo,
     canRedo,
-    exportFilename,
-    copyState,
     onTargets,
     onVolatility,
     onCurve,
@@ -161,10 +153,6 @@ export function TargetsPanel(props: TargetsPanelProps) {
     onAutoDistribute,
     onUndo,
     onRedo,
-    onCopy,
-    onDownload,
-    onFilename,
-    onClear,
   } = props
 
   const invalid =
@@ -318,28 +306,6 @@ export function TargetsPanel(props: TargetsPanelProps) {
           <span className="field-hint">
             {bucketCount} buckets{lockedCount > 0 && <> · {lockedCount} locked</>}
           </span>
-        </div>
-
-        <div className="target-field export">
-          <label className="field-label">Export</label>
-          <div className="btn-row">
-            <button type="button" className="btn" onClick={onCopy} disabled={bucketCount === 0}>
-              {copyState === 'ok' ? 'Copied ✓' : copyState === 'fail' ? 'Copy failed' : 'Copy TSV'}
-            </button>
-            <button type="button" className="btn" onClick={onDownload} disabled={bucketCount === 0}>
-              Download .tsv
-            </button>
-          </div>
-          <input
-            className="filename-input"
-            value={exportFilename}
-            aria-label="Export filename"
-            spellCheck={false}
-            onChange={(e) => onFilename(e.target.value)}
-          />
-          <button type="button" className="link-btn danger" onClick={onClear}>
-            Clear workspace
-          </button>
         </div>
       </div>
 

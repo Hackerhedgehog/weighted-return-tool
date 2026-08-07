@@ -326,3 +326,26 @@ describe('numpad decimal', () => {
     expect(spins.value.endsWith('.')).toBe(true)
   })
 })
+
+describe('header actions', () => {
+  it('carries the export controls, not the targets panel', () => {
+    loadRealData()
+    const header = document.querySelector('.topbar') as HTMLElement
+
+    expect(within(header).getByRole('button', { name: 'Load sample' })).toBeDefined()
+    expect(within(header).getByRole('button', { name: 'Paste TSV data' })).toBeDefined()
+    expect(within(header).getByRole('button', { name: 'Copy TSV' })).toBeDefined()
+    expect(within(header).getByRole('button', { name: 'Download .tsv' })).toBeDefined()
+    expect(within(header).getByLabelText('Export filename')).toBeDefined()
+    expect(within(header).getByRole('button', { name: 'Clear workspace' })).toBeDefined()
+
+    expect(document.querySelector('.targets .filename-input')).toBeNull()
+  })
+
+  it('shows only the load actions before a table exists', () => {
+    render(<App />)
+    const header = document.querySelector('.topbar') as HTMLElement
+    expect(within(header).queryByRole('button', { name: 'Copy TSV' })).toBeNull()
+    expect(within(header).getByRole('button', { name: 'Load sample' })).toBeDefined()
+  })
+})

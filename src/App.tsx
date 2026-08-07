@@ -339,6 +339,32 @@ export default function App() {
           <button type="button" className="btn" onClick={() => setPasteOpen(true)}>
             Paste TSV data
           </button>
+          {hasRows && (
+            <>
+              <span className="topbar-sep" aria-hidden="true" />
+              <input
+                className="filename-input"
+                value={exportFilename}
+                aria-label="Export filename"
+                spellCheck={false}
+                onChange={(e) => setExportFilename(e.target.value)}
+              />
+              <button type="button" className="btn" onClick={handleCopy}>
+                {copyState === 'ok' ? 'Copied ✓' : copyState === 'fail' ? 'Copy failed' : 'Copy TSV'}
+              </button>
+              <button
+                type="button"
+                className="btn"
+                onClick={() => downloadTsv(exportText(), exportFilename)}
+              >
+                Download .tsv
+              </button>
+              <span className="topbar-sep" aria-hidden="true" />
+              <button type="button" className="btn danger" onClick={handleClear}>
+                Clear workspace
+              </button>
+            </>
+          )}
         </div>
       </header>
 
@@ -355,8 +381,6 @@ export default function App() {
             lockedCount={lockedCount}
             canUndo={history.past.length > 0}
             canRedo={history.future.length > 0}
-            exportFilename={exportFilename}
-            copyState={copyState}
             onTargets={(t) => commit((d) => ({ ...d, targets: t }))}
             onVolatility={(v) => commit((d) => ({ ...d, volatility: v, curve: CURVE_PRESETS[v] }))}
             onCurve={(c) => commit((d) => ({ ...d, curve: c, volatility: volatilityForCurve(c) }))}
@@ -364,10 +388,6 @@ export default function App() {
             onAutoDistribute={autoDistribute}
             onUndo={doUndo}
             onRedo={doRedo}
-            onCopy={handleCopy}
-            onDownload={() => downloadTsv(exportText(), exportFilename)}
-            onFilename={setExportFilename}
-            onClear={handleClear}
           />
 
           <section className="panel">
