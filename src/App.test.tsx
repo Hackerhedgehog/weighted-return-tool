@@ -3,6 +3,8 @@ import { describe, it, expect, beforeEach, afterEach } from 'vitest'
 import { cleanup, fireEvent, render, screen, within } from '@testing-library/react'
 import App from './App'
 import { readFileSync } from 'node:fs'
+import { saveWorkspace } from './lib/storage'
+import { DEFAULT_CHART, DEFAULT_TARGETS } from './lib/types'
 
 const INPUT = readFileSync('example-input-data.tsv', 'utf8')
 
@@ -96,6 +98,25 @@ describe('App', () => {
     expect(after.textContent).toBe(weightBefore)
   })
 
+  it('shows a clear notice when every row is locked and the total is changed', () => {
+    loadRealData()
+    document.querySelectorAll('.grid-row .gcell.lock').forEach((el) => fireEvent.click(el))
+    expect(document.querySelectorAll('.grid-row.locked')).toHaveLength(30)
+
+    const cell = document.querySelector('.totals-row .col-weight .gcell') as HTMLElement
+    fireEvent.mouseDown(cell)
+    fireEvent.doubleClick(cell)
+    const input = document.querySelector('.totals-row .col-weight input') as HTMLInputElement
+    fireEvent.change(input, { target: { value: '2000000' } })
+    fireEvent.keyDown(input, { key: 'Enter' })
+
+    expect(
+      screen.getByText(
+        'Every row is locked — unlock something or set the total to exactly the locked weight (1,000,000).',
+      ),
+    ).toBeDefined()
+  })
+
   it('adds to a cell when an operator is typed on it', () => {
     loadRealData()
     const cell = document.querySelector('.grid-row .col-weight .gcell') as HTMLElement
@@ -178,5 +199,130 @@ describe('App', () => {
         resolve()
       }, 400)
     })
+  })
+})
+
+describe('weight step', () => {
+  it('snaps Auto-Distribute to the chosen step', () => {
+    loadRealData()
+    fireEvent.click(screen.getByRole('button', { name: '100' }))
+    fireEvent.click(screen.getByRole('button', { name: 'Auto-Distribute' }))
+
+    const weights = [...document.querySelectorAll('tbody .col-weight .gcell')].map((c) =>
+      Number((c.textContent ?? '').replace(/,/g, '')),
+    )
+    expect(weights).toHaveLength(30)
+    expect(weights.every((w) => w % 100 === 0)).toBe(true)
+  })
+
+  it('is undoable', () => {
+    loadRealData()
+    fireEvent.click(screen.getByRole('button', { name: '100' }))
+    expect(screen.getByRole('button', { name: '100' }).className).toContain('active')
+    fireEvent.click(screen.getByRole('button', { name: /Undo/ }))
+    expect(screen.getByRole('button', { name: 'free' }).className).toContain('active')
+  })
+
+  it('restores from a saved workspace', () => {
+    saveWorkspace({
+      version: 1,
+      rows: [{ uid: 'b1', bucketId: 0, payout: 2, label: 'x', weight: 500, locked: false }],
+      targets: DEFAULT_TARGETS,
+      volatility: 'medium',
+      curve: 0.09,
+      columnWidths: {},
+      chart: DEFAULT_CHART,
+      exportFilename: 'f.tsv',
+      weightStep: 100,
+    })
+    render(<App />)
+    expect(screen.getByRole('button', { name: '100' }).className).toContain('active')
+  })
+
+  it('never snaps a typed weight, even at step 100', () => {
+    loadRealData()
+    fireEvent.click(screen.getByRole('button', { name: '100' }))
+
+    const cell = document.querySelector('.grid-row .col-weight .gcell') as HTMLElement
+    fireEvent.mouseDown(cell)
+    fireEvent.doubleClick(cell)
+    const input = document.querySelector('.grid-row .col-weight input') as HTMLInputElement
+    fireEvent.change(input, { target: { value: '12345' } })
+    fireEvent.keyDown(input, { key: 'Enter' })
+
+    expect(document.querySelector('.grid-row .col-weight .gcell')!.textContent).toBe('12,345')
+  })
+
+  it('restores the step on redo after undoing it', () => {
+    loadRealData()
+    fireEvent.click(screen.getByRole('button', { name: '100' }))
+
+    fireEvent.click(screen.getByRole('button', { name: /Undo/ }))
+    expect(screen.getByRole('button', { name: 'free' }).className).toContain('active')
+
+    fireEvent.click(screen.getByRole('button', { name: /Redo/ }))
+    expect(screen.getByRole('button', { name: '100' }).className).toContain('active')
+  })
+})
+
+describe('numpad decimal', () => {
+  const numpadComma = { key: ',', code: 'NumpadDecimal' }
+
+  it('types a dot into an open cell editor', () => {
+    loadRealData()
+    const cell = [...document.querySelectorAll('tbody .col-weight .gcell')][0]
+    fireEvent.mouseDown(cell)
+    fireEvent.doubleClick(cell)
+    const input = document.querySelector('input.gcell.editing') as HTMLInputElement
+    input.setSelectionRange(input.value.length, input.value.length)
+    const before = input.value
+    fireEvent.keyDown(input, numpadComma)
+    expect(input.value).toBe(`${before}.`)
+  })
+
+  it('seeds an edit with a dot when typed on a selected numeric cell', () => {
+    loadRealData()
+    const cell = [...document.querySelectorAll('tbody .col-weight .gcell')][0]
+    fireEvent.mouseDown(cell)
+    fireEvent.keyDown(cell, numpadComma)
+    const input = document.querySelector('input.gcell.editing') as HTMLInputElement
+    expect(input.value).toBe('.')
+  })
+
+  it('keeps the comma when typing into a label cell', () => {
+    loadRealData()
+    const cell = [...document.querySelectorAll('tbody .col-label .gcell')][0]
+    fireEvent.mouseDown(cell)
+    fireEvent.keyDown(cell, numpadComma)
+    const input = document.querySelector('input.gcell.editing') as HTMLInputElement
+    expect(input.value).toBe(',')
+  })
+
+  it('leaves a main-row comma alone in the cell editor', () => {
+    loadRealData()
+    const cell = [...document.querySelectorAll('tbody .col-weight .gcell')][0]
+    fireEvent.mouseDown(cell)
+    fireEvent.doubleClick(cell)
+    const input = document.querySelector('input.gcell.editing') as HTMLInputElement
+    const before = input.value
+    fireEvent.keyDown(input, { key: ',', code: 'Comma' })
+    expect(input.value).toBe(before)
+  })
+
+  it('types a dot into a panel number field', () => {
+    loadRealData()
+    const rtp = screen.getByLabelText('Target RTP') as HTMLInputElement
+    fireEvent.focus(rtp)
+    rtp.setSelectionRange(rtp.value.length, rtp.value.length)
+    fireEvent.keyDown(rtp, numpadComma)
+    expect(rtp.value.endsWith('.')).toBe(true)
+  })
+
+  it('types a dot into the spins field', () => {
+    loadRealData()
+    const spins = screen.getByLabelText('Spins') as HTMLInputElement
+    spins.setSelectionRange(spins.value.length, spins.value.length)
+    fireEvent.keyDown(spins, numpadComma)
+    expect(spins.value.endsWith('.')).toBe(true)
   })
 })

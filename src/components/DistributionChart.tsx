@@ -1,5 +1,5 @@
 import { useEffect, useMemo, useRef, useState } from 'react'
-import type { BucketRow, ChartSettings } from '../lib/types'
+import type { BucketRow, ChartSettings, WeightStep } from '../lib/types'
 import type { Grouping } from '../lib/groups'
 import { scaleSubset, setSubsetTotal } from '../lib/interact'
 import { fmtPayout, fmtPct, fmtRtp, fmtWeight } from '../lib/format'
@@ -30,9 +30,11 @@ interface DistributionChartProps {
   totalWeight: number
   chart: ChartSettings
   grouping: Grouping
+  weightStep: WeightStep
   onChart: (c: ChartSettings) => void
   onPreview: (rows: BucketRow[] | null) => void
   onCommit: (rows: BucketRow[]) => void
+  onDragBlocked: () => void
 }
 
 interface Segment {
@@ -65,6 +67,7 @@ interface DragState {
   scale: Scale
   moved: boolean
   lastRows: BucketRow[] | null
+  blockedNotified: boolean
 }
 
 const HEIGHT = 340
@@ -126,9 +129,11 @@ export function DistributionChart({
   totalWeight,
   chart,
   grouping,
+  weightStep,
   onChart,
   onPreview,
   onCommit,
+  onDragBlocked,
 }: DistributionChartProps) {
   const [containerRef, width] = useContainerWidth()
   const [hover, setHover] = useState<number | null>(null)
@@ -291,6 +296,7 @@ export function DistributionChart({
       scale: liveScale,
       moved: false,
       lastRows: null,
+      blockedNotified: false,
     }
     setDragScale(liveScale)
   }
@@ -301,13 +307,22 @@ export function DistributionChart({
     const f = fracFromPointer(e.clientY)
     const value = d.scale.invert(f)
 
-    let weights: number[]
+    let weights: number[] | null
     if (metric === 'chance') {
-      weights = scaleSubset(d.baseRows, d.uids, clamp(value, 0, 1) * d.baseTotal)
+      weights = scaleSubset(d.baseRows, d.uids, clamp(value, 0, 1) * d.baseTotal, weightStep)
     } else if (relative) {
-      weights = scaleSubset(d.baseRows, d.uids, value)
+      weights = scaleSubset(d.baseRows, d.uids, value, weightStep)
     } else {
-      weights = setSubsetTotal(d.baseRows, d.uids, value)
+      weights = setSubsetTotal(d.baseRows, d.uids, value, weightStep)
+    }
+
+    if (weights === null) {
+      // Off-step table: the drag has nowhere legal to move. Say so once.
+      if (!d.blockedNotified) {
+        d.blockedNotified = true
+        onDragBlocked()
+      }
+      return
     }
 
     const next = d.baseRows.map((r, i) => (r.weight === weights[i] ? r : { ...r, weight: weights[i] }))

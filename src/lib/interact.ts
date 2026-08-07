@@ -1,4 +1,4 @@
-import type { BucketRow } from './types'
+import type { BucketRow, WeightStep } from './types'
 import { largestRemainder } from './distribute'
 
 /**
@@ -9,10 +9,12 @@ import { largestRemainder } from './distribute'
  * `scaleSubset` is the relative form: the subset is scaled to a new total and
  * every other unlocked row absorbs the difference, so the grand total is
  * invariant. Chance is weight / total, which makes Σchance == 1 hold for free.
+ * With a step > 1, drags snap to step-sized parcels, and returns null when the
+ * table's free weight cannot be partitioned on the step.
  *
  * `setSubsetTotal` is the absolute form (weights mode with relativity off):
  * the subset is scaled and the rest of the table never moves, so the grand
- * total drifts by exactly the requested change.
+ * total drifts by exactly the requested change. With a step, the subset snaps.
  */
 
 interface Split {
@@ -48,17 +50,18 @@ function splitRows(rows: BucketRow[], subsetUids: Iterable<string>): Split {
 }
 
 /** Proportional integer split of `budget` over `idx`, equal when all-zero. */
-function allocate(current: number[], idx: number[], budget: number): number[] {
+function allocate(current: number[], idx: number[], budget: number, step: number): number[] {
   const base = idx.map((i) => current[i])
   const anyPositive = base.some((b) => b > 0)
-  return largestRemainder(anyPositive ? base : base.map(() => 1), budget, false)
+  return largestRemainder(anyPositive ? base : base.map(() => 1), budget, false, step)
 }
 
 export function scaleSubset(
   rows: BucketRow[],
   subsetUids: Iterable<string>,
   newSubsetTotal: number,
-): number[] {
+  step: WeightStep = 1,
+): number[] | null {
   const s = splitRows(rows, subsetUids)
   const out = s.current.slice()
 
@@ -66,13 +69,18 @@ export function scaleSubset(
   // subset total exactly where it is — the drag has nowhere to move.
   if (s.inside.length === 0 || s.outside.length === 0) return out
 
+  // The grand total is invariant, so both sides must land on the step at
+  // once — impossible unless the table's free weight is itself on the step.
+  if ((s.grand - s.lockedIn - s.lockedOut) % step !== 0) return null
+
   const lo = s.lockedIn
   const hi = s.grand - s.lockedOut
-  const target = Math.min(Math.max(Math.round(newSubsetTotal), lo), hi)
+  const snapped = s.lockedIn + Math.round((newSubsetTotal - s.lockedIn) / step) * step
+  const target = Math.min(Math.max(snapped, lo), hi)
   if (!Number.isFinite(target)) return out
 
-  const insideAlloc = allocate(s.current, s.inside, target - s.lockedIn)
-  const outsideAlloc = allocate(s.current, s.outside, s.grand - target - s.lockedOut)
+  const insideAlloc = allocate(s.current, s.inside, target - s.lockedIn, step)
+  const outsideAlloc = allocate(s.current, s.outside, s.grand - target - s.lockedOut, step)
 
   s.inside.forEach((i, k) => {
     out[i] = insideAlloc[k]
@@ -87,15 +95,17 @@ export function setSubsetTotal(
   rows: BucketRow[],
   subsetUids: Iterable<string>,
   newSubsetTotal: number,
+  step: WeightStep = 1,
 ): number[] {
   const s = splitRows(rows, subsetUids)
   const out = s.current.slice()
   if (s.inside.length === 0) return out
 
-  const target = Math.max(Math.round(newSubsetTotal), s.lockedIn)
+  const snapped = s.lockedIn + Math.round((newSubsetTotal - s.lockedIn) / step) * step
+  const target = Math.max(snapped, s.lockedIn)
   if (!Number.isFinite(target)) return out
 
-  const insideAlloc = allocate(s.current, s.inside, target - s.lockedIn)
+  const insideAlloc = allocate(s.current, s.inside, target - s.lockedIn, step)
   s.inside.forEach((i, k) => {
     out[i] = insideAlloc[k]
   })

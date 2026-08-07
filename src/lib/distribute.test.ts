@@ -3,6 +3,7 @@ import { readFileSync } from 'node:fs'
 import { parseTsv } from './parse'
 import {
   groupOf,
+  largestRemainder,
   rescaleToTotal,
   retargetRtp,
   solveWeights,
@@ -205,6 +206,20 @@ describe('single-cell solves', () => {
   })
 })
 
+describe('single-cell solves with a weight step', () => {
+  it('rounds the solved weight to the nearest step multiple', () => {
+    // exact answer is 0.3·900/0.7 ≈ 385.7 → 400 on the 100-step
+    expect(weightForChance(100, 1000, 0.3, 100)).toBe(400)
+    // exact answer is 300 — already on the step
+    expect(weightForValue(100, 1000, 2, 0.5, 100)).toBe(300)
+  })
+
+  it('keeps its refusals regardless of the step', () => {
+    expect(weightForChance(100, 1000, 1, 100)).toBeNull()
+    expect(weightForValue(100, 1000, 2, 5, 100)).toBeNull()
+  })
+})
+
 describe('rescaleToTotal', () => {
   const start = solveWeights(rows, T, DEFAULT_TARGETS, CURVE_PRESETS.medium).weights
 
@@ -239,7 +254,7 @@ describe('retargetRtp', () => {
 
   it('reaches a new RTP without moving hit or win chance', () => {
     const before = statsOf(withWeights(start), T)
-    const out = retargetRtp(withWeights(start), T, 1.05)
+    const out = retargetRtp(withWeights(start), T, 1.05)!
     const after = statsOf(withWeights(out), T)
 
     expect(sum(out)).toBe(T)
@@ -249,15 +264,105 @@ describe('retargetRtp', () => {
   })
 
   it('works downwards too', () => {
-    const out = retargetRtp(withWeights(start), T, 0.8)
+    const out = retargetRtp(withWeights(start), T, 0.8)!
     expect(statsOf(withWeights(out), T).rtp).toBeCloseTo(0.8, 4)
     expect(sum(out)).toBe(T)
   })
 
   it('respects locks', () => {
     const src = withWeights(start).map((r, i) => (i === 0 ? { ...r, locked: true } : r))
-    const out = retargetRtp(src, T, 1.05)
+    const out = retargetRtp(src, T, 1.05)!
     expect(out[0]).toBe(src[0].weight)
     expect(sum(out)).toBe(T)
+  })
+})
+
+describe('weight steps on rescale and retarget', () => {
+  const T100 = 1200300
+  const start = solveWeights(rows, T100, DEFAULT_TARGETS, CURVE_PRESETS.medium, 100).weights
+
+  it('rescales on the step', () => {
+    const out = rescaleToTotal(withWeights(start), 600000, 100)!
+    expect(out).not.toBeNull()
+    expect(sum(out)).toBe(600000)
+    expect(out.every((w) => w % 100 === 0)).toBe(true)
+  })
+
+  it('rejects a rescale whose free budget is off the step', () => {
+    expect(rescaleToTotal(withWeights(start), 600050, 100)).toBeNull()
+  })
+
+  it('retargets RTP while keeping every weight on the step', () => {
+    const out = retargetRtp(withWeights(start), T100, 1.05, 100)!
+    expect(out).not.toBeNull()
+    expect(sum(out)).toBe(T100)
+    expect(out.every((w) => w % 100 === 0)).toBe(true)
+    expect(statsOf(withWeights(out), T100).rtp).toBeCloseTo(1.05, 4)
+  })
+
+  it('refuses to retarget when the current weights sit off the step', () => {
+    // the step-1 solve at T puts 144,042 in the win group — not a multiple of 100
+    const offStep = solveWeights(rows, T, DEFAULT_TARGETS, CURVE_PRESETS.medium).weights
+    expect(retargetRtp(withWeights(offStep), T, 1.05, 100)).toBeNull()
+  })
+})
+
+describe('largestRemainder with a step', () => {
+  it('allocates only multiples of the step, exactly to the total', () => {
+    const out = largestRemainder([3, 1, 1], 1000, false, 100)
+    expect(out).toEqual([600, 200, 200])
+  })
+
+  it('minOne gives every entry at least one step', () => {
+    const out = largestRemainder([1000, 1, 1], 300, true, 100)
+    expect(out.every((v) => v >= 100 && v % 100 === 0)).toBe(true)
+    expect(sum(out)).toBe(300)
+  })
+
+  it('defaults to unit granularity', () => {
+    expect(sum(largestRemainder([1, 1, 1], 10, false))).toBe(10)
+  })
+})
+
+describe('solveWeights with a weight step', () => {
+  // T = 1,200,350 divides by 10 but not by 100
+  const T100 = 1200300
+
+  it('lands every weight on a multiple of 10 and still sums exactly', () => {
+    const r = solveWeights(rows, T, DEFAULT_TARGETS, CURVE_PRESETS.medium, 10)
+    expect(r.weights.every((w) => w % 10 === 0)).toBe(true)
+    expect(sum(r.weights)).toBe(T)
+    expect(r.warnings).toHaveLength(0)
+  })
+
+  it('hits RTP to step granularity and keeps the chances in band', () => {
+    const r = solveWeights(rows, T100, DEFAULT_TARGETS, CURVE_PRESETS.medium, 100)
+    expect(r.weights.every((w) => w % 100 === 0)).toBe(true)
+    expect(sum(r.weights)).toBe(T100)
+    expect(Math.min(...r.weights)).toBeGreaterThanOrEqual(100)
+    const s = statsOf(withWeights(r.weights), T100)
+    expect(s.rtp).toBeCloseTo(0.95, 4)
+    expect(s.hitChance).toBeCloseTo(0.3, 3)
+    expect(s.winChance).toBeCloseTo(0.12, 3)
+  })
+
+  it('blocks with a warning when the free weight does not divide', () => {
+    const r = solveWeights(rows, T, DEFAULT_TARGETS, CURVE_PRESETS.medium, 100)
+    expect(r.weights).toEqual(rows.map((row) => Math.max(0, Math.round(row.weight))))
+    expect(r.warnings.some((w) => w.includes('not divisible by 100'))).toBe(true)
+    expect(r.warnings.some((w) => w.includes('1,200,300') && w.includes('1,200,400'))).toBe(true)
+  })
+
+  it('allows an off-step locked weight when the free budget still divides', () => {
+    const zi = rows.findIndex((r) => r.payout === 0)
+    const locked = rows.map((r, i) => (i === zi ? { ...r, weight: 107421, locked: true } : r))
+    const total = 107421 + T100 // free budget stays a multiple of 100
+    const r = solveWeights(locked, total, DEFAULT_TARGETS, CURVE_PRESETS.medium, 100)
+    expect(r.weights[zi]).toBe(107421)
+    expect(sum(r.weights)).toBe(total)
+    locked.forEach((row, i) => {
+      if (!row.locked) expect(r.weights[i] % 100).toBe(0)
+    })
+    expect(r.warnings).toHaveLength(0)
   })
 })

@@ -1,6 +1,7 @@
 import { useEffect, useRef, useState } from 'react'
 import { evaluateExpression } from '../lib/expr'
 import type { EditSeed } from './useGridNavigation'
+import { remapNumpadComma } from './numpadDecimal'
 
 const FLASH_MS = 700
 
@@ -152,6 +153,7 @@ function CellInput({ initial, numeric, onCommit, onCancel, onNavigate }: CellInp
       onKeyDown={(e) => {
         // Ctrl+Z inside an open cell belongs to the text field, not the grid.
         e.stopPropagation()
+        if (numeric && remapNumpadComma(e)) return
 
         switch (e.key) {
           case 'Enter':

@@ -1,4 +1,4 @@
-import type { BucketRow, ChartSettings, Targets, Volatility } from './types'
+import type { BucketRow, ChartSettings, Targets, Volatility, WeightStep } from './types'
 
 /**
  * One autosaved workspace. The key carries the schema version, and the payload
@@ -18,6 +18,8 @@ export interface Workspace {
   exportFilename: string
   /** Optional — absent in workspaces saved before the simulation existed. */
   simSpins?: number
+  /** Optional — absent in workspaces saved before the weight step existed. */
+  weightStep?: WeightStep
 }
 
 const isObject = (v: unknown): v is Record<string, unknown> =>
@@ -69,7 +71,8 @@ function isWorkspace(v: unknown): v is Workspace {
     isObject(v.columnWidths) &&
     isChart(v.chart) &&
     typeof v.exportFilename === 'string' &&
-    (v.simSpins === undefined || isFiniteNumber(v.simSpins))
+    (v.simSpins === undefined || isFiniteNumber(v.simSpins)) &&
+    (v.weightStep === undefined || v.weightStep === 1 || v.weightStep === 10 || v.weightStep === 100)
   )
 }
 

@@ -26,6 +26,7 @@ function renderChart(chart: Partial<ChartSettings>, rows = baseRows()) {
   const onChart = vi.fn()
   const onPreview = vi.fn()
   const onCommit = vi.fn()
+  const onDragBlocked = vi.fn()
   const total = rows.reduce((a, r) => a + r.weight, 0)
   render(
     <DistributionChart
@@ -33,12 +34,14 @@ function renderChart(chart: Partial<ChartSettings>, rows = baseRows()) {
       totalWeight={total}
       chart={{ ...DEFAULT_CHART, logY: false, aggregate: false, ...chart }}
       grouping={groupRows(rows)}
+      weightStep={1}
       onChart={onChart}
       onPreview={onPreview}
       onCommit={onCommit}
+      onDragBlocked={onDragBlocked}
     />,
   )
-  return { onChart, onPreview, onCommit, rows, total }
+  return { onChart, onPreview, onCommit, onDragBlocked, rows, total }
 }
 
 const lastRows = (fn: ReturnType<typeof vi.fn>): BucketRow[] =>
