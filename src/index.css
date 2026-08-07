@@ -905,6 +905,35 @@ input.gcell.editing {
   font-variant-numeric: tabular-nums;
 }
 
+/* touch-action: none, or a touch drag scrolls the page instead of resizing. */
+.chart-grip {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  height: 12px;
+  margin: 2px 6px;
+  border-radius: 4px;
+  cursor: ns-resize;
+  touch-action: none;
+  outline: none;
+}
+
+.chart-grip-bar {
+  width: 44px;
+  height: 3px;
+  border-radius: 2px;
+  background: var(--line);
+}
+
+.chart-grip:hover .chart-grip-bar,
+.chart-grip:focus-visible .chart-grip-bar {
+  background: var(--line-strong);
+}
+
+.chart-grip:focus-visible {
+  box-shadow: 0 0 0 2px var(--accent-soft);
+}
+
 /* ---------- simulation panel ---------- */
 
 .sim-controls {
