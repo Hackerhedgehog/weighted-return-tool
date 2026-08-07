@@ -26,6 +26,7 @@ weights — then exports a `.tsv` the engine can read back.
   - [Bucket groups](#bucket-groups)
   - [Dragging the distribution chart](#dragging-the-distribution-chart)
   - [Simulation](#simulation)
+  - [Layout](#layout)
   - [Columns](#columns)
   - [Export](#export)
   - [Persistence](#persistence)
@@ -98,8 +99,8 @@ paste the result back without editing anything out.
 
 First launch opens the paste screen. `Load sample` builds the table from a
 bundled sample (14 buckets); `Paste TSV data` takes your own bucket list
-and stays available in the top bar afterwards. `Clear workspace` in the
-targets panel wipes everything and returns to the paste screen, after
+and stays available in the top bar afterwards. `Clear workspace`, at the far
+right of the top bar, wipes everything and returns to the paste screen, after
 confirming.
 
 ### The solver
@@ -168,7 +169,7 @@ want, put them in `CURVE_PRESETS` in `src/lib/types.ts`.
 
 ### Weight step
 
-The **Weight step** switch (`free` · `10` · `100`) sets the granularity of
+The **Weight step** switch (`free` · `×10` · `×100`) sets the granularity of
 every tool-distributed weight: Auto-Distribute, rescaling the total, RTP
 retargeting, the chance/value cell solves, and chart drags all land their
 results on a multiple of the step. Typed weight cells are never snapped —
@@ -178,11 +179,17 @@ the panel names the nearest totals that would work.
 
 ### The targets panel
 
+Every setting sits on one row — Target RTP, Preferred Hit Chance, Preferred
+Win Chance, Chance tolerance, Volatility, Curve c — with the weight step and
+`Auto-Distribute` on the row below.
+
 Each target shows its achieved value beside it as a badge, flagged when the
-solve could not keep it inside the band. The RTP field adds an exact "off by"
-readout and a small gauge of achieved against target. The `= current` button
-under each chance copies the achieved figure into the target — handy after
-hand-editing weights, to adopt the current state as the new goal.
+solve could not keep it inside the band. Hover a badge for the detail: the
+chance badges give the tolerance band, the RTP badge the exact "off by"
+figure. The RTP field also carries a small gauge of achieved against target.
+The `= current` button under each chance copies the achieved figure into the
+target — handy after hand-editing weights, to adopt the current state as the
+new goal.
 
 ### Locks
 
@@ -206,6 +213,11 @@ missing the target silently.
 | Delete / Backspace | clear the cell |
 | Space | toggle the lock, on the lock column |
 | Ctrl+Z / Ctrl+Y | undo / redo (20 steps) |
+| Numpad `.` | always types a decimal point, as in Excel |
+
+The numpad remap covers every numeric field, not just the grid. A comma typed
+on the **main** keyboard row keeps its thousands-separator meaning, so
+`1,200,350` still pastes and parses as one number.
 
 ### In-cell arithmetic
 
@@ -294,23 +306,41 @@ values.
 The run snapshots the table when Run is clicked, so edits made mid-run don't
 bend an in-flight simulation. Cancel keeps the partial statistics.
 
+### Layout
+
+The page runs at 95% of the viewport width with the **table and the
+distribution chart side by side**, half each. The chart panel sticks as you
+scroll, so the bars stay beside whichever rows you are editing. Targets sit
+across the top and the simulation across the bottom, both full width.
+
+**The bucket table has no scroll box of its own.** However many buckets there
+are, it renders every row and grows the page instead — so there is never a
+little window to scroll inside a taller page. The header row stays pinned to
+the top of the viewport and the editable totals row to the bottom while you
+scroll a long table.
+
+Below 1200px the two columns stack and the chart stops sticking.
+
 ### Columns
 
 Drag a header edge to resize; double-click it to fit the content. Click a header
-to sort. Widths persist with the workspace.
+to sort. Widths persist with the workspace. The defaults are sized to fit the
+table in its half of the page; widen the Chance column when you want to read a
+chance to its full 15 decimals.
 
 ### Export
 
 `Copy TSV` puts the document on the clipboard; `Download .tsv` saves it, named
-`ref-weights-regular.tsv` by default — the filename field next to the buttons is
-editable and remembered.
+`ref-weights-regular.tsv` by default. Both sit in the top bar next to
+`Load sample` and `Paste TSV data`, with the editable filename field between
+them — it is remembered with the workspace.
 
 ### Persistence
 
-The table, targets, volatility, column widths, chart settings, export
-filename and simulation spin count autosave to `localStorage` and come back on
-reload. `Clear workspace` wipes it after confirming. Undo history and
-simulation results are not persisted.
+The table, targets, volatility, weight step, column widths, chart settings,
+export filename and simulation spin count autosave to `localStorage` and come
+back on reload. `Clear workspace`, at the right of the top bar, wipes it after
+confirming. Undo history and simulation results are not persisted.
 
 ## Project layout
 
@@ -335,13 +365,14 @@ src/
     cells.tsx            cell rendering and edit lifecycle
     numpadDecimal.ts     numpad ',' → '.' remap shared by every numeric input
     useGridNavigation.ts selection and edit state machine
-    TargetsPanel.tsx     targets, volatility, export, undo
+    TargetsPanel.tsx     targets, volatility, weight step, undo
     DistributionChart.tsx draggable bars, group handles
     SimulationPanel.tsx  spins, run control, live stats
     SimChart.tsx         realtime simulation chart
-    chartUtils.ts        shared axis/width helpers
+    chartUtils.ts        shared axis, width and bar-geometry helpers
     RtpGauge.tsx
-  App.tsx           document state, undo wiring, drag previews, autosave
+  App.tsx           document state, undo wiring, drag previews, autosave,
+                    the top bar and its export controls
 ```
 
 ## Tests

@@ -8,9 +8,28 @@
 
 **Tech Stack:** React 19 + TypeScript (strict), Vite, Vitest (`npm run test:run`), no new dependencies.
 
+## Status — read before starting
+
+Merging `worktree-weight-step-switch` on 2026-08-07 landed work this plan had
+duplicated:
+
+- **Tasks 1–3 are done.** The numpad remap already ships as
+  `src/components/numpadDecimal.ts` (`remapNumpadComma`), wired into
+  `cells.tsx`, `useGridNavigation.ts`, `TargetsPanel.tsx` and
+  `SimulationPanel.tsx`, with tests in `src/App.test.tsx`. It keys on
+  `e.code === 'NumpadDecimal' && e.key === ','`, equivalent in practice to the
+  `applyNumpadDecimal` those tasks specified. **Skip them.** Read the module
+  rather than re-creating `src/lib/numpad.ts`.
+- **The whole weight step plan is done**, so Task 5's prerequisite is met.
+  Its labels came in as `free · 10 · 100`; Task 5 restyles them to
+  `free · ×10 · ×100`.
+
+Start at Task 4.
+
 ## Global Constraints
 
-- **Run the weight step plan first.** `docs/superpowers/plans/2026-08-06-weight-step-switch.md` must be complete before Task 5 here, which rearranges the targets rows around the `Weight step` field that plan adds. Tasks 1–4 and 6–8 do not depend on it.
+- ~~**Run the weight step plan first.**~~ Done — merged 2026-08-07. Task 5
+  rearranges the targets rows around the `Weight step` field it added.
 - No new dependencies.
 - `src/lib/expr.ts` is not modified. A comma reaching the expression parser stays a thousands separator, so `1,200,350` keeps parsing and the export acceptance test keeps passing.
 - Saved workspaces keep their stored column widths — `App.tsx` already merges them over `DEFAULT_WIDTHS`, and that merge is not touched.
