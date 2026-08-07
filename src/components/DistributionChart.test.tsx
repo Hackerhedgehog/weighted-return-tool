@@ -51,6 +51,15 @@ const weightsOf = (rows: BucketRow[]) => rows.map((r) => r.weight)
 const sum = (xs: number[]) => xs.reduce((a, b) => a + b, 0)
 
 describe('DistributionChart grouping', () => {
+  it('draws slim bars', () => {
+    // jsdom: useContainerWidth starts at 900px and the faked ResizeObserver
+    // never fires, so the geometry here is deterministic.
+    renderChart({ metric: 'weights' })
+    const widths = [...document.querySelectorAll('.bar')].map((el) => el.getAttribute('width'))
+    expect(widths.length).toBeGreaterThan(0)
+    expect(widths.every((w) => w === '16')).toBe(true)
+  })
+
   it('colors bars by their group', () => {
     renderChart({ metric: 'weights' })
     const styles = [...document.querySelectorAll('.bar')].map((el) => el.getAttribute('style') ?? '')

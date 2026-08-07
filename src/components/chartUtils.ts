@@ -26,6 +26,27 @@ export function niceCeil(v: number): number {
   return nice * base
 }
 
+/**
+ * Bar geometry. Slim bars with tight gaps: the distribution chart shares its
+ * row with the table now, and a dense payout ladder has to stay readable in
+ * half the width. Bars still spread across the whole plot — only the cap and
+ * the gap shrink.
+ */
+const MAX_BAR_W = 16
+const BAR_FILL = 0.86
+const MAX_LOG_BAR_W = 12
+const LOG_BAR_FILL = 0.85
+
+/** Bar width on an evenly-spaced axis, given the per-bar slot width. */
+export function linearBarWidth(slot: number): number {
+  return Math.max(2, Math.min(MAX_BAR_W, slot * BAR_FILL))
+}
+
+/** Bar width on a log payout axis, given the tightest gap between centres. */
+export function logBarWidth(minGap: number): number {
+  return Math.max(2, Math.min(MAX_LOG_BAR_W, (minGap || 8) * LOG_BAR_FILL))
+}
+
 /** 1500 → "1.5k", 100000000 → "100M" — x-axis ticks for spin counts. */
 export function fmtCompact(n: number): string {
   if (!Number.isFinite(n)) return '—'

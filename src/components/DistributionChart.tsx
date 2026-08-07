@@ -3,7 +3,7 @@ import type { BucketRow, ChartSettings, WeightStep } from '../lib/types'
 import type { Grouping } from '../lib/groups'
 import { scaleSubset, setSubsetTotal } from '../lib/interact'
 import { fmtPayout, fmtPct, fmtRtp, fmtWeight } from '../lib/format'
-import { niceCeil, useContainerWidth } from './chartUtils'
+import { linearBarWidth, logBarWidth, niceCeil, useContainerWidth } from './chartUtils'
 
 /**
  * The distribution chart is now a control surface as well as a picture:
@@ -71,7 +71,7 @@ interface DragState {
 }
 
 const HEIGHT = 340
-const MARGIN = { top: 18, right: 150, bottom: 46, left: 76 }
+const MARGIN = { top: 18, right: 128, bottom: 46, left: 64 }
 const HANDLE_GAP = 30
 const SEGMENT_GAP = 2
 
@@ -272,10 +272,11 @@ export function DistributionChart({
   }, [bars, logX, step, plotW])
 
   const barW = useMemo(() => {
-    if (!logX) return Math.max(2, Math.min(48, step * 0.72))
+    if (!logX) return linearBarWidth(step)
     let gap = plotW
     for (let i = 1; i < centres.length; i++) gap = Math.min(gap, centres[i] - centres[i - 1])
-    return Math.max(2, Math.min(36, gap * 0.7 || 8))
+    // A single bar leaves no gap to measure; logBarWidth falls back for 0.
+    return logBarWidth(gap === plotW ? 0 : gap)
   }, [logX, step, centres, plotW])
 
   // ---- dragging ----
