@@ -50,9 +50,10 @@ describe('SimChart', () => {
     expect(screen.getByText(/block avg · 400 spins each/)).toBeDefined()
   })
 
-  it('shows the hint until the chart is hovered', () => {
+  it('draws no bubble until the chart is hovered', () => {
     renderSim()
-    expect(screen.getByText('hover the chart for block detail')).toBeDefined()
+    expect(document.querySelector('.chart-readout-band')).not.toBeNull()
+    expect(document.querySelector('.chart-readout')).toBeNull()
   })
 
   it('reports the hovered block, including a short final block', () => {

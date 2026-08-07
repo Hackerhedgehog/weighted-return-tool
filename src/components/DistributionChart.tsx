@@ -617,7 +617,8 @@ export function DistributionChart({
             <ChartReadout
               titles={readoutTitles}
               stats={readoutStats}
-              hint="hover a bar for its numbers"
+              anchor={hover !== null && hover < centres.length ? centres[hover] : null}
+              width={width}
             />
 
             <ChartResizeGrip

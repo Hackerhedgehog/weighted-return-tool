@@ -213,7 +213,8 @@ export function SimChart({
       <ChartReadout
         titles={h === null ? [] : [{ text: `${fmtWeight(spinsAt[h])} spins` }]}
         stats={readoutStats}
-        hint="hover the chart for block detail"
+        anchor={h === null ? null : x(spinsAt[h])}
+        width={width}
       />
 
       <ChartResizeGrip

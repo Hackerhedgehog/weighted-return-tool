@@ -190,10 +190,22 @@ const readoutStats = (): Record<string, string> =>
   )
 
 describe('DistributionChart readout', () => {
-  it('shows the hint until a bar is hovered', () => {
+  it('draws no bubble until a bar is hovered', () => {
     renderChart({ metric: 'weights' })
-    expect(screen.getByText('hover a bar for its numbers')).toBeDefined()
-    expect(document.querySelectorAll('.readout-title')).toHaveLength(0)
+    expect(document.querySelector('.chart-readout-band')).not.toBeNull()
+    expect(document.querySelector('.chart-readout')).toBeNull()
+  })
+
+  it('anchors the bubble under the hovered bar', () => {
+    renderChart({ metric: 'weights' })
+    const hits = [...document.querySelectorAll('.bar-hit')]
+    fireEvent.mouseOver(hits[1])
+    const first = parseFloat((document.querySelector('.chart-readout') as HTMLElement).style.left)
+    fireEvent.mouseOut(hits[1])
+    fireEvent.mouseOver(hits[3])
+    const later = parseFloat((document.querySelector('.chart-readout') as HTMLElement).style.left)
+    // bars ascend left to right, so a later bar anchors further right
+    expect(later).toBeGreaterThan(first)
   })
 
   it('names the hovered bucket in its group color', () => {
@@ -235,13 +247,13 @@ describe('DistributionChart readout', () => {
     expect(screen.queryByText('↑↓')).toBeNull()
   })
 
-  it('returns to the hint when the pointer leaves the bar', () => {
+  it('dismisses the bubble when the pointer leaves the bar', () => {
     renderChart({ metric: 'weights' })
     const hit = document.querySelectorAll('.bar-hit')[3]
     fireEvent.mouseOver(hit)
     expect(document.querySelectorAll('.readout-title')).toHaveLength(1)
     fireEvent.mouseOut(hit)
-    expect(screen.getByText('hover a bar for its numbers')).toBeDefined()
+    expect(document.querySelector('.chart-readout')).toBeNull()
   })
 })
 

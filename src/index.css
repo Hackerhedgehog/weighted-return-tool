@@ -802,26 +802,30 @@ input.gcell.editing {
   font-size: 10px;
 }
 
-/* The readout sits under the plot, never over it: it spans the panel so no
-   edge can clip it, and its height is fixed so hovering never reflows. */
-.chart-readout {
-  display: flex;
-  align-items: flex-start;
-  justify-content: space-between;
-  gap: 16px;
-  height: 78px;
+/* The band is reserved whether or not anything is hovered, so the bubble
+   appearing never reflows the page. The bubble itself floats under the plot —
+   below is the only place it can sit without hiding the data it describes. */
+.chart-readout-band {
+  position: relative;
+  height: 86px;
   margin: 2px 6px 0;
-  padding: 8px 10px;
-  border: 1px solid var(--line);
-  border-radius: 5px;
-  background: var(--surface-alt);
-  overflow: hidden;
-  pointer-events: none;
 }
 
-.readout-hint {
-  font-size: 12px;
-  color: var(--text-faint);
+.chart-readout {
+  position: absolute;
+  top: 0;
+  transform: translateX(-50%);
+  display: flex;
+  align-items: flex-start;
+  gap: 16px;
+  padding: 7px 11px;
+  border: 1px solid var(--line-strong);
+  border-radius: 5px;
+  background: var(--surface);
+  box-shadow: 0 6px 18px rgba(31, 35, 40, 0.14);
+  white-space: nowrap;
+  pointer-events: none;
+  z-index: 5;
 }
 
 .readout-titles {
@@ -834,7 +838,7 @@ input.gcell.editing {
   font-size: 12px;
   font-weight: 600;
   line-height: 16px;
-  white-space: nowrap;
+  max-width: 240px;
   overflow: hidden;
   text-overflow: ellipsis;
 }

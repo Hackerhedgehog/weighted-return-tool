@@ -5,12 +5,28 @@ import { ChartReadout } from './ChartReadout'
 
 afterEach(cleanup)
 
+const bubble = () => document.querySelector('.chart-readout') as HTMLElement | null
+const leftOf = () => parseFloat(bubble()!.style.left)
+
+/** jsdom has no layout, so offsetWidth is 0 unless we define it. */
+function withMeasuredBubble(px: number) {
+  Object.defineProperty(HTMLElement.prototype, 'offsetWidth', {
+    configurable: true,
+    get() {
+      return this.classList.contains('chart-readout') ? px : 0
+    },
+  })
+}
+
+afterEach(() => {
+  Reflect.deleteProperty(HTMLElement.prototype, 'offsetWidth')
+})
+
 describe('ChartReadout', () => {
-  it('shows the hint and no stats when nothing is hovered', () => {
-    render(
-      <ChartReadout titles={[]} stats={[{ label: 'weight', value: '5' }]} hint="hover a bar" />,
-    )
-    expect(screen.getByText('hover a bar')).toBeDefined()
+  it('draws nothing when there is no hover, but keeps the band', () => {
+    render(<ChartReadout titles={[]} stats={[{ label: 'weight', value: '5' }]} anchor={null} width={900} />)
+    expect(document.querySelector('.chart-readout-band')).not.toBeNull()
+    expect(bubble()).toBeNull()
     expect(screen.queryByText('weight')).toBeNull()
   })
 
@@ -22,7 +38,8 @@ describe('ChartReadout', () => {
           { text: 'bonus4', color: 'var(--series-1)' },
         ]}
         stats={[]}
-        hint="hover"
+        anchor={400}
+        width={900}
       />,
     )
     const lines = [...document.querySelectorAll('.readout-title')]
@@ -39,18 +56,18 @@ describe('ChartReadout', () => {
           { label: 'weight', value: '420' },
           { label: 'chance', value: '0.42%' },
         ]}
-        hint="hover"
+        anchor={400}
+        width={900}
       />,
     )
     expect(screen.getByText('weight')).toBeDefined()
     expect(screen.getByText('420')).toBeDefined()
-    expect(screen.getByText('chance')).toBeDefined()
     expect(screen.getByText('0.42%')).toBeDefined()
   })
 
   it('trims a long title list to three lines plus a count', () => {
     const titles = ['a', 'b', 'c', 'd', 'e'].map((text) => ({ text }))
-    render(<ChartReadout titles={titles} stats={[]} hint="hover" />)
+    render(<ChartReadout titles={titles} stats={[]} anchor={400} width={900} />)
     expect([...document.querySelectorAll('.readout-title')].map((el) => el.textContent)).toEqual([
       'a',
       'b',
@@ -61,15 +78,35 @@ describe('ChartReadout', () => {
 
   it('keeps four titles without trimming', () => {
     const titles = ['a', 'b', 'c', 'd'].map((text) => ({ text }))
-    render(<ChartReadout titles={titles} stats={[]} hint="hover" />)
+    render(<ChartReadout titles={titles} stats={[]} anchor={400} width={900} />)
     expect(document.querySelectorAll('.readout-title').length).toBe(4)
     expect(screen.queryByText(/ more$/)).toBeNull()
   })
 
-  it('stays mounted whether or not anything is hovered', () => {
-    const { rerender } = render(<ChartReadout titles={[]} stats={[]} hint="hover" />)
-    expect(document.querySelector('.chart-readout')).not.toBeNull()
-    rerender(<ChartReadout titles={[{ text: 'a' }]} stats={[]} hint="hover" />)
-    expect(document.querySelectorAll('.chart-readout').length).toBe(1)
+  it('centres the bubble on the anchor when there is room', () => {
+    withMeasuredBubble(200)
+    render(<ChartReadout titles={[{ text: 'a' }]} stats={[]} anchor={450} width={900} />)
+    expect(leftOf()).toBe(450)
+  })
+
+  it('never lets the bubble overhang the left edge', () => {
+    withMeasuredBubble(200)
+    render(<ChartReadout titles={[{ text: 'a' }]} stats={[]} anchor={10} width={900} />)
+    // left is the centre; the bubble's own left edge is left - 100
+    expect(leftOf() - 100).toBeGreaterThanOrEqual(0)
+    expect(leftOf()).toBe(106)
+  })
+
+  it('never lets the bubble overhang the right edge', () => {
+    withMeasuredBubble(200)
+    render(<ChartReadout titles={[{ text: 'a' }]} stats={[]} anchor={890} width={900} />)
+    expect(leftOf() + 100).toBeLessThanOrEqual(900)
+    expect(leftOf()).toBe(794)
+  })
+
+  it('pins a bubble wider than its container rather than inverting the clamp', () => {
+    withMeasuredBubble(400)
+    render(<ChartReadout titles={[{ text: 'a' }]} stats={[]} anchor={100} width={200} />)
+    expect(leftOf()).toBe(206)
   })
 })
