@@ -26,7 +26,7 @@ import { emptyHistory, pushHistory, redo, undo, type HistoryState } from './lib/
 import { DEFAULT_SPINS } from './lib/sim'
 import { clearWorkspace, loadWorkspace, saveWorkspace } from './lib/storage'
 import { BucketTable } from './components/BucketTable'
-import { clampHeight, DIST_HEIGHT } from './components/chartUtils'
+import { clampHeight, DIST_HEIGHT, SIM_HEIGHT } from './components/chartUtils'
 import { DistributionChart } from './components/DistributionChart'
 import { SimulationPanel } from './components/SimulationPanel'
 import { TargetsPanel } from './components/TargetsPanel'
@@ -100,6 +100,9 @@ export default function App() {
   const [chartHeight, setChartHeight] = useState(() =>
     clampHeight(saved?.chartHeight ?? DIST_HEIGHT.fallback, DIST_HEIGHT),
   )
+  const [simChartHeight, setSimChartHeight] = useState(() =>
+    clampHeight(saved?.simChartHeight ?? SIM_HEIGHT.fallback, SIM_HEIGHT),
+  )
   const [exportFilename, setExportFilename] = useState(
     saved?.exportFilename ?? DEFAULT_EXPORT_FILENAME,
   )
@@ -160,10 +163,11 @@ export default function App() {
         simSpins,
         weightStep: doc.weightStep,
         chartHeight,
+        simChartHeight,
       })
     }, SAVE_DEBOUNCE_MS)
     return () => window.clearTimeout(t)
-  }, [doc, columnWidths, chart, exportFilename, simSpins, chartHeight])
+  }, [doc, columnWidths, chart, exportFilename, simSpins, chartHeight, simChartHeight])
 
   // ---- global keyboard ----
 
@@ -459,6 +463,8 @@ export default function App() {
               expectedRtp={achieved.rtp}
               spins={simSpins}
               onSpins={setSimSpins}
+              chartHeight={simChartHeight}
+              onChartHeight={setSimChartHeight}
             />
           </section>
         </main>

@@ -47,6 +47,8 @@ function renderPanel(worker?: FakeWorker, spins = 1000) {
       expectedRtp={0.6}
       spins={spins}
       onSpins={onSpins}
+      chartHeight={260}
+      onChartHeight={vi.fn()}
       createWorker={worker === undefined ? undefined : () => worker}
     />,
   )

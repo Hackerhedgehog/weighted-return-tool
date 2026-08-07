@@ -1,6 +1,7 @@
 import { useMemo, useState } from 'react'
 import { ChartReadout, type ReadoutStat } from './ChartReadout'
-import { fmtCompact, niceCeil, useContainerWidth } from './chartUtils'
+import { ChartResizeGrip } from './ChartResizeGrip'
+import { fmtCompact, niceCeil, SIM_HEIGHT, useContainerWidth } from './chartUtils'
 import { fmtRtp, fmtWeight } from '../lib/format'
 
 /**
@@ -22,17 +23,25 @@ interface SimChartProps {
   blockSize: number
   requestedSpins: number
   expectedRtp: number
+  height: number
+  onHeight: (h: number) => void
 }
 
-const HEIGHT = 260
 const MARGIN = { top: 14, right: 74, bottom: 40, left: 64 }
 
-export function SimChart({ points, blockSize, requestedSpins, expectedRtp }: SimChartProps) {
+export function SimChart({
+  points,
+  blockSize,
+  requestedSpins,
+  expectedRtp,
+  height,
+  onHeight,
+}: SimChartProps) {
   const [containerRef, width] = useContainerWidth()
   const [hover, setHover] = useState<number | null>(null)
 
   const plotW = width - MARGIN.left - MARGIN.right
-  const plotH = HEIGHT - MARGIN.top - MARGIN.bottom
+  const plotH = height - MARGIN.top - MARGIN.bottom
 
   /** Spins covered by block i (the last block may run short). */
   const spinsOf = (i: number) => Math.min(blockSize, requestedSpins - i * blockSize)
@@ -138,7 +147,7 @@ export function SimChart({ points, blockSize, requestedSpins, expectedRtp }: Sim
         )}
       </div>
 
-      <svg width={width} height={HEIGHT} role="img" aria-label="Simulation results">
+      <svg width={width} height={height} role="img" aria-label="Simulation results">
         {yTicks.map((t, i) => (
           <g key={i}>
             <line className="grid-line" x1={MARGIN.left} x2={width - MARGIN.right} y1={t.y} y2={t.y} />
@@ -148,7 +157,7 @@ export function SimChart({ points, blockSize, requestedSpins, expectedRtp }: Sim
           </g>
         ))}
         {xTicks.map((t, i) => (
-          <text key={i} className="axis-label" x={t.x} y={HEIGHT - MARGIN.bottom + 18} textAnchor="middle">
+          <text key={i} className="axis-label" x={t.x} y={height - MARGIN.bottom + 18} textAnchor="middle">
             {t.label}
           </text>
         ))}
@@ -185,7 +194,7 @@ export function SimChart({ points, blockSize, requestedSpins, expectedRtp }: Sim
           />
         )}
 
-        <text className="axis-title" x={width / 2} y={HEIGHT - 8} textAnchor="middle">
+        <text className="axis-title" x={width / 2} y={height - 8} textAnchor="middle">
           spins
         </text>
 
@@ -205,6 +214,13 @@ export function SimChart({ points, blockSize, requestedSpins, expectedRtp }: Sim
         titles={h === null ? [] : [{ text: `${fmtWeight(spinsAt[h])} spins` }]}
         stats={readoutStats}
         hint="hover the chart for block detail"
+      />
+
+      <ChartResizeGrip
+        height={height}
+        range={SIM_HEIGHT}
+        label="Resize the simulation chart"
+        onHeight={onHeight}
       />
     </div>
   )

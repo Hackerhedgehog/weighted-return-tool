@@ -37,6 +37,9 @@ interface SimulationPanelProps {
   expectedRtp: number
   spins: number
   onSpins: (n: number) => void
+  /** Owned by App and persisted; the panel only passes it through. */
+  chartHeight: number
+  onChartHeight: (h: number) => void
   createWorker?: () => SimWorkerLike
 }
 
@@ -64,6 +67,8 @@ export function SimulationPanel({
   expectedRtp,
   spins,
   onSpins,
+  chartHeight,
+  onChartHeight,
   createWorker,
 }: SimulationPanelProps) {
   const [run, setRun] = useState<Run | null>(null)
@@ -284,6 +289,8 @@ export function SimulationPanel({
           blockSize={run.blockSize}
           requestedSpins={run.requested}
           expectedRtp={run.expectedRtp}
+          height={chartHeight}
+          onHeight={onChartHeight}
         />
       ) : (
         <div className="chart-empty">
