@@ -73,22 +73,71 @@ describe('ChartReadout', () => {
     expect(screen.getByText('0.42%')).toBeDefined()
   })
 
-  it('trims a long title list to three lines plus a count', () => {
-    const titles = ['a', 'b', 'c', 'd', 'e'].map((text) => ({ text }))
+  it('lists every label, however many there are, and never truncates', () => {
+    const titles = ['a', 'b', 'c', 'd', 'e', 'f', 'g'].map((text) => ({ text }))
     render(<ChartReadout titles={titles} stats={[]} anchor={400} width={900} />)
     expect([...document.querySelectorAll('.readout-title')].map((el) => el.textContent)).toEqual([
       'a',
       'b',
       'c',
+      'd',
+      'e',
+      'f',
+      'g',
     ])
-    expect(screen.getByText('+2 more')).toBeDefined()
+    expect(screen.queryByText(/ more$/)).toBeNull()
   })
 
-  it('keeps four titles without trimming', () => {
-    const titles = ['a', 'b', 'c', 'd'].map((text) => ({ text }))
+  it('leaves a list that fits unanimated', () => {
+    const titles = ['a', 'b'].map((text) => ({ text }))
     render(<ChartReadout titles={titles} stats={[]} anchor={400} width={900} />)
-    expect(document.querySelectorAll('.readout-title').length).toBe(4)
-    expect(screen.queryByText(/ more$/)).toBeNull()
+    expect(document.querySelector('.readout-list')!.className).not.toContain('scrolling')
+  })
+
+  it('auto-scrolls a list that overflows, pacing the cycle by the distance', () => {
+    // jsdom has no layout: fake a list taller than its 80px clip.
+    Object.defineProperty(HTMLElement.prototype, 'scrollHeight', {
+      configurable: true,
+      get() {
+        return this.classList.contains('readout-list') ? 200 : 0
+      },
+    })
+    Object.defineProperty(HTMLElement.prototype, 'clientHeight', {
+      configurable: true,
+      get() {
+        return this.classList.contains('readout-titles') ? 80 : 0
+      },
+    })
+
+    const titles = ['a', 'b', 'c', 'd', 'e', 'f', 'g'].map((text) => ({ text }))
+    render(<ChartReadout titles={titles} stats={[]} anchor={400} width={900} />)
+
+    const list = document.querySelector('.readout-list') as HTMLElement
+    expect(list.className).toContain('scrolling')
+    expect(list.style.getPropertyValue('--scroll-dist')).toBe('120px')
+    // 120px at 22px/s over a 76% duty cycle
+    expect(parseFloat(list.style.getPropertyValue('--scroll-cycle'))).toBeCloseTo(7.18, 1)
+
+    Reflect.deleteProperty(HTMLElement.prototype, 'scrollHeight')
+    Reflect.deleteProperty(HTMLElement.prototype, 'clientHeight')
+  })
+
+  it('puts the stats in a single column, so the bubble reads as two', () => {
+    render(
+      <ChartReadout
+        titles={[{ text: 'a' }]}
+        stats={[
+          { label: 'payout', value: '×100' },
+          { label: 'weight', value: '5' },
+        ]}
+        anchor={400}
+        width={900}
+      />,
+    )
+    const cols = document.querySelector('.chart-readout')!.children
+    expect(cols).toHaveLength(2)
+    expect(cols[0].className).toBe('readout-titles')
+    expect(cols[1].className).toBe('readout-stats')
   })
 
   it('centres the bubble on the anchor when there is room', () => {

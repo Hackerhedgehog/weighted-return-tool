@@ -9,6 +9,10 @@ import { useLayoutEffect, useRef, useState } from 'react'
  * neighbours. The band has a fixed height and is always in the layout, so a
  * hover never reflows the page.
  *
+ * Two columns: the bucket labels on the left, their numbers on the right. A
+ * bar aggregating more labels than fit is not truncated — the list scrolls
+ * itself, so everything in the bar is readable without interaction.
+ *
  * The horizontal clamp measures the bubble instead of guessing at it — a
  * five-line tooltip is far wider than a two-line one, and the guess is what
  * used to let bars near an edge push their tooltip out of the panel.
@@ -35,35 +39,46 @@ interface ChartReadoutProps {
   width: number
 }
 
-/** Past this the tail is folded into a "+N more" line, so the box stays small. */
-const MAX_TITLES = 4
 /** Breathing room between the bubble and the panel edge. */
 const PAD = 6
+/** Auto-scroll pace, px per second. Readable without being tedious. */
+const SCROLL_SPEED = 22
+/** Fraction of the cycle actually spent moving; the rest pauses at the ends. */
+const SCROLL_DUTY = 0.76
+const MIN_SCROLL_CYCLE = 4
 
 export function ChartReadout({ titles, stats, anchor, width }: ChartReadoutProps) {
   const ref = useRef<HTMLDivElement>(null)
+  const clipRef = useRef<HTMLDivElement>(null)
+  const listRef = useRef<HTMLDivElement>(null)
   const [bubbleW, setBubbleW] = useState(0)
+  const [scroll, setScroll] = useState(0)
 
-  const shown = titles.length > MAX_TITLES ? titles.slice(0, MAX_TITLES - 1) : titles
-  const overflow = titles.length > MAX_TITLES ? titles.length - (MAX_TITLES - 1) : 0
   const open = titles.length > 0 && anchor !== null
 
   /**
-   * The width drives the clamp, so it is measured rather than assumed, and
-   * re-measured whenever the content resizes the bubble — a five-label
-   * tooltip is much wider than a one-label one. Measuring in a layout effect
-   * keeps the correction ahead of paint, so the bubble never flashes in the
-   * wrong place.
+   * Width drives the clamp and overflow drives the scroll, so both are
+   * measured rather than assumed, and re-measured whenever the content
+   * resizes either box. A layout effect keeps the correction ahead of paint,
+   * so the bubble never flashes in the wrong place.
    */
   useLayoutEffect(() => {
     const el = ref.current
-    if (el === null) return
-    const measure = () => setBubbleW(el.offsetWidth)
+    const clip = clipRef.current
+    const list = listRef.current
+    if (el === null || clip === null || list === null) return
+
+    const measure = () => {
+      setBubbleW(el.offsetWidth)
+      setScroll(Math.max(0, list.scrollHeight - clip.clientHeight))
+    }
     measure()
+
     const obs = new ResizeObserver(measure)
     obs.observe(el)
+    obs.observe(list)
     return () => obs.disconnect()
-  }, [open])
+  }, [open, titles.length])
 
   const half = bubbleW / 2
   const room = width - half - PAD
@@ -71,17 +86,31 @@ export function ChartReadout({ titles, stats, anchor, width }: ChartReadoutProps
   // to the left edge rather than letting the clamp invert.
   const left = room < half + PAD ? half + PAD : Math.min(Math.max(anchor ?? 0, half + PAD), room)
 
+  const cycle = Math.max(MIN_SCROLL_CYCLE, scroll / SCROLL_SPEED / SCROLL_DUTY)
+
   return (
     <div className="chart-readout-band">
       {open && (
         <div className="chart-readout" ref={ref} style={{ left }}>
-          <div className="readout-titles">
-            {shown.map((t, i) => (
-              <div key={i} className="readout-title" style={{ color: t.color }} title={t.text}>
-                {t.text}
-              </div>
-            ))}
-            {overflow > 0 && <div className="readout-more">+{overflow} more</div>}
+          <div className="readout-titles" ref={clipRef}>
+            <div
+              className={scroll > 0 ? 'readout-list scrolling' : 'readout-list'}
+              ref={listRef}
+              style={
+                scroll > 0
+                  ? ({
+                      '--scroll-dist': `${scroll}px`,
+                      '--scroll-cycle': `${cycle}s`,
+                    } as React.CSSProperties)
+                  : undefined
+              }
+            >
+              {titles.map((t, i) => (
+                <div key={i} className="readout-title" style={{ color: t.color }} title={t.text}>
+                  {t.text}
+                </div>
+              ))}
+            </div>
           </div>
           <div className="readout-stats">
             {stats.map((s) => (

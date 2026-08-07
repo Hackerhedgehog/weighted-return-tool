@@ -118,6 +118,26 @@ export default function App() {
    * ref rather than an effect: this has to run when the panel mounts and
    * unmounts, which is exactly when the ref fires.
    */
+  /**
+   * Whether the chart has wrapped below the table. CSS cannot express "did
+   * this flex line break?", and the answer decides how the table aligns, so it
+   * is measured: two panels on the same line share an offsetTop.
+   */
+  const rowRef = useCallback((el: HTMLDivElement | null) => {
+    if (el === null) return
+    const check = () => {
+      const [table, chart] = [...el.children] as HTMLElement[]
+      if (table === undefined || chart === undefined) return
+      const stacked = table.offsetTop !== chart.offsetTop
+      if (el.classList.contains('stacked') !== stacked) el.classList.toggle('stacked', stacked)
+    }
+    check()
+    const obs = new ResizeObserver(check)
+    obs.observe(el)
+    for (const child of el.children) obs.observe(child)
+    return () => obs.disconnect()
+  }, [])
+
   const targetsRef = useCallback((el: HTMLElement | null) => {
     const root = document.documentElement
     if (el === null) {
@@ -435,6 +455,7 @@ export default function App() {
             onRedo={doRedo}
           />
 
+          <div className="content-row" ref={rowRef}>
           <section className="panel buckets">
             <div className="panel-head">
               <h2>Buckets</h2>
@@ -483,6 +504,7 @@ export default function App() {
               onDragBlocked={handleDragBlocked}
             />
           </section>
+          </div>
 
           <section className="panel full">
             <div className="panel-head">

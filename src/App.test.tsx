@@ -328,15 +328,18 @@ describe('numpad decimal', () => {
 })
 
 describe('page layout', () => {
-  it('lays the table and the chart out side by side', () => {
+  it('lays the table and the chart out side by side, in their own row', () => {
     loadRealData()
     const content = document.querySelector('.content')!
     expect([...content.children].map((el) => el.className)).toEqual([
       'targets',
-      'panel buckets',
-      'panel chart',
+      'content-row',
       'panel full',
     ])
+    // The row is the sticky chart's containing block, so it cannot follow the
+    // page past the bottom of the table.
+    const row = document.querySelector('.content-row')!
+    expect([...row.children].map((el) => el.className)).toEqual(['panel buckets', 'panel chart'])
   })
 })
 
@@ -392,9 +395,11 @@ describe('targets panel collapse', () => {
     expect(document.querySelectorAll('.targets-row')).toHaveLength(0)
 
     const summary = document.querySelector('.targets-summary') as HTMLElement
-    expect(within(summary).getByText('RTP')).toBeDefined()
-    expect(within(summary).getByText('hit')).toBeDefined()
-    expect(within(summary).getByText('win')).toBeDefined()
+    const names = [...summary.querySelectorAll('dt')].map((el) => el.textContent)
+    expect(names).toEqual(['RTP', 'Hit', 'Win', 'Tolerance', 'Volatility', 'Curve', 'Step'])
+    expect(within(summary).getByText('3.5%')).toBeDefined()
+    expect(within(summary).getByText('medium')).toBeDefined()
+    expect(within(summary).getByText('free')).toBeDefined()
 
     const actions = document.querySelector('.targets-head-actions') as HTMLElement
     expect(within(actions).getByRole('button', { name: 'Auto-Distribute' })).toBeDefined()

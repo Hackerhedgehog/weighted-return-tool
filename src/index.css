@@ -242,7 +242,41 @@ body {
   font-size: 9px;
 }
 
-.targets-summary,
+/* Wide gaps between pairs, a tight one inside each, so a row of seven
+   readings still parses at a glance. */
+.targets-summary {
+  display: flex;
+  align-items: center;
+  gap: 4px 20px;
+  flex-wrap: wrap;
+  margin: 0;
+}
+
+.summary-pair {
+  display: inline-flex;
+  align-items: baseline;
+  gap: 5px;
+}
+
+.summary-pair dt {
+  font-size: 11px;
+  color: var(--text-faint);
+  white-space: nowrap;
+}
+
+.summary-pair dt::after {
+  content: ':';
+}
+
+.summary-pair dd {
+  margin: 0;
+  font-size: 12px;
+  font-weight: 600;
+  color: var(--text);
+  font-variant-numeric: tabular-nums;
+  white-space: nowrap;
+}
+
 .targets-head-actions {
   display: flex;
   align-items: center;
@@ -482,30 +516,46 @@ body {
 
 /* The table and the chart share the width; targets and simulation span both.
    The chart sticks so it stays beside whichever rows are on screen. */
-/* A wrapping flex row, not a grid: `min-width: min-content` on the table panel
+.content {
+  display: flex;
+  flex-direction: column;
+  gap: 16px;
+}
+
+/* The table and the chart share one line — and one containing block, which is
+   what stops the sticky chart following past the bottom of the table.
+
+   A wrapping flex row, not a grid: `min-width: min-content` on the table panel
    stops flex shrinking it below its real column widths, so the chart wraps to
    the next line the moment the two no longer fit. Columns are user-resizable,
-   so no fixed breakpoint could get this right. */
-.content {
+   so no fixed breakpoint could get this right.
+
+   `flex-basis: 0` on both is what keeps a column resize off the chart: the
+   panels split the space by grow factor rather than by content, so widening a
+   column eats the table's own left-hand slack and only reaches the chart once
+   the table genuinely needs more than its half. */
+.content-row {
   display: flex;
   flex-wrap: wrap;
   gap: 16px;
   align-items: flex-start;
 }
 
-.content > .targets,
-.content > .panel.full {
-  flex: 1 0 100%;
-}
-
-.content > .panel.buckets {
-  flex: 1 1 auto;
+.content-row > .panel.buckets {
+  flex: 1 1 0;
   min-width: min-content;
 }
 
-.content > .panel.chart {
-  flex: 1 1 420px;
-  min-width: 0;
+.content-row > .panel.chart {
+  flex: 1 1 0;
+  min-width: 420px;
+}
+
+/* Wrapped: the table has the whole width, so centre it rather than pinning it
+   to an edge the chart is no longer beside. */
+.content-row.stacked .grid-table {
+  margin-left: auto;
+  margin-right: auto;
 }
 
 .panel {
@@ -894,10 +944,41 @@ input.gcell.editing {
   z-index: 5;
 }
 
+/* Five labels fit; a longer list scrolls itself rather than being truncated. */
 .readout-titles {
+  min-width: 0;
+  max-height: 80px;
+  overflow: hidden;
+}
+
+.readout-list {
   display: flex;
   flex-direction: column;
-  min-width: 0;
+}
+
+.readout-list.scrolling {
+  animation: readout-scroll var(--scroll-cycle, 6s) linear infinite;
+}
+
+/* Pause at the top, crawl to the bottom, pause there, then snap back. */
+@keyframes readout-scroll {
+  0%,
+  8% {
+    transform: translateY(0);
+  }
+  84%,
+  100% {
+    transform: translateY(calc(-1 * var(--scroll-dist, 0px)));
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .readout-list.scrolling {
+    animation: none;
+  }
+  .readout-titles {
+    overflow-y: auto;
+  }
 }
 
 .readout-title {
@@ -909,16 +990,11 @@ input.gcell.editing {
   text-overflow: ellipsis;
 }
 
-.readout-more {
-  font-size: 11px;
-  line-height: 16px;
-  color: var(--text-faint);
-}
-
+/* One stat per line, so the bubble reads as two columns — labels, numbers. */
 .readout-stats {
-  display: grid;
-  grid-template-columns: auto auto;
-  gap: 2px 18px;
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
   flex: none;
 }
 
@@ -1206,8 +1282,8 @@ input.gcell.editing {
    width. This only stops the chart sticking once the page is narrow enough
    that it lands under the table rather than beside it. */
 @media (max-width: 1200px) {
-  .content > .panel.buckets,
-  .content > .panel.chart {
+  .content-row > .panel.buckets,
+  .content-row > .panel.chart {
     flex: 1 0 100%;
   }
 

@@ -228,22 +228,52 @@ export function TargetsPanel(props: TargetsPanelProps) {
 
         {collapsed && (
           <>
-            <div className="targets-summary">
-              <span className={`badge ${rtpOk ? 'ok' : 'warn'}`}>{fmtRtp(achieved.rtp)}</span>
-              <span className="field-hint">RTP</span>
-              <span
-                className={`badge ${withinBand(achieved.hitChance, targets.hitChance, targets.tolerance) ? 'ok' : 'warn'}`}
-              >
-                {fmtFixed3(achieved.hitChance)}
-              </span>
-              <span className="field-hint">hit</span>
-              <span
-                className={`badge ${withinBand(achieved.winChance, targets.winChance, targets.tolerance) ? 'ok' : 'warn'}`}
-              >
-                {fmtFixed3(achieved.winChance)}
-              </span>
-              <span className="field-hint">win</span>
-            </div>
+            {/* Name and value sit tight together and the pairs sit far apart,
+                so the eye parses "RTP: 0.9500" as one thing at a glance. */}
+            <dl className="targets-summary">
+              <div className="summary-pair">
+                <dt>RTP</dt>
+                <dd>
+                  <span className={`badge ${rtpOk ? 'ok' : 'warn'}`}>{fmtRtp(achieved.rtp)}</span>
+                </dd>
+              </div>
+              <div className="summary-pair">
+                <dt>Hit</dt>
+                <dd>
+                  <span
+                    className={`badge ${withinBand(achieved.hitChance, targets.hitChance, targets.tolerance) ? 'ok' : 'warn'}`}
+                  >
+                    {fmtFixed3(achieved.hitChance)}
+                  </span>
+                </dd>
+              </div>
+              <div className="summary-pair">
+                <dt>Win</dt>
+                <dd>
+                  <span
+                    className={`badge ${withinBand(achieved.winChance, targets.winChance, targets.tolerance) ? 'ok' : 'warn'}`}
+                  >
+                    {fmtFixed3(achieved.winChance)}
+                  </span>
+                </dd>
+              </div>
+              <div className="summary-pair">
+                <dt>Tolerance</dt>
+                <dd>{targets.tolerance}%</dd>
+              </div>
+              <div className="summary-pair">
+                <dt>Volatility</dt>
+                <dd>{volatility}</dd>
+              </div>
+              <div className="summary-pair">
+                <dt>Curve</dt>
+                <dd>{curve}</dd>
+              </div>
+              <div className="summary-pair">
+                <dt>Step</dt>
+                <dd>{weightStep === 1 ? 'free' : `×${weightStep}`}</dd>
+              </div>
+            </dl>
             <div className="targets-head-actions">{actions}</div>
           </>
         )}
