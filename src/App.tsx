@@ -496,41 +496,39 @@ export default function App() {
           <span className="brand-sub">slot engine bucket weights</span>
         </div>
         <div className="topbar-actions">
-          <button type="button" className="btn" onClick={() => loadData(SAMPLE_TSV)}>
-            Load sample
-          </button>
-          <button type="button" className="btn" onClick={() => setPasteOpen(true)}>
-            Paste TSV data
-          </button>
+          <div className="topbar-block">
+            <span className="topbar-block-label">Import</span>
+            <button type="button" className="btn" onClick={() => loadData(SAMPLE_TSV)}>
+              Load sample
+            </button>
+            <button type="button" className="btn" onClick={() => setPasteOpen(true)}>
+              Paste TSV data
+            </button>
+          </div>
           {hasRows && (
             <>
-              <button
-                type="button"
-                className={`btn ${groupsOpen ? 'primary' : ''}`}
-                aria-expanded={groupsOpen}
-                onClick={() => setGroupsOpen((v) => !v)}
-              >
-                Group settings
-              </button>
-              <span className="topbar-sep" aria-hidden="true" />
-              <input
-                className="filename-input"
-                value={exportFilename}
-                aria-label="Export filename"
-                spellCheck={false}
-                onChange={(e) => setExportFilename(e.target.value)}
-              />
-              <button type="button" className="btn" onClick={handleCopy}>
-                {copyState === 'ok' ? 'Copied ✓' : copyState === 'fail' ? 'Copy failed' : 'Copy TSV'}
-              </button>
-              <button
-                type="button"
-                className="btn"
-                onClick={() => downloadTsv(exportText(), exportFilename)}
-              >
-                Download .tsv
-              </button>
-              <span className="topbar-sep" aria-hidden="true" />
+              <div className="topbar-block">
+                <span className="topbar-block-label">Export</span>
+                <input
+                  className="filename-input"
+                  value={exportFilename}
+                  aria-label="Export filename"
+                  spellCheck={false}
+                  onChange={(e) => setExportFilename(e.target.value)}
+                />
+                <button type="button" className="btn" onClick={handleCopy}>
+                  {copyState === 'ok' ? 'Copied ✓' : copyState === 'fail' ? 'Copy failed' : 'Copy TSV'}
+                </button>
+                <button
+                  type="button"
+                  className="btn"
+                  onClick={() => downloadTsv(exportText(), exportFilename)}
+                >
+                  Download .tsv
+                </button>
+              </div>
+              {/* Destructive, so it stands apart from the two blocks rather
+                  than sitting among the actions used constantly. */}
               <button type="button" className="btn danger" onClick={handleClear}>
                 Clear workspace
               </button>
@@ -544,6 +542,7 @@ export default function App() {
           <TargetsPanel
             panelRef={targetsRef}
             collapsed={targetsCollapsed}
+            groupsOpen={groupsOpen}
             onCollapsed={setTargetsCollapsed}
             targets={doc.targets}
             volatility={doc.volatility}
@@ -562,6 +561,7 @@ export default function App() {
             onAutoDistribute={autoDistribute}
             onUndo={doUndo}
             onRedo={doRedo}
+            onGroupSettings={() => setGroupsOpen((v) => !v)}
           />
 
           {groupsOpen && (

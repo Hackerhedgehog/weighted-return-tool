@@ -89,12 +89,24 @@ body {
   gap: 8px;
 }
 
-/* Thin rules grouping load · export · destructive actions. */
-.topbar-sep {
-  width: 1px;
-  align-self: stretch;
-  min-height: 20px;
-  background: var(--line);
+/* Import and export read as two things, which a hairline rule never conveyed.
+   Same card treatment as the targets panel. */
+.topbar-block {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 7px 10px 8px;
+  border: 1px solid var(--line);
+  border-radius: 6px;
+  background: var(--surface);
+}
+
+.topbar-block-label {
+  font-size: 11px;
+  font-weight: 600;
+  letter-spacing: 0.04em;
+  text-transform: uppercase;
+  color: var(--text-dim);
 }
 
 /* ---------- buttons ---------- */

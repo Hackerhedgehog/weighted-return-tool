@@ -688,3 +688,41 @@ describe('group bars', () => {
     expect(document.querySelectorAll('.bar')).toHaveLength(1)
   })
 })
+
+describe('chrome layout', () => {
+  it('opens group settings from the targets panel', () => {
+    render(<App />)
+    fireEvent.click(screen.getByRole('button', { name: 'Load sample' }))
+    const targets = document.querySelector('.targets')!
+    const btn = screen.getByRole('button', { name: 'Group settings' })
+    expect(targets.contains(btn)).toBe(true)
+    fireEvent.click(btn)
+    expect(screen.getByRole('heading', { name: 'Groups' })).toBeDefined()
+  })
+
+  it('keeps group settings reachable when the targets panel is collapsed', () => {
+    render(<App />)
+    fireEvent.click(screen.getByRole('button', { name: 'Load sample' }))
+    fireEvent.click(screen.getByRole('button', { name: /Targets/ }))
+    expect(screen.getByRole('button', { name: 'Group settings' })).toBeDefined()
+  })
+
+  it('separates import from export in the top bar', () => {
+    render(<App />)
+    fireEvent.click(screen.getByRole('button', { name: 'Load sample' }))
+
+    const blocks = [...document.querySelectorAll('.topbar-block')]
+    expect(blocks.map((b) => b.querySelector('.topbar-block-label')!.textContent)).toEqual([
+      'Import',
+      'Export',
+    ])
+    expect(blocks[0].contains(screen.getByRole('button', { name: 'Paste TSV data' }))).toBe(true)
+    expect(blocks[1].contains(screen.getByRole('button', { name: 'Copy TSV' }))).toBe(true)
+    expect(blocks[1].contains(screen.getByLabelText('Export filename'))).toBe(true)
+
+    // Destructive, and deliberately outside both blocks.
+    const clear = screen.getByRole('button', { name: 'Clear workspace' })
+    expect(blocks.some((b) => b.contains(clear))).toBe(false)
+    expect(document.querySelector('.topbar-sep')).toBeNull()
+  })
+})

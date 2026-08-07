@@ -25,6 +25,7 @@ interface TargetsPanelProps {
   canUndo: boolean
   canRedo: boolean
   collapsed: boolean
+  groupsOpen: boolean
   /** App measures the panel to keep the other sticky offsets clear of it. */
   panelRef: (el: HTMLElement | null) => void
   onCollapsed: (c: boolean) => void
@@ -35,6 +36,7 @@ interface TargetsPanelProps {
   onAutoDistribute: () => void
   onUndo: () => void
   onRedo: () => void
+  onGroupSettings: () => void
 }
 
 /** Small numeric field that also accepts arithmetic, like the grid cells do. */
@@ -171,6 +173,7 @@ export function TargetsPanel(props: TargetsPanelProps) {
     canUndo,
     canRedo,
     collapsed,
+    groupsOpen,
     panelRef,
     onCollapsed,
     onTargets,
@@ -180,6 +183,7 @@ export function TargetsPanel(props: TargetsPanelProps) {
     onAutoDistribute,
     onUndo,
     onRedo,
+    onGroupSettings,
   } = props
 
   // Only the chance constraints can be invalid, and only while they are being
@@ -197,9 +201,10 @@ export function TargetsPanel(props: TargetsPanelProps) {
   const rtpOk = Math.abs(rtpDelta) < 1e-6
 
   /**
-   * Auto-Distribute and undo/redo appear in exactly one place at a time — the
-   * settings row when expanded, the head bar when collapsed — so acting on the
-   * table never needs an expand, and there is never a duplicate control.
+   * Auto-Distribute, Group settings and undo/redo appear in exactly one place
+   * at a time — the settings row when expanded, the head bar when collapsed —
+   * so acting on the table never needs an expand, and there is never a
+   * duplicate control.
    */
   const actions = (
     <>
@@ -211,6 +216,15 @@ export function TargetsPanel(props: TargetsPanelProps) {
         title={invalid ? 'Fix the targets first' : 'Redistribute unlocked weights to hit these targets'}
       >
         Auto-Distribute
+      </button>
+      <button
+        type="button"
+        className={`btn ${groupsOpen ? 'primary' : ''}`}
+        aria-expanded={groupsOpen}
+        onClick={onGroupSettings}
+        title="Add, rename, recolor, lock or delete bucket groups"
+      >
+        Group settings
       </button>
       <div className="btn-row">
         <button type="button" className="btn" onClick={onUndo} disabled={!canUndo} title="Ctrl+Z">
