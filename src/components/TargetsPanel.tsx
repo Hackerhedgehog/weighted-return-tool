@@ -119,12 +119,14 @@ function ChanceTarget({
         validate={(n) => n >= 0 && n <= 1}
         onCommit={onChange}
       />
+      {/* The band lives in the badge's tooltip: the row has six fields to fit
+          now, and it is reference detail rather than something to watch. */}
       <div className="field-meta">
-        <span className={`badge ${inBand ? 'ok' : 'warn'}`} title={inBand ? 'Within tolerance' : 'Outside tolerance'}>
+        <span
+          className={`badge ${inBand ? 'ok' : 'warn'}`}
+          title={`${inBand ? 'Within' : 'Outside'} tolerance · ${fmtPct(achieved, 2)} · band ${fmtFixed3(lo)}–${fmtFixed3(hi)}`}
+        >
           {fmtFixed3(achieved)}
-        </span>
-        <span className="field-hint">
-          {fmtPct(achieved, 2)} · band {fmtFixed3(lo)}–{fmtFixed3(hi)}
         </span>
         <button type="button" className="link-btn" onClick={onUseCurrent} title="Copy the achieved value into the target">
           = current
@@ -178,15 +180,17 @@ export function TargetsPanel(props: TargetsPanelProps) {
             onCommit={(n) => onTargets({ ...targets, rtp: n })}
           />
           <div className="field-meta">
-            <span className={`badge ${Math.abs(rtpDelta) < 1e-6 ? 'ok' : 'warn'}`}>
+            <span
+              className={`badge ${Math.abs(rtpDelta) < 1e-6 ? 'ok' : 'warn'}`}
+              title={
+                Number.isFinite(rtpDelta) && Math.abs(rtpDelta) >= 1e-6
+                  ? `off by ${rtpDelta > 0 ? '+' : ''}${rtpDelta.toFixed(6)}`
+                  : 'on target'
+              }
+            >
               {fmtRtp(achieved.rtp)}
             </span>
-            <span className="field-hint">
-              {fmtPct(achieved.rtp, 2)}
-              {Number.isFinite(rtpDelta) && Math.abs(rtpDelta) >= 1e-6 && (
-                <> · off by {rtpDelta > 0 ? '+' : ''}{rtpDelta.toFixed(6)}</>
-              )}
-            </span>
+            <span className="field-hint">{fmtPct(achieved.rtp, 2)}</span>
           </div>
           <RtpGauge rtp={achieved.rtp} target={targets.rtp} />
         </div>
@@ -221,21 +225,18 @@ export function TargetsPanel(props: TargetsPanelProps) {
             display={`${targets.tolerance}%`}
             raw={String(targets.tolerance)}
             ariaLabel="Chance tolerance percent"
+            title="Relative band on hit and win chance — spent only when RTP is otherwise out of reach"
             validate={(n) => n >= 0 && n <= 50}
             onCommit={(n) => onTargets({ ...targets, tolerance: n })}
           />
           <div className="field-meta">
-            <span className="field-hint">
-              relative · spent only when RTP is otherwise out of reach
-            </span>
+            <span className="field-hint">relative</span>
           </div>
         </div>
-      </div>
 
-      <div className="targets-row">
-        <div className="target-field wide">
+        <div className="target-field">
           <label className="field-label">Volatility</label>
-          <div className="seg">
+          <div className="seg small">
             {VOLATILITY_STEPS.map((v) => (
               <button
                 key={v}
@@ -257,17 +258,17 @@ export function TargetsPanel(props: TargetsPanelProps) {
             display={String(curve)}
             raw={String(curve)}
             ariaLabel="Curve curvature"
+            title="0 = straight line on a log-log chart · higher bends the tail down"
             validate={(n) => n >= 0 && n <= 2}
             onCommit={onCurve}
           />
-          <div className="field-meta">
-            <span className="field-hint">0 = straight line on a log-log chart · higher bends the tail down</span>
-          </div>
         </div>
+      </div>
 
+      <div className="targets-row">
         <div className="target-field">
           <label className="field-label">Weight step</label>
-          <div className="seg">
+          <div className="seg small">
             {WEIGHT_STEPS.map((s) => (
               <button
                 key={s}
@@ -276,7 +277,7 @@ export function TargetsPanel(props: TargetsPanelProps) {
                 onClick={() => onWeightStep(s)}
                 title={s === 1 ? 'Weights land on any integer' : `Distributed weights land on multiples of ${s}`}
               >
-                {s === 1 ? 'free' : s}
+                {s === 1 ? 'free' : `×${s}`}
               </button>
             ))}
           </div>

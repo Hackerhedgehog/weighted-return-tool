@@ -205,7 +205,7 @@ describe('App', () => {
 describe('weight step', () => {
   it('snaps Auto-Distribute to the chosen step', () => {
     loadRealData()
-    fireEvent.click(screen.getByRole('button', { name: '100' }))
+    fireEvent.click(screen.getByRole('button', { name: '×100' }))
     fireEvent.click(screen.getByRole('button', { name: 'Auto-Distribute' }))
 
     const weights = [...document.querySelectorAll('tbody .col-weight .gcell')].map((c) =>
@@ -217,8 +217,8 @@ describe('weight step', () => {
 
   it('is undoable', () => {
     loadRealData()
-    fireEvent.click(screen.getByRole('button', { name: '100' }))
-    expect(screen.getByRole('button', { name: '100' }).className).toContain('active')
+    fireEvent.click(screen.getByRole('button', { name: '×100' }))
+    expect(screen.getByRole('button', { name: '×100' }).className).toContain('active')
     fireEvent.click(screen.getByRole('button', { name: /Undo/ }))
     expect(screen.getByRole('button', { name: 'free' }).className).toContain('active')
   })
@@ -236,12 +236,12 @@ describe('weight step', () => {
       weightStep: 100,
     })
     render(<App />)
-    expect(screen.getByRole('button', { name: '100' }).className).toContain('active')
+    expect(screen.getByRole('button', { name: '×100' }).className).toContain('active')
   })
 
   it('never snaps a typed weight, even at step 100', () => {
     loadRealData()
-    fireEvent.click(screen.getByRole('button', { name: '100' }))
+    fireEvent.click(screen.getByRole('button', { name: '×100' }))
 
     const cell = document.querySelector('.grid-row .col-weight .gcell') as HTMLElement
     fireEvent.mouseDown(cell)
@@ -255,13 +255,13 @@ describe('weight step', () => {
 
   it('restores the step on redo after undoing it', () => {
     loadRealData()
-    fireEvent.click(screen.getByRole('button', { name: '100' }))
+    fireEvent.click(screen.getByRole('button', { name: '×100' }))
 
     fireEvent.click(screen.getByRole('button', { name: /Undo/ }))
     expect(screen.getByRole('button', { name: 'free' }).className).toContain('active')
 
     fireEvent.click(screen.getByRole('button', { name: /Redo/ }))
-    expect(screen.getByRole('button', { name: '100' }).className).toContain('active')
+    expect(screen.getByRole('button', { name: '×100' }).className).toContain('active')
   })
 })
 
@@ -324,6 +324,37 @@ describe('numpad decimal', () => {
     spins.setSelectionRange(spins.value.length, spins.value.length)
     fireEvent.keyDown(spins, numpadComma)
     expect(spins.value.endsWith('.')).toBe(true)
+  })
+})
+
+describe('targets panel layout', () => {
+  it('keeps every target setting on one row', () => {
+    loadRealData()
+    const rows = document.querySelectorAll('.targets-row')
+    const first = rows[0] as HTMLElement
+    const second = rows[1] as HTMLElement
+
+    for (const label of [
+      'Target RTP',
+      'Preferred Hit Chance',
+      'Preferred Win Chance',
+      'Chance tolerance',
+      'Volatility',
+      'Curve c',
+    ]) {
+      expect(within(first).getByText(label)).toBeDefined()
+    }
+
+    expect(within(second).getByText('Weight step')).toBeDefined()
+    expect(within(second).getByRole('button', { name: 'Auto-Distribute' })).toBeDefined()
+  })
+
+  it('labels the weight steps as multipliers', () => {
+    loadRealData()
+    const names = [...document.querySelectorAll('.targets-row')[1].querySelectorAll('.seg-btn')].map(
+      (b) => b.textContent,
+    )
+    expect(names).toEqual(['free', '×10', '×100'])
   })
 })
 

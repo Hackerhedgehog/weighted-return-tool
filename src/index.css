@@ -198,20 +198,20 @@ body {
   background: var(--surface);
   border: 1px solid var(--line);
   border-radius: 6px;
-  padding: 14px 16px;
-  margin-bottom: 16px;
+  padding: 10px 14px;
+  margin-bottom: 0;
 }
 
 .targets-row {
   display: flex;
   flex-wrap: wrap;
-  gap: 22px;
+  gap: 16px;
   align-items: flex-start;
 }
 
 .targets-row + .targets-row {
-  margin-top: 16px;
-  padding-top: 14px;
+  margin-top: 10px;
+  padding-top: 10px;
   border-top: 1px dashed var(--line);
 }
 
@@ -219,20 +219,15 @@ body {
   display: flex;
   flex-direction: column;
   gap: 4px;
-  min-width: 170px;
+  min-width: 104px;
 }
 
 .target-field.rtp {
-  min-width: 230px;
+  min-width: 150px;
 }
 
-.target-field.wide {
-  flex: 1 1 340px;
-}
-
-.target-field.actions,
-.target-field.export {
-  min-width: 210px;
+.target-field.actions {
+  min-width: 190px;
 }
 
 .field-label {
