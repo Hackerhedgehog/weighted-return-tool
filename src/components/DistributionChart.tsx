@@ -7,6 +7,7 @@ import { fmtPayout, fmtPct, fmtRtp, fmtWeight } from '../lib/format'
 import { ChartReadout, type ReadoutStat, type ReadoutTitle } from './ChartReadout'
 import { ChartValueEntry, type ValueEntryTarget } from './ChartValueEntry'
 import { ChartResizeGrip } from './ChartResizeGrip'
+import { GroupBarChips } from './GroupBarChips'
 import { DIST_HEIGHT, linearBarWidth, logBarWidth, niceCeil, useContainerWidth } from './chartUtils'
 
 /**
@@ -455,6 +456,12 @@ export function DistributionChart({
         )}
         <span className="panel-hint">drag a bar or a group handle to reshape</span>
       </div>
+
+      <GroupBarChips
+        groups={grouping.groups}
+        groupBars={groupBars}
+        onGroupBars={(ids) => set({ groupBars: ids })}
+      />
 
       <div className="chart-wrap" ref={containerRef}>
         {n === 0 ? (

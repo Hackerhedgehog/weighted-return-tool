@@ -638,3 +638,36 @@ describe('solver switches', () => {
     expect(Number(rtp)).toBeCloseTo(0.95, 4)
   })
 })
+
+describe('group bars', () => {
+  it('collapses a group into one bar from the chip row', () => {
+    render(<App />)
+    fireEvent.click(screen.getByRole('button', { name: 'Load sample' }))
+
+    const before = document.querySelectorAll('.bar').length
+    fireEvent.click(screen.getByRole('button', { name: 'bonus' }))
+
+    expect(document.querySelectorAll('.bar').length).toBeLessThan(before)
+    expect(screen.getByRole('button', { name: 'bonus', pressed: true })).toBeDefined()
+  })
+
+  it('restores collapsed groups from a saved workspace', () => {
+    saveWorkspace({
+      version: 1,
+      rows: [
+        { uid: 'b1', bucketId: 0, payout: 2, label: 'bonus3', weight: 500, locked: false, groupId: 'bonus', weightId: '' },
+        { uid: 'b2', bucketId: 1, payout: 8, label: 'bonus4', weight: 500, locked: false, groupId: 'bonus', weightId: '' },
+      ],
+      groups: [{ id: 'bonus', name: 'bonus', color: '#a8d8ea' }],
+      targets: DEFAULT_TARGETS,
+      volatility: 'medium',
+      curve: 0.09,
+      columnWidths: {},
+      chart: { ...DEFAULT_CHART, groupBars: ['bonus'] },
+      exportFilename: 'f.tsv',
+    })
+    render(<App />)
+    expect(screen.getByRole('button', { name: 'bonus', pressed: true })).toBeDefined()
+    expect(document.querySelectorAll('.bar')).toHaveLength(1)
+  })
+})
