@@ -53,6 +53,9 @@ interface DragState {
   baseTotal: number
   uids: string[]
   scale: Scale
+  /** Pointer y at press, and the subset's own position on the frozen axis. */
+  startY: number
+  startFrac: number
   moved: boolean
   lastRows: BucketRow[] | null
   blockedNotified: boolean
@@ -225,13 +228,18 @@ export function DistributionChart({
 
   // ---- dragging ----
 
-  const fracFromPointer = (clientY: number): number => {
-    const top = svgRef.current?.getBoundingClientRect().top ?? 0
-    const y = clientY - top
-    return clamp((MARGIN.top + plotH - y) / plotH, 0, 1)
-  }
-
-  const beginDrag = (e: React.PointerEvent, uids: string[], disabled: boolean) => {
+  /**
+   * `currentValue` is the subset's value in the chart's current metric. It is
+   * what makes the drag relative: the value moves by the pointer's delta from
+   * where it started, so pressing on a bar never changes it and a bar can be
+   * grabbed anywhere along its length.
+   */
+  const beginDrag = (
+    e: React.PointerEvent,
+    uids: string[],
+    disabled: boolean,
+    currentValue: number,
+  ) => {
     if (disabled || e.button !== 0) return
     ;(e.currentTarget as Element).setPointerCapture?.(e.pointerId)
     dragRef.current = {
@@ -239,6 +247,8 @@ export function DistributionChart({
       baseTotal: rows.reduce((a, r) => a + Math.max(0, Math.round(r.weight)), 0),
       uids,
       scale: liveScale,
+      startY: e.clientY,
+      startFrac: liveScale.frac(currentValue),
       moved: false,
       lastRows: null,
       blockedNotified: false,
@@ -249,7 +259,10 @@ export function DistributionChart({
   const moveDrag = (e: React.PointerEvent) => {
     const d = dragRef.current
     if (d === null) return
-    const f = fracFromPointer(e.clientY)
+    // Measured in axis fractions, so sensitivity keeps the meaning the chart is
+    // already showing: a constant multiplier per pixel on a log axis, a
+    // constant amount on a linear one.
+    const f = clamp(d.startFrac + (d.startY - e.clientY) / plotH, 0, 1)
     const value = d.scale.invert(f)
 
     let weights: number[] | null
@@ -503,7 +516,7 @@ export function DistributionChart({
                     aria-valuenow={
                       metric === 'weights' ? Math.round(s.weight) : Math.round(s.chance * 1000) / 10
                     }
-                    onPointerDown={(e) => beginDrag(e, s.group.uids, s.allLocked)}
+                    onPointerDown={(e) => beginDrag(e, s.group.uids, s.allLocked, s.value)}
                     onPointerMove={moveDrag}
                     onPointerUp={endDrag}
                     onPointerCancel={endDrag}
@@ -557,7 +570,7 @@ export function DistributionChart({
                     if (!dragging) setHover(i)
                   }}
                   onMouseLeave={() => setHover(null)}
-                  onPointerDown={(e) => beginDrag(e, b.uids, b.allLocked)}
+                  onPointerDown={(e) => beginDrag(e, b.uids, b.allLocked, valueOf(b))}
                   onPointerMove={moveDrag}
                   onPointerUp={endDrag}
                   onPointerCancel={endDrag}

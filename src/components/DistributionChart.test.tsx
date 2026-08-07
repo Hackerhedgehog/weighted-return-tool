@@ -332,3 +332,55 @@ describe('DistributionChart height', () => {
     expect(onHeight).toHaveBeenLastCalledWith(400)
   })
 })
+
+describe('DistributionChart delta dragging', () => {
+  it('does not move a bar when the pointer is pressed and not moved', () => {
+    // The regression this feature exists for: the old drag jumped the bar to
+    // wherever the pointer happened to land, destroying its value on contact.
+    const { onPreview } = renderChart({ metric: 'weights', relative: true })
+    const hit = document.querySelectorAll('.bar-hit')[1]
+
+    fireEvent.pointerDown(hit, { pointerId: 1, clientY: 250 })
+    fireEvent.pointerMove(hit, { pointerId: 1, clientY: 250 })
+
+    expect(weightsOf(lastRows(onPreview))).toEqual([500_000, 300_000, 150_000, 50_000])
+  })
+
+  it('gives the same result for the same delta from different grab points', () => {
+    const low = renderChart({ metric: 'weights', relative: true })
+    const lowHit = document.querySelectorAll('.bar-hit')[1]
+    fireEvent.pointerDown(lowHit, { pointerId: 1, clientY: 300 })
+    fireEvent.pointerMove(lowHit, { pointerId: 1, clientY: 260 })
+    const fromLow = weightsOf(lastRows(low.onPreview))
+    cleanup()
+
+    const high = renderChart({ metric: 'weights', relative: true })
+    const highHit = document.querySelectorAll('.bar-hit')[1]
+    fireEvent.pointerDown(highHit, { pointerId: 1, clientY: 120 })
+    fireEvent.pointerMove(highHit, { pointerId: 1, clientY: 80 })
+
+    expect(weightsOf(lastRows(high.onPreview))).toEqual(fromLow)
+  })
+
+  it('raises the value when the pointer moves up and lowers it when it moves down', () => {
+    const { onPreview } = renderChart({ metric: 'weights', relative: true })
+    const hit = document.querySelectorAll('.bar-hit')[1]
+
+    fireEvent.pointerDown(hit, { pointerId: 1, clientY: 200 })
+    fireEvent.pointerMove(hit, { pointerId: 1, clientY: 160 })
+    expect(lastRows(onPreview)[1].weight).toBeGreaterThan(300_000)
+
+    fireEvent.pointerMove(hit, { pointerId: 1, clientY: 240 })
+    expect(lastRows(onPreview)[1].weight).toBeLessThan(300_000)
+  })
+
+  it('starts a group handle drag from the group’s own value', () => {
+    const { onPreview } = renderChart({ metric: 'weights', relative: true })
+    const handle = screen.getByRole('slider', { name: 'bonus group' })
+
+    fireEvent.pointerDown(handle, { pointerId: 1, clientY: 200 })
+    fireEvent.pointerMove(handle, { pointerId: 1, clientY: 200 })
+
+    expect(weightsOf(lastRows(onPreview))).toEqual([500_000, 300_000, 150_000, 50_000])
+  })
+})
