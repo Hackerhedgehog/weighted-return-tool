@@ -47,6 +47,26 @@ export function logBarWidth(minGap: number): number {
   return Math.max(2, Math.min(MAX_LOG_BAR_W, (minGap || 8) * LOG_BAR_FILL))
 }
 
+/**
+ * Chart height is user-set and persisted, so it arrives from localStorage
+ * unvalidated. Clamping on the way in as well as on every drag keeps a
+ * hand-edited workspace from producing a 5px or a 50,000px chart.
+ */
+export interface HeightRange {
+  min: number
+  max: number
+  /** Restored by Home and by double-clicking the grip. */
+  fallback: number
+}
+
+export const DIST_HEIGHT: HeightRange = { min: 220, max: 900, fallback: 340 }
+export const SIM_HEIGHT: HeightRange = { min: 160, max: 800, fallback: 260 }
+
+export function clampHeight(h: number, r: HeightRange): number {
+  if (!Number.isFinite(h)) return r.fallback
+  return Math.min(Math.max(Math.round(h), r.min), r.max)
+}
+
 /** 1500 → "1.5k", 100000000 → "100M" — x-axis ticks for spin counts. */
 export function fmtCompact(n: number): string {
   if (!Number.isFinite(n)) return '—'
