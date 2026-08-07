@@ -46,6 +46,7 @@ function PanelNumber({
   className,
   title,
   ariaLabel,
+  disabled = false,
 }: {
   display: string
   raw: string
@@ -54,6 +55,7 @@ function PanelNumber({
   className?: string
   title?: string
   ariaLabel: string
+  disabled?: boolean
 }) {
   const [draft, setDraft] = useState<string | null>(null)
 
@@ -67,6 +69,7 @@ function PanelNumber({
   return (
     <input
       className={`panel-num ${className ?? ''}`}
+      disabled={disabled}
       value={draft ?? display}
       title={title}
       aria-label={ariaLabel}
@@ -106,6 +109,7 @@ function ChanceTarget({
   preferred,
   achieved,
   tolerance,
+  disabled,
   onChange,
   onUseCurrent,
 }: {
@@ -113,6 +117,7 @@ function ChanceTarget({
   preferred: number
   achieved: number
   tolerance: number
+  disabled: boolean
   onChange: (n: number) => void
   onUseCurrent: () => void
 }) {
@@ -122,9 +127,10 @@ function ChanceTarget({
   const inBand = withinBand(achieved, preferred, tolerance)
 
   return (
-    <div className="target-field">
+    <div className={disabled ? 'target-field off' : 'target-field'}>
       <label className="field-label">{label}</label>
       <PanelNumber
+        disabled={disabled}
         display={String(preferred)}
         raw={String(preferred)}
         ariaLabel={label}
@@ -135,8 +141,12 @@ function ChanceTarget({
           now, and it is reference detail rather than something to watch. */}
       <div className="field-meta">
         <span
-          className={`badge ${inBand ? 'ok' : 'warn'}`}
-          title={`${inBand ? 'Within' : 'Outside'} tolerance · ${fmtPct(achieved, 2)} · band ${fmtFixed3(lo)}–${fmtFixed3(hi)}`}
+          className={`badge ${disabled ? '' : inBand ? 'ok' : 'warn'}`}
+          title={
+            disabled
+              ? `Not steered — the table currently sits at ${fmtPct(achieved, 2)}`
+              : `${inBand ? 'Within' : 'Outside'} tolerance · ${fmtPct(achieved, 2)} · band ${fmtFixed3(lo)}–${fmtFixed3(hi)}`
+          }
         >
           {fmtFixed3(achieved)}
         </span>
@@ -172,13 +182,16 @@ export function TargetsPanel(props: TargetsPanelProps) {
     onRedo,
   } = props
 
+  // Only the chance constraints can be invalid, and only while they are being
+  // steered — an unused field must never block Auto-Distribute.
   const invalid =
     !(targets.rtp > 0) ||
-    !(targets.winChance >= 0) ||
-    targets.winChance > targets.hitChance ||
-    targets.hitChance > 1 ||
-    targets.tolerance < 0 ||
-    targets.tolerance > 50
+    (targets.useChances &&
+      (!(targets.winChance >= 0) ||
+        targets.winChance > targets.hitChance ||
+        targets.hitChance > 1 ||
+        targets.tolerance < 0 ||
+        targets.tolerance > 50))
 
   const rtpDelta = achieved.rtp - targets.rtp
   const rtpOk = Math.abs(rtpDelta) < 1e-6
@@ -259,11 +272,11 @@ export function TargetsPanel(props: TargetsPanelProps) {
               </div>
               <div className="summary-pair">
                 <dt>Tolerance</dt>
-                <dd>{targets.tolerance}%</dd>
+                <dd>{targets.useChances ? `${targets.tolerance}%` : 'off'}</dd>
               </div>
               <div className="summary-pair">
                 <dt>Volatility</dt>
-                <dd>{volatility}</dd>
+                <dd>{targets.useVolatility ? volatility : 'off'}</dd>
               </div>
               <div className="summary-pair">
                 <dt>Curve</dt>
@@ -311,6 +324,7 @@ export function TargetsPanel(props: TargetsPanelProps) {
           preferred={targets.hitChance}
           achieved={achieved.hitChance}
           tolerance={targets.tolerance}
+          disabled={!targets.useChances}
           onChange={(n) => onTargets({ ...targets, hitChance: n })}
           onUseCurrent={() =>
             Number.isFinite(achieved.hitChance) &&
@@ -323,6 +337,7 @@ export function TargetsPanel(props: TargetsPanelProps) {
           preferred={targets.winChance}
           achieved={achieved.winChance}
           tolerance={targets.tolerance}
+          disabled={!targets.useChances}
           onChange={(n) => onTargets({ ...targets, winChance: n })}
           onUseCurrent={() =>
             Number.isFinite(achieved.winChance) &&
@@ -330,9 +345,10 @@ export function TargetsPanel(props: TargetsPanelProps) {
           }
         />
 
-        <div className="target-field">
+        <div className={targets.useChances ? 'target-field' : 'target-field off'}>
           <label className="field-label">Chance tolerance</label>
           <PanelNumber
+            disabled={!targets.useChances}
             display={`${targets.tolerance}%`}
             raw={String(targets.tolerance)}
             ariaLabel="Chance tolerance percent"
@@ -345,7 +361,7 @@ export function TargetsPanel(props: TargetsPanelProps) {
           </div>
         </div>
 
-        <div className="target-field">
+        <div className={targets.useVolatility ? 'target-field' : 'target-field off'}>
           <label className="field-label">Volatility</label>
           <div className="seg small">
             {VOLATILITY_STEPS.map((v) => (
@@ -353,6 +369,7 @@ export function TargetsPanel(props: TargetsPanelProps) {
                 key={v}
                 type="button"
                 className={`seg-btn ${volatility === v ? 'active' : ''}`}
+                disabled={!targets.useVolatility}
                 onClick={() => onVolatility(v)}
                 title={`curve c = ${CURVE_PRESETS[v]}`}
               >
@@ -363,9 +380,10 @@ export function TargetsPanel(props: TargetsPanelProps) {
           </div>
         </div>
 
-        <div className="target-field">
+        <div className={targets.useVolatility ? 'target-field' : 'target-field off'}>
           <label className="field-label">Curve c</label>
           <PanelNumber
+            disabled={!targets.useVolatility}
             display={String(curve)}
             raw={String(curve)}
             ariaLabel="Curve curvature"
@@ -373,6 +391,26 @@ export function TargetsPanel(props: TargetsPanelProps) {
             validate={(n) => n >= 0 && n <= 2}
             onCommit={onCurve}
           />
+        </div>
+
+        <div className="target-field solver-switches">
+          <label className="field-label">Solve for</label>
+          <label className="checkbox" title="Off: hit chance, win chance and the tolerance stop being goals — the fields keep reporting what the table achieves, and everything goes into RTP">
+            <input
+              type="checkbox"
+              checked={targets.useChances}
+              onChange={(e) => onTargets({ ...targets, useChances: e.target.checked })}
+            />
+            <span>Chance targets</span>
+          </label>
+          <label className="checkbox" title="Off: the tail is left as a pure power law (c = 0) and only gamma solves RTP">
+            <input
+              type="checkbox"
+              checked={targets.useVolatility}
+              onChange={(e) => onTargets({ ...targets, useVolatility: e.target.checked })}
+            />
+            <span>Volatility curve</span>
+          </label>
         </div>
 
         <div className="target-field">

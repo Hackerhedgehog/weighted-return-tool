@@ -1,4 +1,5 @@
-import type { BucketRow, ChartSettings, Targets, Volatility, WeightStep } from './types'
+import type { BucketRow, ChartSettings, GroupDef, Targets, Volatility, WeightStep } from './types'
+import { isHexColor } from './palette'
 
 /**
  * One autosaved workspace. The key carries the schema version, and the payload
@@ -10,6 +11,8 @@ export const STORAGE_KEY = 'weighted-return-tool:workspace:v1'
 export interface Workspace {
   version: 1
   rows: BucketRow[]
+  /** Optional — absent in workspaces saved before groups became data. */
+  groups?: GroupDef[]
   targets: Targets
   volatility: Volatility
   curve: number
@@ -40,7 +43,17 @@ function isRow(v: unknown): v is BucketRow {
     isFiniteNumber(v.payout) &&
     typeof v.label === 'string' &&
     isFiniteNumber(v.weight) &&
-    typeof v.locked === 'boolean'
+    typeof v.locked === 'boolean' &&
+    // Both optional on disk: a workspace saved before these existed is
+    // migrated on load rather than thrown away.
+    (v.groupId === undefined || typeof v.groupId === 'string') &&
+    (v.weightId === undefined || typeof v.weightId === 'string')
+  )
+}
+
+function isGroup(v: unknown): v is GroupDef {
+  return (
+    isObject(v) && typeof v.id === 'string' && typeof v.name === 'string' && isHexColor(v.color)
   )
 }
 
@@ -70,6 +83,7 @@ function isWorkspace(v: unknown): v is Workspace {
     v.version === 1 &&
     Array.isArray(v.rows) &&
     v.rows.every(isRow) &&
+    (v.groups === undefined || (Array.isArray(v.groups) && v.groups.every(isGroup))) &&
     isTargets(v.targets) &&
     typeof v.volatility === 'string' &&
     isFiniteNumber(v.curve) &&

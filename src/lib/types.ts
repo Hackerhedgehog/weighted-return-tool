@@ -7,6 +7,25 @@ export interface BucketRow {
   weight: number
   /** Locked rows keep their weight through Auto-Distribute and rescaling. */
   locked: boolean
+  /**
+   * Which group this bucket belongs to. Seeded once from the label heuristics
+   * at import and then owned by the user — never re-derived, so a hand-made
+   * assignment sticks.
+   */
+  groupId: string
+  /**
+   * A free-text id the tool never interprets. Exported only when at least one
+   * row carries one, so tables that do not use it keep their exact old shape.
+   */
+  weightId: string
+}
+
+/** A user-editable bucket group: a name and one of the palette colors. */
+export interface GroupDef {
+  id: string
+  name: string
+  /** 6-digit hex from `PASTEL_COLORS`. */
+  color: string
 }
 
 /**
@@ -67,6 +86,14 @@ export interface Targets {
   winChance: number
   /** Relative tolerance on the two chances, in percent. */
   tolerance: number
+  /**
+   * Off: the solver stops steering hit and win chance (and their tolerance)
+   * and spends everything on RTP. The fields keep showing what the table
+   * currently achieves — they just stop being goals.
+   */
+  useChances: boolean
+  /** Off: the tail shape is left as a pure power law, c = 0. */
+  useVolatility: boolean
 }
 
 export const DEFAULT_TARGETS: Targets = {
@@ -74,11 +101,15 @@ export const DEFAULT_TARGETS: Targets = {
   hitChance: 0.3,
   winChance: 0.12,
   tolerance: 3.5,
+  useChances: true,
+  useVolatility: true,
 }
 
 export type ColumnKey =
   | 'lock'
+  | 'group'
   | 'id'
+  | 'weightId'
   | 'payout'
   | 'label'
   | 'weight'
@@ -86,11 +117,10 @@ export type ColumnKey =
   | 'chance'
 
 export type RowPatch = Partial<
-  Pick<BucketRow, 'bucketId' | 'payout' | 'label' | 'weight' | 'locked'>
+  Pick<BucketRow, 'bucketId' | 'payout' | 'label' | 'weight' | 'locked' | 'groupId' | 'weightId'>
 >
 
-/** 'group' has no column of its own — it's driven by the Group sort button. */
-export type SortKey = Exclude<ColumnKey, 'lock'> | 'group'
+export type SortKey = Exclude<ColumnKey, 'lock'>
 
 export interface SortState {
   key: SortKey

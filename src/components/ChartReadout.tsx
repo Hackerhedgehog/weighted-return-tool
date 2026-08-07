@@ -20,7 +20,7 @@ import { useLayoutEffect, useRef, useState } from 'react'
 
 export interface ReadoutTitle {
   text: string
-  /** CSS color, e.g. 'var(--series-2)'. Omitted → the default text color. */
+  /** The bucket's group color. Omitted → the default text color. */
   color?: string
 }
 

@@ -79,6 +79,10 @@ export function parseTsv(text: string): ParseOutcome {
       label: parts[2],
       weight,
       locked: false,
+      // Seeded by seedGroups once the whole table is parsed.
+      groupId: '',
+      // Trailing column of our own export, present only when it was used.
+      weightId: parts[6] ?? '',
     })
   }
 

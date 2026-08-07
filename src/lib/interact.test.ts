@@ -10,6 +10,8 @@ const row = (weight: number, locked = false): BucketRow => ({
   label: `b${n}`,
   weight,
   locked,
+  groupId: 'other',
+  weightId: '',
 })
 
 const total = (w: number[]) => w.reduce((a, b) => a + b, 0)

@@ -1,6 +1,6 @@
 import { describe, it, expect } from 'vitest'
 import type { BucketRow } from './types'
-import { groupRows } from './groups'
+import { buildGrouping, groupRows, seedGroups } from './groups'
 
 let n = 0
 const row = (payout: number, label: string): BucketRow => ({
@@ -10,6 +10,8 @@ const row = (payout: number, label: string): BucketRow => ({
   label,
   weight: 100,
   locked: false,
+  groupId: 'other',
+  weightId: '',
 })
 
 /** Group id of a single row inside a table. */
@@ -160,5 +162,69 @@ describe('groupRows', () => {
       'wins',
       'wins',
     ])
+  })
+})
+
+describe('stem detection on bare prefixes', () => {
+  it('groups families named by a leading token with no digits', () => {
+    const lw1 = row(8, 'lw-8-16')
+    const lw2 = row(16, 'lw-16-32')
+    const fs1 = row(16, 'fs-16-32')
+    const fs2 = row(32, 'fs-32-64')
+    const rows = [lw1, lw2, fs1, fs2]
+
+    expect(idOf(rows, lw1)).toBe('stem:lw')
+    expect(idOf(rows, lw2)).toBe('stem:lw')
+    expect(idOf(rows, fs1)).toBe('stem:fs')
+    expect(idOf(rows, fs2)).toBe('stem:fs')
+    expect(idOf(rows, lw1)).not.toBe(idOf(rows, fs1))
+  })
+
+  it('still needs two members before a prefix is a group', () => {
+    const only = row(8, 'lw-8-16')
+    const other = row(16, 'zz-16-32')
+    expect(idOf([only, other], only)).toBe('other')
+  })
+})
+
+describe('seedGroups and buildGrouping', () => {
+  it('stamps a groupId on every row and lists the groups it found', () => {
+    const rows = [row(8, 'lw-8-16'), row(16, 'lw-16-32'), row(0, '0x')]
+    const seeded = seedGroups(rows)
+
+    expect(seeded.groups.map((g) => g.id)).toEqual(['stem:lw', 'zero'])
+    expect(seeded.rows.map((r) => r.groupId)).toEqual(['stem:lw', 'stem:lw', 'zero'])
+    for (const g of seeded.groups) expect(g.color).toMatch(/^#[0-9a-f]{6}$/i)
+  })
+
+  it('reads the stored assignment back, heuristics notwithstanding', () => {
+    const seeded = seedGroups([row(8, 'lw-8-16'), row(16, 'lw-16-32')])
+    // hand-move the second bucket somewhere the detector would never put it
+    const groups = [...seeded.groups, { id: 'custom', name: 'mine', color: '#5fc4a0' }]
+    const moved = seeded.rows.map((r, i) => (i === 1 ? { ...r, groupId: 'custom' } : r))
+
+    const g = buildGrouping(moved, groups)
+    expect(g.byUid.get(moved[0].uid)!.id).toBe('stem:lw')
+    expect(g.byUid.get(moved[1].uid)!.id).toBe('custom')
+    expect(g.byUid.get(moved[1].uid)!.name).toBe('mine')
+  })
+
+  it('drops groups with no members from the view but keeps the rest ranked', () => {
+    const seeded = seedGroups([row(8, 'lw-8-16'), row(16, 'lw-16-32')])
+    const groups = [{ id: 'empty', name: 'empty', color: '#6aa9e0' }, ...seeded.groups]
+
+    const g = buildGrouping(seeded.rows, groups)
+    expect(g.groups.map((x) => x.id)).toEqual(['stem:lw'])
+    expect(g.rank.get(seeded.rows[0].uid)).toBe(0)
+  })
+
+  it('gives a renamed group its new colour everywhere', () => {
+    const seeded = seedGroups([row(8, 'lw-8-16'), row(16, 'lw-16-32')])
+    const groups = seeded.groups.map((x) => ({ ...x, name: 'low wins', color: '#e58bb0' }))
+    const g = buildGrouping(seeded.rows, groups)
+
+    expect(g.groups[0].name).toBe('low wins')
+    expect(g.groups[0].color).toBe('#e58bb0')
+    expect(g.groups[0].tint).toContain('229, 139, 176')
   })
 })

@@ -1,5 +1,13 @@
 import { useCallback, useMemo, useRef } from 'react'
-import type { BucketRow, ColumnKey, RowPatch, SortKey, SortState, WeightStep } from '../lib/types'
+import type {
+  BucketRow,
+  ColumnKey,
+  GroupDef,
+  RowPatch,
+  SortKey,
+  SortState,
+  WeightStep,
+} from '../lib/types'
 import type { Grouping } from '../lib/groups'
 import { COLUMNS, sortRows, type Column } from '../lib/columns'
 import { fmtDecimal, fmtPayout, fmtWeight } from '../lib/format'
@@ -17,6 +25,8 @@ interface BucketTableProps {
   columnWidths: Record<string, number>
   /** Colors each row by its bucket group and drives the group sort. */
   grouping: Grouping
+  /** Every group that exists, for the per-row group dropdown. */
+  groups: GroupDef[]
   weightStep: WeightStep
   onSort: (key: SortKey) => void
   onPatch: (uid: string, patch: RowPatch) => void
@@ -41,6 +51,7 @@ export function BucketTable({
   sort,
   columnWidths,
   grouping,
+  groups,
   weightStep,
   onSort,
   onPatch,
@@ -67,6 +78,8 @@ export function BucketTable({
       switch (key) {
         case 'id':
           return String(r.bucketId)
+        case 'weightId':
+          return r.weightId
         case 'payout':
           return fmtPayout(r.payout)
         case 'label':
@@ -110,7 +123,8 @@ export function BucketTable({
   const isEditable = useCallback(
     (pos: CellPos) => {
       const key = COLUMNS[pos.col]?.key
-      if (key === undefined || key === 'lock') return false
+      // Group is a dropdown, not a text cell — it has its own edit affordance.
+      if (key === undefined || key === 'lock' || key === 'group') return false
       if (pos.row === sorted.length) return key === 'weight' || key === 'weightedValue'
       if (key === 'weightedValue') return (sorted[pos.row]?.payout ?? 0) > 0
       return true
@@ -245,9 +259,25 @@ export function BucketTable({
                 />
               </td>
 
+              <td className="col-group">
+                <select
+                  className="group-select"
+                  aria-label={`Group of ${row.label}`}
+                  value={row.groupId}
+                  style={{ color: grouping.byUid.get(row.uid)?.color }}
+                  onChange={(e) => onPatch(row.uid, { groupId: e.target.value })}
+                >
+                  {groups.map((g) => (
+                    <option key={g.id} value={g.id}>
+                      {g.name}
+                    </option>
+                  ))}
+                </select>
+              </td>
+
               <td className="col-id">
                 <GridCell
-                  {...cellProps(rowIdx, 1)}
+                  {...cellProps(rowIdx, 2)}
                   display={String(row.bucketId)}
                   raw={String(row.bucketId)}
                   numeric
@@ -257,9 +287,20 @@ export function BucketTable({
                 />
               </td>
 
+              <td className="col-weightId">
+                <GridCell
+                  {...cellProps(rowIdx, 3)}
+                  display={row.weightId}
+                  raw={row.weightId}
+                  numeric={false}
+                  editable
+                  onCommitText={(s) => onPatch(row.uid, { weightId: s })}
+                />
+              </td>
+
               <td className="col-payout">
                 <GridCell
-                  {...cellProps(rowIdx, 2)}
+                  {...cellProps(rowIdx, 4)}
                   display={fmtPayout(row.payout)}
                   raw={fmtPayout(row.payout)}
                   numeric
@@ -271,7 +312,7 @@ export function BucketTable({
 
               <td className="col-label">
                 <GridCell
-                  {...cellProps(rowIdx, 3)}
+                  {...cellProps(rowIdx, 5)}
                   display={row.label}
                   raw={row.label}
                   numeric={false}
@@ -282,7 +323,7 @@ export function BucketTable({
 
               <td className="col-weight">
                 <GridCell
-                  {...cellProps(rowIdx, 4)}
+                  {...cellProps(rowIdx, 6)}
                   display={fmtWeight(row.weight)}
                   raw={String(row.weight)}
                   numeric
@@ -294,7 +335,7 @@ export function BucketTable({
 
               <td className="col-weightedValue">
                 <GridCell
-                  {...cellProps(rowIdx, 5)}
+                  {...cellProps(rowIdx, 7)}
                   display={fmtDecimal(valueOf(row))}
                   raw={fmtDecimal(valueOf(row))}
                   numeric
@@ -314,7 +355,7 @@ export function BucketTable({
 
               <td className="col-chance">
                 <GridCell
-                  {...cellProps(rowIdx, 6)}
+                  {...cellProps(rowIdx, 8)}
                   display={fmtDecimal(chanceOf(row))}
                   raw={fmtDecimal(chanceOf(row))}
                   numeric
@@ -344,15 +385,33 @@ export function BucketTable({
                 editable={false}
               />
             </td>
+            <td className="col-group">
+              <GridCell
+                {...cellProps(totalsRowIndex, 1)}
+                display=""
+                raw=""
+                numeric={false}
+                editable={false}
+              />
+            </td>
             <td className="col-id">
-              <GridCell {...cellProps(totalsRowIndex, 1)} display="" raw="" numeric editable={false} />
+              <GridCell {...cellProps(totalsRowIndex, 2)} display="" raw="" numeric editable={false} />
+            </td>
+            <td className="col-weightId">
+              <GridCell
+                {...cellProps(totalsRowIndex, 3)}
+                display=""
+                raw=""
+                numeric={false}
+                editable={false}
+              />
             </td>
             <td className="col-payout">
-              <GridCell {...cellProps(totalsRowIndex, 2)} display="" raw="" numeric editable={false} />
+              <GridCell {...cellProps(totalsRowIndex, 4)} display="" raw="" numeric editable={false} />
             </td>
             <td className="col-label">
               <GridCell
-                {...cellProps(totalsRowIndex, 3)}
+                {...cellProps(totalsRowIndex, 5)}
                 display="Total"
                 raw="Total"
                 numeric={false}
@@ -363,7 +422,7 @@ export function BucketTable({
 
             <td className="col-weight">
               <GridCell
-                {...cellProps(totalsRowIndex, 4)}
+                {...cellProps(totalsRowIndex, 6)}
                 display={fmtWeight(totalWeight)}
                 raw={String(Math.round(totalWeight))}
                 numeric
@@ -376,7 +435,7 @@ export function BucketTable({
 
             <td className="col-weightedValue">
               <GridCell
-                {...cellProps(totalsRowIndex, 5)}
+                {...cellProps(totalsRowIndex, 7)}
                 display={fmtDecimal(rtp)}
                 raw={fmtDecimal(rtp)}
                 numeric
@@ -389,7 +448,7 @@ export function BucketTable({
 
             <td className="col-chance">
               <GridCell
-                {...cellProps(totalsRowIndex, 6)}
+                {...cellProps(totalsRowIndex, 8)}
                 display={rows.length > 0 ? '1' : '0'}
                 raw="1"
                 numeric

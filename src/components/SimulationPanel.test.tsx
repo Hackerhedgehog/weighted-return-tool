@@ -6,8 +6,8 @@ import type { SimRunRequest, SimWorkerMessage } from '../lib/sim'
 import type { BucketRow } from '../lib/types'
 
 const rows: BucketRow[] = [
-  { uid: 'a', bucketId: 0, payout: 0, label: '0x', weight: 700_000, locked: false },
-  { uid: 'b', bucketId: 1, payout: 2, label: '1-2x', weight: 300_000, locked: false },
+  { uid: 'a', bucketId: 0, payout: 0, label: '0x', weight: 700_000, locked: false, groupId: 'other', weightId: '' },
+  { uid: 'b', bucketId: 1, payout: 2, label: '1-2x', weight: 300_000, locked: false, groupId: 'other', weightId: '' },
 ]
 
 class FakeWorker implements SimWorkerLike {

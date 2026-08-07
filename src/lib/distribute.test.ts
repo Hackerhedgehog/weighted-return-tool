@@ -403,3 +403,52 @@ describe('solveWeights with a weight step', () => {
     expect(r.warnings).toHaveLength(0)
   })
 })
+
+describe('solver switches', () => {
+  const noChances = { ...DEFAULT_TARGETS, useChances: false }
+
+  it('hits RTP without steering the chances', () => {
+    const r = solveWeights(rows, T, noChances, CURVE_PRESETS.medium)
+    const s = statsOf(withWeights(r.weights), T)
+    expect(sum(r.weights)).toBe(T)
+    expect(s.rtp).toBeCloseTo(DEFAULT_TARGETS.rtp, 4)
+  })
+
+  it('reports nothing about chances it was not asked to hit', () => {
+    const r = solveWeights(rows, T, { ...noChances, hitChance: 0.9, winChance: 0.8 }, 0.09)
+    expect(r.warnings.some((w) => w.includes('hit chance'))).toBe(false)
+    expect(r.warnings.some((w) => w.includes('win chance'))).toBe(false)
+  })
+
+  it('lets the curve span the whole ladder once the groups are unpinned', () => {
+    const steered = solveWeights(rows, T, DEFAULT_TARGETS, CURVE_PRESETS.medium)
+    const free = solveWeights(rows, T, noChances, CURVE_PRESETS.medium)
+    // both land on RTP, but the free solve is not held to the chance split
+    expect(statsOf(withWeights(free.weights), T).rtp).toBeCloseTo(0.95, 4)
+    expect(free.weights).not.toEqual(steered.weights)
+  })
+
+  it('drops the curvature term when volatility is off', () => {
+    const curved = solveWeights(rows, T, DEFAULT_TARGETS, 0.32)
+    const flat = solveWeights(rows, T, { ...DEFAULT_TARGETS, useVolatility: false }, 0.32)
+    const pure = solveWeights(rows, T, { ...DEFAULT_TARGETS, useVolatility: false }, 0)
+
+    // volatility off == c = 0, whatever the curve field says
+    expect(flat.weights).toEqual(pure.weights)
+    expect(flat.weights).not.toEqual(curved.weights)
+    expect(statsOf(withWeights(flat.weights), T).rtp).toBeCloseTo(0.95, 4)
+  })
+
+  it('still respects locks with both switches off', () => {
+    const wi = rows.findIndex((r) => r.payout > 1)
+    const locked = rows.map((r, i) => (i === wi ? { ...r, weight: 5000, locked: true } : r))
+    const r = solveWeights(
+      locked,
+      T,
+      { ...DEFAULT_TARGETS, useChances: false, useVolatility: false },
+      0.09,
+    )
+    expect(r.weights[wi]).toBe(5000)
+    expect(sum(r.weights)).toBe(T)
+  })
+})

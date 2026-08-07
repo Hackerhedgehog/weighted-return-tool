@@ -51,7 +51,17 @@ describe('App', () => {
   it('shows columns in the export order', () => {
     loadRealData()
     const headers = [...document.querySelectorAll('thead th')].map((th) => th.textContent?.trim())
-    expect(headers).toEqual(['', 'ID▲', 'Avg Payout', 'Label', 'Weights', 'Weighted Value', 'Chance'])
+    expect(headers).toEqual([
+      '',
+      'Group',
+      'ID▲',
+      'Weight ID',
+      'Avg Payout',
+      'Label',
+      'Weights',
+      'Weighted Value',
+      'Chance',
+    ])
   })
 
   it('keeps float payouts intact', () => {
@@ -156,9 +166,10 @@ describe('App', () => {
     const styles = [...document.querySelectorAll('.grid-row')].map(
       (tr) => tr.getAttribute('style') ?? '',
     )
-    expect(styles.some((s) => s.includes('--series-0-tint'))).toBe(true) // win ranges
-    expect(styles.some((s) => s.includes('--series-1-tint'))).toBe(true) // bonus
-    expect(styles.some((s) => s.includes('--series-6-tint'))).toBe(true) // 0x buckets
+    const tints = new Set(styles.filter((s) => s.includes('rgba')))
+    // wins, bonus, joker and 0x at least — each its own pastel tint
+    expect(tints.size).toBeGreaterThanOrEqual(4)
+    for (const s of styles) expect(s).not.toContain('--series-')
   })
 
   it('sorts by group when the Group sort button is clicked', () => {
@@ -226,7 +237,7 @@ describe('weight step', () => {
   it('restores from a saved workspace', () => {
     saveWorkspace({
       version: 1,
-      rows: [{ uid: 'b1', bucketId: 0, payout: 2, label: 'x', weight: 500, locked: false }],
+      rows: [{ uid: 'b1', bucketId: 0, payout: 2, label: 'x', weight: 500, locked: false, groupId: 'other', weightId: '' }],
       targets: DEFAULT_TARGETS,
       volatility: 'medium',
       curve: 0.09,
@@ -459,5 +470,156 @@ describe('header actions', () => {
     const header = document.querySelector('.topbar') as HTMLElement
     expect(within(header).queryByRole('button', { name: 'Copy TSV' })).toBeNull()
     expect(within(header).getByRole('button', { name: 'Load sample' })).toBeDefined()
+  })
+})
+
+describe('groups', () => {
+  const openSettings = () => fireEvent.click(screen.getByRole('button', { name: 'Group settings' }))
+
+  it('detects families named by a bare prefix, not just alpha+digits', () => {
+    render(<App />)
+    fireEvent.change(screen.getByPlaceholderText(/joker5-maxwin/), {
+      target: {
+        value: [
+          ['0', '8', 'lw-8-16'],
+          ['1', '16', 'lw-16-32'],
+          ['2', '16', 'fs-16-32'],
+          ['3', '32', 'fs-32-64'],
+        ]
+          .map((r) => r.join('\t'))
+          .join('\n'),
+      },
+    })
+    fireEvent.click(screen.getByRole('button', { name: 'Build table' }))
+
+    const picked = [...document.querySelectorAll('.col-group select')].map(
+      (el) => (el as HTMLSelectElement).selectedOptions[0].textContent,
+    )
+    expect(picked).toEqual(['lw', 'lw', 'fs', 'fs'])
+  })
+
+  it('moves a bucket to another group from the table dropdown', () => {
+    loadRealData()
+    const select = document.querySelector('.col-group select') as HTMLSelectElement
+    const before = select.value
+    const other = [...select.options].map((o) => o.value).find((v) => v !== before)!
+
+    fireEvent.change(select, { target: { value: other } })
+    expect((document.querySelector('.col-group select') as HTMLSelectElement).value).toBe(other)
+  })
+
+  it('keeps a hand-made assignment through an Auto-Distribute', () => {
+    loadRealData()
+    const select = document.querySelector('.col-group select') as HTMLSelectElement
+    const other = [...select.options].map((o) => o.value).find((v) => v !== select.value)!
+    fireEvent.change(select, { target: { value: other } })
+
+    fireEvent.click(screen.getByRole('button', { name: 'Auto-Distribute' }))
+    expect((document.querySelector('.col-group select') as HTMLSelectElement).value).toBe(other)
+  })
+
+  it('hides group settings until the button is pressed', () => {
+    loadRealData()
+    expect(document.querySelector('.group-settings')).toBeNull()
+    openSettings()
+    expect(document.querySelector('.group-settings')).not.toBeNull()
+    openSettings()
+    expect(document.querySelector('.group-settings')).toBeNull()
+  })
+
+  it('renames a group, and the table dropdown follows', () => {
+    loadRealData()
+    openSettings()
+    const name = document.querySelector('.group-name') as HTMLInputElement
+    fireEvent.change(name, { target: { value: 'renamed' } })
+
+    const options = [...document.querySelectorAll('.col-group select option')].map(
+      (o) => o.textContent,
+    )
+    expect(options).toContain('renamed')
+  })
+
+  it('offers twenty pastel swatches and recolors on click', () => {
+    loadRealData()
+    openSettings()
+    const row = document.querySelector('.group-row') as HTMLElement
+    const swatches = row.querySelectorAll('.swatch')
+    expect(swatches).toHaveLength(20)
+
+    fireEvent.click(swatches[7])
+    expect(swatches[7].getAttribute('aria-checked')).toBe('true')
+  })
+
+  it('adds a group', () => {
+    loadRealData()
+    openSettings()
+    const before = document.querySelectorAll('.group-row').length
+    fireEvent.click(screen.getByRole('button', { name: '+ Add group' }))
+    expect(document.querySelectorAll('.group-row')).toHaveLength(before + 1)
+  })
+
+  it('deleting a group moves its buckets rather than losing them', () => {
+    loadRealData()
+    const rowsBefore = document.querySelectorAll('.grid-row').length
+    openSettings()
+
+    const first = document.querySelector('.group-row') as HTMLElement
+    const label = (first.querySelector('.group-name') as HTMLInputElement).value
+    fireEvent.click(within(first).getByRole('button', { name: `Delete group ${label}` }))
+
+    expect(document.querySelectorAll('.grid-row')).toHaveLength(rowsBefore)
+    const options = [...document.querySelectorAll('.col-group select option')].map(
+      (o) => o.textContent,
+    )
+    expect(options).not.toContain(label)
+  })
+})
+
+describe('weight id', () => {
+  it('is an editable free-text column', () => {
+    loadRealData()
+    const cell = document.querySelector('.grid-row .col-weightId .gcell') as HTMLElement
+    expect(cell.textContent).toBe('')
+
+    fireEvent.mouseDown(cell)
+    fireEvent.doubleClick(cell)
+    const input = document.querySelector('.grid-row .col-weightId input') as HTMLInputElement
+    fireEvent.change(input, { target: { value: 'W-42' } })
+    fireEvent.keyDown(input, { key: 'Enter' })
+
+    expect(document.querySelector('.grid-row .col-weightId .gcell')!.textContent).toBe('W-42')
+  })
+})
+
+describe('solver switches', () => {
+  it('greys the chance targets out and stops them blocking', () => {
+    loadRealData()
+    const toggle = screen.getByRole('checkbox', { name: 'Chance targets' }) as HTMLInputElement
+    expect(toggle.checked).toBe(true)
+
+    fireEvent.click(toggle)
+    expect((screen.getByLabelText('Preferred Hit Chance') as HTMLInputElement).disabled).toBe(true)
+    expect((screen.getByLabelText('Chance tolerance percent') as HTMLInputElement).disabled).toBe(
+      true,
+    )
+    // still reports what the table achieves
+    expect(screen.getByLabelText('Preferred Win Chance')).toBeDefined()
+  })
+
+  it('greys volatility out on its own switch', () => {
+    loadRealData()
+    fireEvent.click(screen.getByRole('checkbox', { name: 'Volatility curve' }))
+    expect((screen.getByLabelText('Curve curvature') as HTMLInputElement).disabled).toBe(true)
+    expect((screen.getByRole('button', { name: 'medium' }) as HTMLButtonElement).disabled).toBe(true)
+  })
+
+  it('still distributes to RTP with both switched off', () => {
+    loadRealData()
+    fireEvent.click(screen.getByRole('checkbox', { name: 'Chance targets' }))
+    fireEvent.click(screen.getByRole('checkbox', { name: 'Volatility curve' }))
+    fireEvent.click(screen.getByRole('button', { name: 'Auto-Distribute' }))
+
+    const rtp = document.querySelector('.totals-row .col-weightedValue .gcell')!.textContent!
+    expect(Number(rtp)).toBeCloseTo(0.95, 4)
   })
 })

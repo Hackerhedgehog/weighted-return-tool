@@ -8,6 +8,14 @@ import { DEFAULT_EXPORT_FILENAME, type BucketRow } from './types'
  */
 export const EXPORT_HEADER = 'ID\tAvg Payout \tLabel\tWeights\tWeighted Value\tChance'
 
+/**
+ * Weight ID rides as a trailing column, and only when a table actually uses
+ * one. Trailing keeps the positional parse of the first six fields intact, and
+ * conditional keeps a table that ignores the field byte-identical to what this
+ * tool has always produced.
+ */
+export const WEIGHT_ID_HEADER = 'Weight ID'
+
 /** CRLF, matching the reference file and what Windows spreadsheets expect. */
 const EOL = '\r\n'
 
@@ -25,19 +33,20 @@ export function buildTsv(rows: BucketRow[], totalWeight: number): string {
   const valueOf = (r: BucketRow) => (safeTotal > 0 ? (r.payout * r.weight) / safeTotal : 0)
   const chanceOf = (r: BucketRow) => (safeTotal > 0 ? r.weight / safeTotal : 0)
 
-  const lines = [EXPORT_HEADER]
+  const withWeightId = rows.some((r) => r.weightId !== '')
+  const lines = [withWeightId ? `${EXPORT_HEADER}\t${WEIGHT_ID_HEADER}` : EXPORT_HEADER]
 
   for (const r of rows) {
-    lines.push(
-      [
-        String(r.bucketId),
-        fmtPayout(r.payout),
-        r.label,
-        String(Math.round(r.weight)),
-        fmtSig(valueOf(r)),
-        fmtSig(chanceOf(r)),
-      ].join('\t'),
-    )
+    const fields = [
+      String(r.bucketId),
+      fmtPayout(r.payout),
+      r.label,
+      String(Math.round(r.weight)),
+      fmtSig(valueOf(r)),
+      fmtSig(chanceOf(r)),
+    ]
+    if (withWeightId) fields.push(r.weightId)
+    lines.push(fields.join('\t'))
   }
 
   // Sum at full precision, then round once. (Summing the already-rounded
@@ -46,9 +55,9 @@ export function buildTsv(rows: BucketRow[], totalWeight: number): string {
   const totalValue = rows.reduce((a, r) => a + valueOf(r), 0)
   const totalChance = rows.reduce((a, r) => a + chanceOf(r), 0)
 
-  lines.push(
-    ['', '', '', String(Math.round(safeTotal)), fmtSig(totalValue), fmtSig(totalChance)].join('\t'),
-  )
+  const totals = ['', '', '', String(Math.round(safeTotal)), fmtSig(totalValue), fmtSig(totalChance)]
+  if (withWeightId) totals.push('')
+  lines.push(totals.join('\t'))
 
   return lines.join(EOL)
 }

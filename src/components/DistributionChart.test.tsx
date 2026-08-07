@@ -6,10 +6,10 @@ import { groupRows } from '../lib/groups'
 import { DEFAULT_CHART, type BucketRow, type ChartSettings } from '../lib/types'
 
 const baseRows = (): BucketRow[] => [
-  { uid: 'a', bucketId: 0, payout: 0, label: '0x', weight: 500_000, locked: false },
-  { uid: 'b', bucketId: 1, payout: 0.6, label: '0-1x', weight: 300_000, locked: false },
-  { uid: 'c', bucketId: 2, payout: 8, label: 'bonus3', weight: 150_000, locked: false },
-  { uid: 'd', bucketId: 3, payout: 100, label: 'bonus4', weight: 50_000, locked: false },
+  { uid: 'a', bucketId: 0, payout: 0, label: '0x', weight: 500_000, locked: false, groupId: 'other', weightId: '' },
+  { uid: 'b', bucketId: 1, payout: 0.6, label: '0-1x', weight: 300_000, locked: false, groupId: 'other', weightId: '' },
+  { uid: 'c', bucketId: 2, payout: 8, label: 'bonus3', weight: 150_000, locked: false, groupId: 'other', weightId: '' },
+  { uid: 'd', bucketId: 3, payout: 100, label: 'bonus4', weight: 50_000, locked: false, groupId: 'other', weightId: '' },
 ]
 
 beforeEach(() => {
@@ -66,15 +66,15 @@ describe('DistributionChart grouping', () => {
   it('colors bars by their group', () => {
     renderChart({ metric: 'weights' })
     const styles = [...document.querySelectorAll('.bar')].map((el) => el.getAttribute('style') ?? '')
-    expect(styles.some((s) => s.includes('--series-0'))).toBe(true) // wins
-    expect(styles.some((s) => s.includes('--series-1'))).toBe(true) // bonus
-    expect(styles.some((s) => s.includes('--series-6'))).toBe(true) // zero
+    // wins, bonus and 0x each get their own palette color
+    const fills = new Set(styles.filter((s) => s.includes('fill')))
+    expect(fills.size).toBe(3)
   })
 
   it('splits an aggregated bar into segments when groups share a payout', () => {
     const rows: BucketRow[] = [
-      { uid: 'x', bucketId: 0, payout: 5, label: 'hp-fullscreen', weight: 100, locked: false },
-      { uid: 'y', bucketId: 1, payout: 5, label: 'bonus9', weight: 100, locked: false },
+      { uid: 'x', bucketId: 0, payout: 5, label: 'hp-fullscreen', weight: 100, locked: false, groupId: 'other', weightId: '' },
+      { uid: 'y', bucketId: 1, payout: 5, label: 'bonus9', weight: 100, locked: false, groupId: 'other', weightId: '' },
     ]
     renderChart({ metric: 'weights', aggregate: true }, rows)
     expect(document.querySelectorAll('.bar').length).toBe(2)
@@ -91,7 +91,7 @@ describe('DistributionChart grouping', () => {
   })
 
   it('disables the handle of a fully locked group', () => {
-    const rows = baseRows().map((r) => (r.uid === 'a' ? { ...r, locked: true } : r))
+    const rows = baseRows().map((r) => (r.uid === 'a' ? { ...r, locked: true, groupId: 'other', weightId: '' } : r))
     renderChart({ metric: 'weights' }, rows)
     const zero = screen.getByRole('slider', { name: '0x group' })
     expect(zero.getAttribute('aria-disabled')).toBe('true')
@@ -170,7 +170,7 @@ describe('DistributionChart dragging', () => {
   })
 
   it('does not preview from a locked group handle', () => {
-    const rows = baseRows().map((r) => (r.uid === 'a' ? { ...r, locked: true } : r))
+    const rows = baseRows().map((r) => (r.uid === 'a' ? { ...r, locked: true, groupId: 'other', weightId: '' } : r))
     const { onPreview } = renderChart({ metric: 'weights' }, rows)
     const handle = screen.getByRole('slider', { name: '0x group' })
 
@@ -214,13 +214,18 @@ describe('DistributionChart readout', () => {
     fireEvent.mouseOver(document.querySelectorAll('.bar-hit')[2])
     const line = document.querySelector('.readout-title')!
     expect(line.textContent).toBe('bonus3')
-    expect(line.getAttribute('style')).toContain('--series-1')
+    // the bonus group's palette color, matching its bars — compared through a
+    // probe element because jsdom rewrites hex to rgb() on the way in
+    const bonusColor = groupRows(baseRows()).groups.find((g) => g.id === 'bonus')!.color
+    const probe = document.createElement('div')
+    probe.style.color = bonusColor
+    expect((line as HTMLElement).style.color).toBe(probe.style.color)
   })
 
   it('gives each bucket of an aggregated bar its own colored line', () => {
     const rows: BucketRow[] = [
-      { uid: 'x', bucketId: 0, payout: 5, label: 'hp-fullscreen', weight: 100, locked: false },
-      { uid: 'y', bucketId: 1, payout: 5, label: 'bonus9', weight: 100, locked: false },
+      { uid: 'x', bucketId: 0, payout: 5, label: 'hp-fullscreen', weight: 100, locked: false, groupId: 'other', weightId: '' },
+      { uid: 'y', bucketId: 1, payout: 5, label: 'bonus9', weight: 100, locked: false, groupId: 'other', weightId: '' },
     ]
     renderChart({ metric: 'weights', aggregate: true }, rows)
     fireEvent.mouseOver(document.querySelector('.bar-hit')!)

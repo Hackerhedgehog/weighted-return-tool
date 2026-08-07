@@ -15,7 +15,9 @@ export interface Column {
  */
 export const COLUMNS: Column[] = [
   { key: 'lock', label: '', sortable: false, numeric: false, width: 34 },
+  { key: 'group', label: 'Group', sortable: true, numeric: false, width: 108 },
   { key: 'id', label: 'ID', sortable: true, numeric: true, width: 62 },
+  { key: 'weightId', label: 'Weight ID', sortable: true, numeric: false, width: 92 },
   { key: 'payout', label: 'Avg Payout', sortable: true, numeric: true, width: 92 },
   { key: 'label', label: 'Label', sortable: true, numeric: false, width: 150 },
   { key: 'weight', label: 'Weights', sortable: true, numeric: true, width: 118 },
@@ -53,6 +55,11 @@ export function sortRows(
       case 'label':
         return (
           dir * a.label.localeCompare(b.label, undefined, { sensitivity: 'base', numeric: true })
+        )
+      case 'weightId':
+        return (
+          dir *
+          a.weightId.localeCompare(b.weightId, undefined, { sensitivity: 'base', numeric: true })
         )
       case 'payout':
         return dir * (a.payout - b.payout)

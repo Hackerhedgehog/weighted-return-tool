@@ -248,18 +248,37 @@ function freeBudgets(ctx: Ctx, masses: number[]): { budgets: number[]; conflict:
   return { budgets: counts.map((c) => (free * c) / totalCount), conflict }
 }
 
+/**
+ * The index lists the curve is fitted over, and their budgets.
+ *
+ * Normally one per payout group, because the chance targets fix how much mass
+ * each group gets. With the chance targets switched off there is no such
+ * constraint, so the two paying groups are pooled and the curve is free to
+ * move mass across the whole positive ladder — which is the entire point of
+ * turning them off.
+ */
+function curveBands(ctx: Ctx, budgets: number[], pooled: boolean): [number[], number][] {
+  if (!pooled) {
+    return ([1, 2] as const).map((g) => [ctx.freeIdx[g], budgets[g]] as [number[], number])
+  }
+  return [[[...ctx.freeIdx[1], ...ctx.freeIdx[2]], budgets[1] + budgets[2]]]
+}
+
 /** Continuous (pre-rounding) weights for a given band position and slope. */
-function continuousWeights(ctx: Ctx, budgets: number[], gamma: number): number[] {
+function continuousWeights(
+  ctx: Ctx,
+  budgets: number[],
+  gamma: number,
+  pooled = false,
+): number[] {
   const w = new Array<number>(ctx.n).fill(0)
   for (let i = 0; i < ctx.n; i++) if (ctx.locked[i]) w[i] = ctx.current[i]
 
-  for (const g of [0, 1, 2] as const) {
+  {
+    const g = 0 as const
     const idx = ctx.freeIdx[g]
-    if (idx.length === 0) continue
     const budget = budgets[g]
-    if (!(budget > 0)) continue
-
-    if (g === 0) {
+    if (idx.length > 0 && budget > 0) {
       // Zero-payout buckets contribute nothing to RTP and there is no
       // principled curve for them, so keep whatever balance the user has.
       const base = idx.map((i) => ctx.current[i])
@@ -268,9 +287,11 @@ function continuousWeights(ctx: Ctx, budgets: number[], gamma: number): number[]
       idx.forEach((i, k) => {
         w[i] = props[k] * budget
       })
-      continue
     }
+  }
 
+  for (const [idx, budget] of curveBands(ctx, budgets, pooled)) {
+    if (idx.length === 0 || !(budget > 0)) continue
     const logs = idx.map((i) => -gamma * ctx.u[i] - ctx.curve * ctx.u[i] * ctx.u[i])
     const maxLog = Math.max(...logs)
     const raw = logs.map((l) => Math.exp(l - maxLog))
@@ -291,24 +312,43 @@ function rtpOf(ctx: Ctx, w: number[]): number {
 }
 
 /** RTP is monotonically decreasing in gamma, so the range is [at HI, at LO]. */
-function reachRange(ctx: Ctx, budgets: number[]): [number, number] {
+function reachRange(ctx: Ctx, budgets: number[], pooled = false): [number, number] {
   return [
-    rtpOf(ctx, continuousWeights(ctx, budgets, GAMMA_HI)),
-    rtpOf(ctx, continuousWeights(ctx, budgets, GAMMA_LO)),
+    rtpOf(ctx, continuousWeights(ctx, budgets, GAMMA_HI, pooled)),
+    rtpOf(ctx, continuousWeights(ctx, budgets, GAMMA_LO, pooled)),
   ]
 }
 
-function solveGamma(ctx: Ctx, budgets: number[], target: number): number {
+function solveGamma(ctx: Ctx, budgets: number[], target: number, pooled = false): number {
   let lo = GAMMA_LO
   let hi = GAMMA_HI
-  const [min, max] = reachRange(ctx, budgets)
+  const [min, max] = reachRange(ctx, budgets, pooled)
   const goal = clamp(target, min, max)
   for (let k = 0; k < BISECTION_STEPS; k++) {
     const mid = (lo + hi) / 2
-    if (rtpOf(ctx, continuousWeights(ctx, budgets, mid)) > goal) lo = mid
+    if (rtpOf(ctx, continuousWeights(ctx, budgets, mid, pooled)) > goal) lo = mid
     else hi = mid
   }
   return (lo + hi) / 2
+}
+
+/**
+ * Group masses taken from the table as it stands, for when the chance targets
+ * are switched off. The zero-payout share is what hit chance *is*, so holding
+ * it where the user already has it keeps the reported chances honest while
+ * leaving RTP as the only thing being solved for.
+ */
+function currentMasses(ctx: Ctx): number[] {
+  const sums = [0, 1, 2].map(
+    (g) => ctx.lockedSum[g] + ctx.freeIdx[g].reduce((a, i) => a + ctx.current[i], 0),
+  )
+  const tot = sums.reduce((a, b) => a + b, 0)
+  if (!(tot > 0)) {
+    const counts = [0, 1, 2].map((g) => ctx.freeIdx[g].length)
+    const n = counts.reduce((a, b) => a + b, 0)
+    return n > 0 ? counts.map((c) => (ctx.total * c) / n) : [ctx.total, 0, 0]
+  }
+  return sums.map((s) => (s / tot) * ctx.total)
 }
 
 /** Band positions ordered by how much slack they spend. */
@@ -454,7 +494,10 @@ export function solveWeights(
   }
   if (rows.length === 0 || !(totalWeight > 0)) return empty
 
-  const ctx = buildCtx(rows, totalWeight, curve)
+  // Volatility off means no curvature term at all — a pure power law, with
+  // gamma alone left to solve RTP.
+  const ctx = buildCtx(rows, totalWeight, targets.useVolatility ? curve : 0)
+  const pooled = !targets.useChances
   const warnings: string[] = []
 
   if (ctx.freeIdx.every((g) => g.length === 0)) {
@@ -503,7 +546,19 @@ export function solveWeights(
   let chosen: Candidate | null = null
   let fallback: Candidate | null = null
 
-  for (const s of bandCandidates()) {
+  if (pooled) {
+    // Nothing to search: with no chance targets there is no band to spend.
+    const { budgets, conflict } = freeBudgets(ctx, currentMasses(ctx))
+    const [min, max] = reachRange(ctx, budgets, true)
+    chosen = {
+      s: 0,
+      budgets,
+      conflict,
+      reachable: targets.rtp >= min - 1e-12 && targets.rtp <= max + 1e-12,
+    }
+  }
+
+  for (const s of chosen !== null ? [] : bandCandidates()) {
     const { budgets, conflict } = freeBudgets(ctx, massesFor(targets, s, totalWeight))
     const [min, max] = reachRange(ctx, budgets)
     const reachable = targets.rtp >= min - 1e-12 && targets.rtp <= max + 1e-12
@@ -532,8 +587,8 @@ export function solveWeights(
     }
   }
 
-  const gamma = solveGamma(ctx, chosen.budgets, targets.rtp)
-  const weights = allocate(ctx, continuousWeights(ctx, chosen.budgets, gamma), step)
+  const gamma = solveGamma(ctx, chosen.budgets, targets.rtp, pooled)
+  const weights = allocate(ctx, continuousWeights(ctx, chosen.budgets, gamma, pooled), step)
   repairRtp(ctx, weights, targets.rtp, step)
 
   const achieved = statsOf(
@@ -541,7 +596,7 @@ export function solveWeights(
     totalWeight,
   )
 
-  if (chosen.conflict) {
+  if (chosen.conflict && targets.useChances) {
     const over = [0, 1, 2].filter(
       (g) => ctx.lockedSum[g] - massesFor(targets, chosen!.s, totalWeight)[g] > 0.5,
     )
@@ -570,8 +625,11 @@ export function solveWeights(
       )
     }
   }
-  outOfBand('hit chance', achieved.hitChance, targets.hitChance)
-  outOfBand('win chance', achieved.winChance, targets.winChance)
+  // Nothing to report against when the chances are not being steered.
+  if (targets.useChances) {
+    outOfBand('hit chance', achieved.hitChance, targets.hitChance)
+    outOfBand('win chance', achieved.winChance, targets.winChance)
+  }
 
   return { weights, achieved, bandUsed: chosen.s, gamma, warnings }
 }

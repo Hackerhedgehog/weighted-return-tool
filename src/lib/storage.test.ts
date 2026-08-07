@@ -18,7 +18,7 @@ Object.defineProperty(globalThis, 'localStorage', {
 
 const workspace: Workspace = {
   version: 1,
-  rows: [{ uid: 'b1', bucketId: 0, payout: 50.16, label: 'bonus5', weight: 700, locked: true }],
+  rows: [{ uid: 'b1', bucketId: 0, payout: 50.16, label: 'bonus5', weight: 700, locked: true, groupId: 'other', weightId: '' }],
   targets: DEFAULT_TARGETS,
   volatility: 'medium',
   curve: 0.09,

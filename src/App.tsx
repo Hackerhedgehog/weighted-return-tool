@@ -2,6 +2,7 @@ import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import type {
   BucketRow,
   ChartSettings,
+  GroupDef,
   RowPatch,
   SortKey,
   SortState,
@@ -21,13 +22,14 @@ import { DEFAULT_WIDTHS, sortRows } from './lib/columns'
 import { parseTsv, SAMPLE_TSV } from './lib/parse'
 import { rescaleToTotal, retargetRtp, solveWeights, statsOf, stepBlockWarning } from './lib/distribute'
 import { buildTsv, copyTsv, downloadTsv } from './lib/exportTsv'
-import { groupRows } from './lib/groups'
+import { buildGrouping, nextGroupColor, nextGroupId, seedGroups } from './lib/groups'
 import { emptyHistory, pushHistory, redo, undo, type HistoryState } from './lib/history'
 import { DEFAULT_SPINS } from './lib/sim'
 import { clearWorkspace, loadWorkspace, saveWorkspace } from './lib/storage'
 import { BucketTable } from './components/BucketTable'
 import { clampHeight, DIST_HEIGHT, SIM_HEIGHT } from './components/chartUtils'
 import { DistributionChart } from './components/DistributionChart'
+import { GroupSettings } from './components/GroupSettings'
 import { SimulationPanel } from './components/SimulationPanel'
 import { TargetsPanel } from './components/TargetsPanel'
 
@@ -41,14 +43,30 @@ const offStepNotice = (step: number) =>
 /** Everything undo covers. View state deliberately lives outside. */
 interface Doc {
   rows: BucketRow[]
+  /** Seeded from the labels at import, then owned by the user. */
+  groups: GroupDef[]
   targets: Targets
   volatility: Volatility
   curve: number
   weightStep: WeightStep
 }
 
+/** Fills in groups and row fields absent from a pre-groups workspace. */
+function migrateGroups(
+  rows: BucketRow[],
+  groups: GroupDef[] | undefined,
+): { rows: BucketRow[]; groups: GroupDef[] } {
+  const filled = rows.map((r) => ({ ...r, weightId: r.weightId ?? '', groupId: r.groupId ?? '' }))
+  const known = new Set((groups ?? []).map((g) => g.id))
+  if (groups !== undefined && groups.length > 0 && filled.every((r) => known.has(r.groupId))) {
+    return { rows: filled, groups }
+  }
+  return seedGroups(filled)
+}
+
 const emptyDoc = (): Doc => ({
   rows: [],
+  groups: [],
   targets: DEFAULT_TARGETS,
   volatility: 'medium',
   curve: CURVE_PRESETS.medium,
@@ -64,8 +82,11 @@ export default function App() {
     saved === null
       ? emptyDoc()
       : {
-          rows: saved.rows,
-          targets: saved.targets,
+          // A workspace saved before groups were data carries neither a group
+          // list nor row assignments — seed both once, exactly as an import
+          // would, rather than dropping the user's table.
+          ...migrateGroups(saved.rows, saved.groups),
+          targets: { ...DEFAULT_TARGETS, ...saved.targets },
           volatility: saved.volatility,
           curve: saved.curve,
           weightStep: saved.weightStep ?? DEFAULT_WEIGHT_STEP,
@@ -108,6 +129,7 @@ export default function App() {
   )
   const [simSpins, setSimSpins] = useState(saved?.simSpins ?? DEFAULT_SPINS)
   const [targetsCollapsed, setTargetsCollapsed] = useState(saved?.targetsCollapsed ?? false)
+  const [groupsOpen, setGroupsOpen] = useState(false)
   const [sort, setSort] = useState<SortState>({ key: 'id', dir: 1 })
 
   /**
@@ -196,6 +218,7 @@ export default function App() {
       saveWorkspace({
         version: 1,
         rows: doc.rows,
+        groups: doc.groups,
         targets: doc.targets,
         volatility: doc.volatility,
         curve: doc.curve,
@@ -250,7 +273,12 @@ export default function App() {
   const totalWeight = useMemo(() => viewRows.reduce((a, r) => a + r.weight, 0), [viewRows])
   const achieved = useMemo(() => statsOf(viewRows, totalWeight), [viewRows, totalWeight])
   const lockedCount = useMemo(() => doc.rows.filter((r) => r.locked).length, [doc.rows])
-  const grouping = useMemo(() => groupRows(viewRows), [viewRows])
+  const grouping = useMemo(() => buildGrouping(viewRows, doc.groups), [viewRows, doc.groups])
+  const groupCounts = useMemo(() => {
+    const m = new Map<string, number>()
+    for (const r of doc.rows) m.set(r.groupId, (m.get(r.groupId) ?? 0) + 1)
+    return m
+  }, [doc.rows])
 
   // ---- actions ----
 
@@ -277,7 +305,8 @@ export default function App() {
         setNotices(res.warnings)
       }
 
-      commit((d) => ({ ...d, rows }))
+      const seeded = seedGroups(rows)
+      commit((d) => ({ ...d, rows: seeded.rows, groups: seeded.groups }))
       setPasteOpen(false)
       setPasteText('')
       setPasteError(null)
@@ -363,6 +392,55 @@ export default function App() {
     setNotices([offStepNotice(docRef.current.weightStep)])
   }, [])
 
+  // ---- groups ----
+
+  const addGroup = useCallback(() => {
+    commit((d) => ({
+      ...d,
+      groups: [
+        ...d.groups,
+        { id: nextGroupId(d.groups), name: `group ${d.groups.length + 1}`, color: nextGroupColor(d.groups) },
+      ],
+    }))
+  }, [commit])
+
+  const renameGroup = useCallback(
+    (id: string, name: string) => {
+      commit((d) => ({
+        ...d,
+        groups: d.groups.map((g) => (g.id === id ? { ...g, name } : g)),
+      }))
+    },
+    [commit],
+  )
+
+  const recolorGroup = useCallback(
+    (id: string, color: string) => {
+      commit((d) => ({
+        ...d,
+        groups: d.groups.map((g) => (g.id === id ? { ...g, color } : g)),
+      }))
+    },
+    [commit],
+  )
+
+  /** Deleting a group never deletes buckets — they move to the first survivor. */
+  const deleteGroup = useCallback(
+    (id: string) => {
+      commit((d) => {
+        if (d.groups.length <= 1) return d
+        const groups = d.groups.filter((g) => g.id !== id)
+        const fallback = groups[0].id
+        return {
+          ...d,
+          groups,
+          rows: d.rows.map((r) => (r.groupId === id ? { ...r, groupId: fallback } : r)),
+        }
+      })
+    },
+    [commit],
+  )
+
   const exportText = useCallback(
     () => buildTsv(sortRows(docRef.current.rows, sort, totalWeight, grouping.rank), totalWeight),
     [sort, totalWeight, grouping],
@@ -403,6 +481,14 @@ export default function App() {
           </button>
           {hasRows && (
             <>
+              <button
+                type="button"
+                className={`btn ${groupsOpen ? 'primary' : ''}`}
+                aria-expanded={groupsOpen}
+                onClick={() => setGroupsOpen((v) => !v)}
+              >
+                Group settings
+              </button>
               <span className="topbar-sep" aria-hidden="true" />
               <input
                 className="filename-input"
@@ -455,6 +541,26 @@ export default function App() {
             onRedo={doRedo}
           />
 
+          {groupsOpen && (
+            <section className="panel full">
+              <div className="panel-head">
+                <h2>Groups</h2>
+                <span className="panel-hint">
+                  colors drive the chart bars and the table row tints
+                </span>
+              </div>
+              <GroupSettings
+                groups={doc.groups}
+                counts={groupCounts}
+                fallbackName={doc.groups[0]?.name ?? ''}
+                onAdd={addGroup}
+                onRename={renameGroup}
+                onRecolor={recolorGroup}
+                onDelete={deleteGroup}
+              />
+            </section>
+          )}
+
           <div className="content-row" ref={rowRef}>
           <section className="panel buckets">
             <div className="panel-head">
@@ -477,6 +583,7 @@ export default function App() {
               sort={sort}
               columnWidths={columnWidths}
               grouping={grouping}
+              groups={doc.groups}
               weightStep={doc.weightStep}
               onSort={handleSort}
               onPatch={patchRow}

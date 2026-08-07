@@ -5,6 +5,9 @@ import { buildTsv, withTsvExtension, EXPORT_HEADER } from './exportTsv'
 import { solveWeights, statsOf } from './distribute'
 import { CURVE_PRESETS, DEFAULT_TARGETS } from './types'
 
+/** The export's line separator, matching the reference file. */
+const EOL = '\r\n'
+
 const INPUT = readFileSync('example-input-data.tsv', 'utf8')
 const OUTPUT = readFileSync('example-output-data.tsv', 'utf8')
 
@@ -112,5 +115,43 @@ describe('withTsvExtension', () => {
 
   it('falls back when given nothing usable', () => {
     expect(withTsvExtension('   ')).toBe('ref-weights-regular.tsv')
+  })
+})
+
+describe('weight id column', () => {
+  const base = {
+    uid: 'u1',
+    bucketId: 0,
+    payout: 2,
+    label: 'x',
+    weight: 100,
+    locked: false,
+    groupId: 'other',
+    weightId: '',
+  }
+
+  it('is absent entirely when no row uses one', () => {
+    const tsv = buildTsv([base], 100)
+    expect(tsv.split(EOL)[0]).toBe(EXPORT_HEADER)
+    expect(tsv).not.toContain('Weight ID')
+  })
+
+  it('rides as a trailing column as soon as one row has it', () => {
+    const tsv = buildTsv([{ ...base, weightId: 'W-7' }, { ...base, uid: 'u2', bucketId: 1 }], 200)
+    const lines = tsv.split(EOL)
+    expect(lines[0]).toBe(`${EXPORT_HEADER}	Weight ID`)
+    expect(lines[1].split('	')).toHaveLength(7)
+    expect(lines[1].split('	')[6]).toBe('W-7')
+    // the row without one still carries the field, empty
+    expect(lines[2].split('	')[6]).toBe('')
+    // and so does the totals row, so the column count never varies
+    expect(lines[3].split('	')).toHaveLength(7)
+  })
+
+  it('survives a round trip through the parser', () => {
+    const tsv = buildTsv([{ ...base, weightId: 'W-7' }], 100)
+    const back = parseTsv(tsv)
+    expect(back.rows).toHaveLength(1)
+    expect(back.rows[0].weightId).toBe('W-7')
   })
 })
