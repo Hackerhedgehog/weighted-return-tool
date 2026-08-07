@@ -915,6 +915,54 @@ input.gcell.editing {
   z-index: 5;
 }
 
+/* Exact-value entry, opened by right-clicking a bar or a group handle. */
+.chart-entry {
+  position: absolute;
+  z-index: 8;
+  width: 200px;
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  padding: 9px 11px 10px;
+  border: 1px solid var(--line-strong);
+  border-radius: 5px;
+  background: var(--surface);
+  box-shadow: 0 6px 18px rgba(31, 35, 40, 0.18);
+}
+
+.chart-entry-title {
+  font-size: 12px;
+  font-weight: 600;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.chart-entry-field {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+  font-size: 12px;
+  color: var(--text-dim);
+}
+
+.chart-entry-field .panel-num {
+  width: 108px;
+}
+
+.chart-entry-hint {
+  font-size: 11px;
+  color: var(--text-faint);
+  font-variant-numeric: tabular-nums;
+}
+
+.chart-entry-actions {
+  display: flex;
+  justify-content: flex-end;
+  gap: 6px;
+}
+
 /* Five labels fit; a longer list scrolls itself rather than being truncated. */
 .readout-titles {
   min-width: 0;

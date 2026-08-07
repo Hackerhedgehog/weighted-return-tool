@@ -22,7 +22,7 @@ beforeEach(() => {
 
 afterEach(cleanup)
 
-function renderChart(chart: Partial<ChartSettings>, rows = baseRows(), height = 340) {
+function renderChart(chart: Partial<ChartSettings>, rows = baseRows(), height = 340, weightStep: 1 | 10 | 100 = 1) {
   const onChart = vi.fn()
   const onPreview = vi.fn()
   const onCommit = vi.fn()
@@ -35,7 +35,7 @@ function renderChart(chart: Partial<ChartSettings>, rows = baseRows(), height = 
       totalWeight={total}
       chart={{ ...DEFAULT_CHART, logY: false, aggregate: false, ...chart }}
       grouping={groupRows(rows)}
-      weightStep={1}
+      weightStep={weightStep}
       height={height}
       onChart={onChart}
       onPreview={onPreview}
@@ -382,5 +382,61 @@ describe('DistributionChart delta dragging', () => {
     fireEvent.pointerMove(handle, { pointerId: 1, clientY: 200 })
 
     expect(weightsOf(lastRows(onPreview))).toEqual([500_000, 300_000, 150_000, 50_000])
+  })
+})
+
+describe('DistributionChart value entry', () => {
+  it('opens a pre-filled popover when a bar is right-clicked', () => {
+    renderChart({ metric: 'weights' })
+    fireEvent.contextMenu(document.querySelectorAll('.bar-hit')[1], { clientX: 200, clientY: 150 })
+    expect(screen.getByRole('dialog')).toBeDefined()
+    expect((screen.getByLabelText('Weight') as HTMLInputElement).value).toBe('300000')
+  })
+
+  it('opens from a group handle with the group total', () => {
+    renderChart({ metric: 'weights' })
+    fireEvent.contextMenu(screen.getByRole('slider', { name: 'bonus group' }), {
+      clientX: 800,
+      clientY: 100,
+    })
+    expect((screen.getByLabelText('Weight') as HTMLInputElement).value).toBe('200000')
+  })
+
+  it('commits a typed weight as one undo step, preserving the grand total', () => {
+    const { onCommit } = renderChart({ metric: 'weights', relative: true })
+    fireEvent.contextMenu(document.querySelectorAll('.bar-hit')[1], { clientX: 200, clientY: 150 })
+    fireEvent.change(screen.getByLabelText('Weight'), { target: { value: '250000' } })
+    fireEvent.keyDown(screen.getByLabelText('Weight'), { key: 'Enter' })
+
+    expect(onCommit).toHaveBeenCalledTimes(1)
+    const rows = lastRows(onCommit)
+    expect(rows[1].weight).toBe(250_000)
+    expect(sum(weightsOf(rows))).toBe(1_000_000)
+  })
+
+  it('commits a typed percentage in chance mode', () => {
+    const { onCommit } = renderChart({ metric: 'chance' })
+    fireEvent.contextMenu(document.querySelectorAll('.bar-hit')[1], { clientX: 200, clientY: 150 })
+    fireEvent.change(screen.getByLabelText('Chance %'), { target: { value: '25' } })
+    fireEvent.keyDown(screen.getByLabelText('Chance %'), { key: 'Enter' })
+    expect(lastRows(onCommit)[1].weight).toBe(250_000)
+  })
+
+  it('reports a step-blocked entry and keeps the weights', () => {
+    // 1,000,005 free weight cannot be partitioned on a step of 10.
+    const rows = baseRows().map((r) => (r.uid === 'a' ? { ...r, weight: 500_005 } : r))
+    const { onCommit, onDragBlocked } = renderChart({ metric: 'weights', relative: true }, rows, 340, 10)
+    fireEvent.contextMenu(document.querySelectorAll('.bar-hit')[1], { clientX: 200, clientY: 150 })
+    fireEvent.change(screen.getByLabelText('Weight'), { target: { value: '250000' } })
+    fireEvent.keyDown(screen.getByLabelText('Weight'), { key: 'Enter' })
+    expect(onDragBlocked).toHaveBeenCalled()
+    expect(onCommit).not.toHaveBeenCalled()
+  })
+
+  it('does not open on a locked bar', () => {
+    const rows = baseRows().map((r) => (r.uid === 'a' ? { ...r, locked: true } : r))
+    renderChart({ metric: 'weights' }, rows)
+    fireEvent.contextMenu(document.querySelectorAll('.bar-hit')[0], { clientX: 100, clientY: 150 })
+    expect(screen.queryByRole('dialog')).toBeNull()
   })
 })
