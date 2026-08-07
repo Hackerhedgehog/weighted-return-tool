@@ -14,6 +14,7 @@ dist-ssr
 
 # Claude Code's local workspace — worktrees, session scratch
 .claude/
+.superpowers/
 
 # Editor directories and files
 .vscode/*
