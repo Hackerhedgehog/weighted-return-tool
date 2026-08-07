@@ -220,6 +220,9 @@ The numpad remap covers every numeric field, not just the grid. A comma typed
 on the **main** keyboard row keeps its thousands-separator meaning, so
 `1,200,350` still pastes and parses as one number.
 
+The table above is the grid's. The chart resize grips carry their own keys —
+see [The readout, and chart height](#the-readout-and-chart-height).
+
 ### In-cell arithmetic
 
 Number cells accept `+ - * / ( )`. Two ways in:
@@ -403,9 +406,10 @@ evaluator, grouping rules, drag operations and simulation core are where the
 real risk is. The key one is the export acceptance test, which parses
 `example-input-data.tsv`, applies the weights from `example-output-data.tsv`,
 and asserts the generated text matches the reference file byte for byte.
-Component tests drive the chart's drag interactions and the simulation panel
-against a faked worker; the App smoke test covers grouping, sorting and the
-simulation panel end to end.
+Component tests drive the chart's drag interactions, the readout's contents
+and colors, the resize grip's pointer and keyboard paths, and the simulation
+panel against a faked worker; the App smoke test covers grouping, sorting and
+the simulation panel end to end.
 
 ```bash
 npm run test:run
