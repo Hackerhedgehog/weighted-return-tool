@@ -496,12 +496,16 @@ body {
   overflow: visible;
 }
 
+/* Right-aligned in its panel: the columns are fixed-width, so any slack sits
+   on the left and the numbers stay next to the chart they are read against. */
 .grid-table {
   border-collapse: separate;
   border-spacing: 0;
   table-layout: fixed;
   font-variant-numeric: tabular-nums;
   background: var(--surface);
+  margin-left: auto;
+  margin-right: 0;
 }
 
 .grid-table th,

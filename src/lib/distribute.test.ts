@@ -346,11 +346,48 @@ describe('solveWeights with a weight step', () => {
     expect(s.winChance).toBeCloseTo(0.12, 3)
   })
 
-  it('blocks with a warning when the free weight does not divide', () => {
+  it('distributes anyway when the free weight does not divide, parking the remainder', () => {
+    // T = 1,200,350 leaves 50 over the 100-step
     const r = solveWeights(rows, T, DEFAULT_TARGETS, CURVE_PRESETS.medium, 100)
-    expect(r.weights).toEqual(rows.map((row) => Math.max(0, Math.round(row.weight))))
-    expect(r.warnings.some((w) => w.includes('not divisible by 100'))).toBe(true)
-    expect(r.warnings.some((w) => w.includes('1,200,300') && w.includes('1,200,400'))).toBe(true)
+
+    expect(sum(r.weights)).toBe(T)
+    expect(r.weights).not.toEqual(rows.map((row) => Math.max(0, Math.round(row.weight))))
+
+    const offStep = r.weights.filter((w) => w % 100 !== 0)
+    expect(offStep).toHaveLength(1)
+    expect(offStep[0] % 100).toBe(50)
+  })
+
+  it('parks the remainder on the lowest-payout bucket, so RTP barely moves', () => {
+    const r = solveWeights(rows, T, DEFAULT_TARGETS, CURVE_PRESETS.medium, 100)
+    const carrier = r.weights.findIndex((w) => w % 100 !== 0)
+
+    const minPayout = Math.min(...rows.map((row) => row.payout))
+    expect(rows[carrier].payout).toBe(minPayout)
+    expect(statsOf(withWeights(r.weights), T).rtp).toBeCloseTo(0.95, 4)
+  })
+
+  it('says where the remainder went instead of refusing', () => {
+    const r = solveWeights(rows, T, DEFAULT_TARGETS, CURVE_PRESETS.medium, 100)
+    const carrier = r.weights.findIndex((w) => w % 100 !== 0)
+    const note = r.warnings.find((w) => w.includes('remaining'))
+    expect(note).toBeDefined()
+    expect(note).toContain('1,200,350')
+    expect(note).toContain('not a multiple of 100')
+    expect(note).toContain(rows[carrier].label)
+  })
+
+  it('leaves locked rows alone while parking a remainder', () => {
+    const wi = rows.findIndex((r) => r.payout > 1)
+    const locked = rows.map((r, i) => (i === wi ? { ...r, weight: 5000, locked: true } : r))
+    const r = solveWeights(locked, T, DEFAULT_TARGETS, CURVE_PRESETS.medium, 100)
+    expect(r.weights[wi]).toBe(5000)
+    expect(sum(r.weights)).toBe(T)
+  })
+
+  it('needs no remainder note when the free weight divides cleanly', () => {
+    const r = solveWeights(rows, T100, DEFAULT_TARGETS, CURVE_PRESETS.medium, 100)
+    expect(r.warnings.some((w) => w.includes('remaining'))).toBe(false)
   })
 
   it('allows an off-step locked weight when the free budget still divides', () => {

@@ -48,12 +48,22 @@ export function ChartReadout({ titles, stats, anchor, width }: ChartReadoutProps
   const overflow = titles.length > MAX_TITLES ? titles.length - (MAX_TITLES - 1) : 0
   const open = titles.length > 0 && anchor !== null
 
-  // Measured after every content change: the width drives the clamp, so a
-  // stale measurement would let the bubble hang off the edge for one frame.
+  /**
+   * The width drives the clamp, so it is measured rather than assumed, and
+   * re-measured whenever the content resizes the bubble — a five-label
+   * tooltip is much wider than a one-label one. Measuring in a layout effect
+   * keeps the correction ahead of paint, so the bubble never flashes in the
+   * wrong place.
+   */
   useLayoutEffect(() => {
-    const w = ref.current?.offsetWidth ?? 0
-    setBubbleW((prev) => (Math.abs(prev - w) < 0.5 ? prev : w))
-  })
+    const el = ref.current
+    if (el === null) return
+    const measure = () => setBubbleW(el.offsetWidth)
+    measure()
+    const obs = new ResizeObserver(measure)
+    obs.observe(el)
+    return () => obs.disconnect()
+  }, [open])
 
   const half = bubbleW / 2
   const room = width - half - PAD

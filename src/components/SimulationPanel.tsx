@@ -10,6 +10,8 @@ import {
   type SimWorkerMessage,
 } from '../lib/sim'
 import { fmtPayout, fmtPct, fmtRtp, fmtWeight } from '../lib/format'
+import { ChartResizeGrip } from './ChartResizeGrip'
+import { SIM_HEIGHT } from './chartUtils'
 import { SimChart } from './SimChart'
 import { remapNumpadComma } from './numpadDecimal'
 
@@ -293,8 +295,18 @@ export function SimulationPanel({
           onHeight={onChartHeight}
         />
       ) : (
-        <div className="chart-empty">
-          Run a simulation to see the spin-by-spin results converge on the table's RTP.
+        // The placeholder carries the grip too, so the panel can be sized
+        // before there is anything in it.
+        <div className="chart-wrap">
+          <div className="chart-empty" style={{ height: chartHeight }}>
+            Run a simulation to see the spin-by-spin results converge on the table's RTP.
+          </div>
+          <ChartResizeGrip
+            height={chartHeight}
+            range={SIM_HEIGHT}
+            label="Resize the simulation chart"
+            onHeight={onChartHeight}
+          />
         </div>
       )}
     </>

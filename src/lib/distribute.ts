@@ -49,6 +49,47 @@ export function stepBlockWarning(free: number, lockedSum: number, step: number):
   return `Free weight ${fmt(free)} is not divisible by ${step} — set the total weight to ${fmt(lo)} or ${fmt(lo + step)}.`
 }
 
+/**
+ * Which unlocked bucket absorbs an indivisible remainder.
+ *
+ * The cheapest one: a bucket contributes `payout · weight / total` to RTP, so
+ * parking the leftover on the lowest payout disturbs the solved RTP least —
+ * and not at all when a 0x bucket exists, which these tables normally have.
+ * Ties go to the largest weight, then to bucket id, so the pick is stable
+ * across runs rather than dependent on row order.
+ */
+/** Says where an indivisible leftover ended up. Informational, not a refusal. */
+export function stepRemainderNote(
+  free: number,
+  remainder: number,
+  step: number,
+  label: string,
+): string {
+  const fmt = (n: number) => n.toLocaleString('en-US')
+  return `Free weight ${fmt(free)} is not a multiple of ${step} — distributed ${fmt(free - remainder)} on step and added the remaining ${fmt(remainder)} to "${label}".`
+}
+
+function remainderCarrier(rows: BucketRow[], weights: number[]): number {
+  let best = -1
+  for (let i = 0; i < rows.length; i++) {
+    if (rows[i].locked) continue
+    if (best === -1) {
+      best = i
+      continue
+    }
+    const a = rows[i]
+    const b = rows[best]
+    const better =
+      a.payout !== b.payout
+        ? a.payout < b.payout
+        : weights[i] !== weights[best]
+          ? weights[i] > weights[best]
+          : a.bucketId < b.bucketId
+    if (better) best = i
+  }
+  return best
+}
+
 function clamp(v: number, lo: number, hi: number): number {
   return Math.min(Math.max(v, lo), hi)
 }
@@ -401,6 +442,8 @@ export function solveWeights(
   targets: Targets,
   curve: number,
   step: WeightStep = 1,
+  /** Internal: false on the inner call, so the remainder split cannot recurse. */
+  absorbRemainder = true,
 ): SolveResult {
   const empty: SolveResult = {
     weights: rows.map((r) => Math.max(0, Math.round(r.weight))),
@@ -419,8 +462,34 @@ export function solveWeights(
   }
 
   const freeWeight = Math.round(ctx.total - ctx.totalLocked)
-  if (freeWeight % step !== 0) {
-    return { ...empty, warnings: [stepBlockWarning(freeWeight, ctx.totalLocked, step)] }
+  const remainder = freeWeight % step
+  if (remainder !== 0) {
+    // Solve the divisible part and park the leftover on one bucket, so the
+    // grand total stays exact and every other weight stays on the step.
+    // `freeWeight - remainder` divides by construction, so the inner call
+    // takes the normal path; the flag makes that guarantee explicit.
+    const base = absorbRemainder
+      ? solveWeights(rows, totalWeight - remainder, targets, curve, step, false)
+      : null
+    const weights = base === null ? null : [...base.weights]
+    const carrier = weights === null ? -1 : remainderCarrier(rows, weights)
+    if (base === null || weights === null || carrier === -1) {
+      return { ...empty, warnings: [stepBlockWarning(freeWeight, ctx.totalLocked, step)] }
+    }
+
+    weights[carrier] += remainder
+    return {
+      ...base,
+      weights,
+      achieved: statsOf(
+        rows.map((r, i) => ({ ...r, weight: weights[i] })),
+        totalWeight,
+      ),
+      warnings: [
+        ...base.warnings,
+        stepRemainderNote(freeWeight, remainder, step, rows[carrier].label),
+      ],
+    }
   }
 
   // Spend as little of the tolerance band as the targets allow.

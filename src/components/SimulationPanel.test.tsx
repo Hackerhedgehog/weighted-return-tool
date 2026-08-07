@@ -105,6 +105,12 @@ describe('SimulationPanel', () => {
     expect(screen.getByRole('button', { name: 'Run' })).toBeDefined()
   })
 
+  it('can be resized before a run has produced a chart', () => {
+    renderPanel(new FakeWorker())
+    expect(screen.queryByRole('img', { name: 'Simulation results' })).toBeNull()
+    expect(screen.getByRole('separator', { name: 'Resize the simulation chart' })).toBeDefined()
+  })
+
   it('cancel terminates the worker and keeps the partial stats', () => {
     const w = new FakeWorker()
     renderPanel(w)
