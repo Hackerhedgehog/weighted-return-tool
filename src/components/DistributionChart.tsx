@@ -42,6 +42,7 @@ interface DistributionChartProps {
   onPreview: (rows: BucketRow[] | null) => void
   onCommit: (rows: BucketRow[]) => void
   onDragBlocked: () => void
+  onGroupLock: (id: string, locked: boolean) => void
 }
 
 interface Scale {
@@ -128,6 +129,7 @@ export function DistributionChart({
   onPreview,
   onCommit,
   onDragBlocked,
+  onGroupLock,
 }: DistributionChartProps) {
   const [containerRef, width] = useContainerWidth()
   const [hover, setHover] = useState<number | null>(null)
@@ -175,12 +177,14 @@ export function DistributionChart({
       let weight = 0
       let weightedValue = 0
       let allLocked = true
+      let anyLocked = false
       for (const uid of g.uids) {
         const r = byUid.get(uid)
         if (r === undefined) continue
         weight += r.weight
         weightedValue += r.payout * r.weight
         if (!r.locked) allLocked = false
+        if (r.locked) anyLocked = true
       }
       const chance = totalWeight > 0 ? weight / totalWeight : 0
       return {
@@ -190,6 +194,7 @@ export function DistributionChart({
         value: metric === 'weights' ? weight : chance,
         weightedValue: totalWeight > 0 ? weightedValue / totalWeight : 0,
         allLocked,
+        anyLocked,
       }
     })
   }, [rows, grouping, totalWeight, metric])
@@ -622,6 +627,27 @@ export function DistributionChart({
                       height={30}
                       fill="transparent"
                     />
+                    <g
+                      role="button"
+                      className={`handle-lock ${s.allLocked ? 'on' : ''} ${!s.allLocked && s.anyLocked ? 'partial' : ''}`}
+                      aria-label={`${s.allLocked ? 'Unlock' : 'Lock'} the ${s.group.name} group`}
+                      // The padlock sits inside the handle's drag target, so
+                      // its press must not also start a drag.
+                      onPointerDown={(e) => e.stopPropagation()}
+                      onClick={() => onGroupLock(s.group.id, !s.allLocked)}
+                    >
+                      <rect
+                        x={plotRight + MARGIN.right - 26}
+                        y={yLabel - 10}
+                        width={20}
+                        height={20}
+                        rx={3}
+                        fill="transparent"
+                      />
+                      <text x={plotRight + MARGIN.right - 16} y={yLabel + 4} textAnchor="middle">
+                        {s.allLocked ? '🔒' : '🔓'}
+                      </text>
+                    </g>
                   </g>
                 )
               })}

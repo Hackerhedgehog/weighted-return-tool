@@ -22,12 +22,19 @@ beforeEach(() => {
 
 afterEach(cleanup)
 
-function renderChart(chart: Partial<ChartSettings>, rows = baseRows(), height = 340, weightStep: 1 | 10 | 100 = 1) {
+function renderChart(
+  chart: Partial<ChartSettings>,
+  rows = baseRows(),
+  height = 340,
+  weightStep: 1 | 10 | 100 = 1,
+  extra: Partial<React.ComponentProps<typeof DistributionChart>> = {},
+) {
   const onChart = vi.fn()
   const onPreview = vi.fn()
   const onCommit = vi.fn()
   const onDragBlocked = vi.fn()
   const onHeight = vi.fn()
+  const onGroupLock = vi.fn()
   const total = rows.reduce((a, r) => a + r.weight, 0)
   render(
     <DistributionChart
@@ -42,9 +49,11 @@ function renderChart(chart: Partial<ChartSettings>, rows = baseRows(), height = 
       onCommit={onCommit}
       onDragBlocked={onDragBlocked}
       onHeight={onHeight}
+      onGroupLock={onGroupLock}
+      {...extra}
     />,
   )
-  return { onChart, onPreview, onCommit, onDragBlocked, onHeight, rows, total }
+  return { onChart, onPreview, onCommit, onDragBlocked, onHeight, onGroupLock, rows, total }
 }
 
 const lastRows = (fn: ReturnType<typeof vi.fn>): BucketRow[] =>
@@ -438,5 +447,40 @@ describe('DistributionChart value entry', () => {
     renderChart({ metric: 'weights' }, rows)
     fireEvent.contextMenu(document.querySelectorAll('.bar-hit')[0], { clientX: 100, clientY: 150 })
     expect(screen.queryByRole('dialog')).toBeNull()
+  })
+})
+
+describe('DistributionChart group locks', () => {
+  it('locks an unlocked group from its handle', () => {
+    const onGroupLock = vi.fn()
+    renderChart({ metric: 'weights' }, baseRows(), 340, 1, { onGroupLock })
+    fireEvent.click(screen.getByRole('button', { name: 'Lock the bonus group' }))
+    expect(onGroupLock).toHaveBeenCalledWith('bonus', true)
+  })
+
+  it('unlocks a fully locked group from its handle', () => {
+    const onGroupLock = vi.fn()
+    const rows = baseRows().map((r) => (r.payout >= 8 ? { ...r, locked: true } : r))
+    renderChart({ metric: 'weights' }, rows, 340, 1, { onGroupLock })
+    fireEvent.click(screen.getByRole('button', { name: 'Unlock the bonus group' }))
+    expect(onGroupLock).toHaveBeenCalledWith('bonus', false)
+  })
+
+  it('locks the rest of a partly locked group', () => {
+    const onGroupLock = vi.fn()
+    const rows = baseRows().map((r) => (r.uid === 'c' ? { ...r, locked: true } : r))
+    renderChart({ metric: 'weights' }, rows, 340, 1, { onGroupLock })
+    fireEvent.click(screen.getByRole('button', { name: 'Lock the bonus group' }))
+    expect(onGroupLock).toHaveBeenCalledWith('bonus', true)
+  })
+
+  it('does not start a drag when the padlock is pressed', () => {
+    const { onPreview } = renderChart({ metric: 'weights' }, baseRows(), 340, 1, {
+      onGroupLock: vi.fn(),
+    })
+    const lock = screen.getByRole('button', { name: 'Lock the bonus group' })
+    fireEvent.pointerDown(lock, { pointerId: 1, clientY: 250 })
+    fireEvent.pointerMove(lock, { pointerId: 1, clientY: 100 })
+    expect(onPreview).not.toHaveBeenCalled()
   })
 })

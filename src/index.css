@@ -1464,3 +1464,49 @@ input.gcell.editing {
 .solver-switches {
   min-width: 150px;
 }
+
+.group-lock {
+  font-family: inherit;
+  font-size: 13px;
+  line-height: 1;
+  padding: 3px 5px;
+  border: 1px solid transparent;
+  border-radius: 4px;
+  background: none;
+  cursor: pointer;
+  opacity: 0.45;
+}
+
+.group-lock:hover:not(:disabled) {
+  opacity: 1;
+  border-color: var(--line);
+}
+
+.group-lock.on,
+.group-lock.partial {
+  opacity: 1;
+}
+
+.group-lock.partial {
+  opacity: 0.7;
+}
+
+.group-lock:disabled {
+  cursor: default;
+  opacity: 0.2;
+}
+
+.handle-lock {
+  cursor: pointer;
+  font-size: 11px;
+  opacity: 0.35;
+}
+
+.handle-lock:hover,
+.handle-lock.on {
+  opacity: 1;
+}
+
+.handle-lock.partial {
+  opacity: 0.65;
+}

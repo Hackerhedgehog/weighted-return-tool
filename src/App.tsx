@@ -22,7 +22,7 @@ import { DEFAULT_WIDTHS, sortRows } from './lib/columns'
 import { parseTsv, SAMPLE_TSV } from './lib/parse'
 import { rescaleToTotal, retargetRtp, solveWeights, statsOf, stepBlockWarning } from './lib/distribute'
 import { buildTsv, copyTsv, downloadTsv } from './lib/exportTsv'
-import { buildGrouping, nextGroupColor, nextGroupId, seedGroups } from './lib/groups'
+import { buildGrouping, groupLockState, nextGroupColor, nextGroupId, seedGroups, type LockState } from './lib/groups'
 import { emptyHistory, pushHistory, redo, undo, type HistoryState } from './lib/history'
 import { DEFAULT_SPINS } from './lib/sim'
 import { clearWorkspace, loadWorkspace, saveWorkspace } from './lib/storage'
@@ -444,6 +444,26 @@ export default function App() {
     [commit],
   )
 
+  /**
+   * A group lock is just its rows' locks, set together — so undo, the solver
+   * and the export need to know nothing about groups.
+   */
+  const setGroupLocked = useCallback(
+    (id: string, locked: boolean) => {
+      commit((d) => ({
+        ...d,
+        rows: d.rows.map((r) => (r.groupId === id ? { ...r, locked } : r)),
+      }))
+    },
+    [commit],
+  )
+
+  const groupLockStates = useMemo(() => {
+    const m = new Map<string, LockState>()
+    for (const g of doc.groups) m.set(g.id, groupLockState(doc.rows, g.id))
+    return m
+  }, [doc.groups, doc.rows])
+
   const exportText = useCallback(
     () => buildTsv(sortRows(docRef.current.rows, sort, totalWeight, grouping.rank), totalWeight),
     [sort, totalWeight, grouping],
@@ -555,11 +575,13 @@ export default function App() {
               <GroupSettings
                 groups={doc.groups}
                 counts={groupCounts}
+                lockStates={groupLockStates}
                 fallbackName={doc.groups[0]?.name ?? ''}
                 onAdd={addGroup}
                 onRename={renameGroup}
                 onRecolor={recolorGroup}
                 onDelete={deleteGroup}
+                onLock={setGroupLocked}
               />
             </section>
           )}
@@ -612,6 +634,7 @@ export default function App() {
               onPreview={setPreview}
               onCommit={handleDragCommit}
               onDragBlocked={handleDragBlocked}
+              onGroupLock={setGroupLocked}
             />
           </section>
           </div>

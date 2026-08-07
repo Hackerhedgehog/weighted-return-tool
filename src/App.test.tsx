@@ -588,6 +588,23 @@ describe('groups', () => {
     )
     expect(options).not.toContain(label)
   })
+
+  it('locks every bucket in a group and undoes it in one step', () => {
+    render(<App />)
+    fireEvent.click(screen.getByRole('button', { name: 'Load sample' }))
+    fireEvent.click(screen.getByRole('button', { name: 'Group settings' }))
+
+    const lockedRows = () => document.querySelectorAll('.gcell.lock.on').length
+    const before = lockedRows()
+
+    // Both the settings row and the chart handle carry this label, so scope it.
+    const settings = within(document.querySelector('.group-settings') as HTMLElement)
+    fireEvent.click(settings.getByRole('button', { name: 'Lock the bonus group' }))
+    expect(lockedRows()).toBeGreaterThan(before)
+
+    fireEvent.click(screen.getByRole('button', { name: '↶ Undo' }))
+    expect(lockedRows()).toBe(before)
+  })
 })
 
 describe('weight id', () => {

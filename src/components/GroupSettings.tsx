@@ -1,4 +1,5 @@
 import type { GroupDef } from '../lib/types'
+import type { LockState } from '../lib/groups'
 import { PASTEL_COLORS } from '../lib/palette'
 
 /**
@@ -14,30 +15,54 @@ interface GroupSettingsProps {
   groups: GroupDef[]
   /** uid counts per group id, so a delete can say what it will move. */
   counts: Map<string, number>
+  /** Per-group lock state, derived from the member rows' locks. */
+  lockStates: Map<string, LockState>
   fallbackName: string
   onAdd: () => void
   onRename: (id: string, name: string) => void
   onRecolor: (id: string, color: string) => void
   onDelete: (id: string) => void
+  onLock: (id: string, locked: boolean) => void
 }
 
 export function GroupSettings({
   groups,
   counts,
+  lockStates,
   fallbackName,
   onAdd,
   onRename,
   onRecolor,
   onDelete,
+  onLock,
 }: GroupSettingsProps) {
   return (
     <div className="group-settings">
       <div className="group-list">
         {groups.map((g) => {
           const n = counts.get(g.id) ?? 0
+          const state = lockStates.get(g.id) ?? 'none'
           return (
             <div className="group-row" key={g.id}>
               <span className="group-chip" style={{ background: g.color }} aria-hidden="true" />
+              <button
+                type="button"
+                className={`group-lock ${state === 'all' ? 'on' : ''} ${state === 'some' ? 'partial' : ''}`}
+                disabled={n === 0}
+                aria-label={`${state === 'all' ? 'Unlock' : 'Lock'} the ${g.name} group`}
+                title={
+                  n === 0
+                    ? 'No buckets to lock'
+                    : state === 'all'
+                      ? 'Unlock every bucket in this group'
+                      : state === 'some'
+                        ? 'Some buckets are locked — lock the rest'
+                        : 'Lock every bucket in this group'
+                }
+                onClick={() => onLock(g.id, state !== 'all')}
+              >
+                {state === 'all' ? '🔒' : '🔓'}
+              </button>
               <input
                 className="panel-num group-name"
                 value={g.name}
