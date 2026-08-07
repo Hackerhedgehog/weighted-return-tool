@@ -1,4 +1,5 @@
 import { useMemo, useState } from 'react'
+import { ChartReadout, type ReadoutStat } from './ChartReadout'
 import { fmtCompact, niceCeil, useContainerWidth } from './chartUtils'
 import { fmtRtp, fmtWeight } from '../lib/format'
 
@@ -106,11 +107,23 @@ export function SimChart({ points, blockSize, requestedSpins, expectedRtp }: Sim
 
   const h = hover !== null && hover < points.length ? hover : null
 
+  const readoutStats: ReadoutStat[] =
+    h === null
+      ? []
+      : [
+          // The plan ceilings the block size, so the final block runs short —
+          // report what this block actually covered, not the nominal size.
+          { label: 'block', value: `${fmtWeight(spinsOf(h))} spins` },
+          { label: 'block avg', value: fmtRtp(points[h]) },
+          { label: 'RTP so far', value: fmtRtp(cumulative[h]) },
+          { label: 'table RTP', value: fmtRtp(expectedRtp) },
+        ]
+
   return (
     <div className="chart-wrap" ref={containerRef}>
       <div className="sim-legend">
         <span className="legend-item">
-          <span className="legend-line noise" /> block avg
+          <span className="legend-line noise" /> block avg · {fmtWeight(blockSize)} spins each
         </span>
         <span className="legend-item">
           <span className="legend-line cumulative" /> RTP so far
@@ -177,6 +190,7 @@ export function SimChart({ points, blockSize, requestedSpins, expectedRtp }: Sim
         </text>
 
         <rect
+          className="sim-hit"
           x={MARGIN.left}
           y={MARGIN.top}
           width={Math.max(0, plotW)}
@@ -187,26 +201,11 @@ export function SimChart({ points, blockSize, requestedSpins, expectedRtp }: Sim
         />
       </svg>
 
-      {h !== null && (
-        <div
-          className="chart-tooltip"
-          style={{ left: Math.min(Math.max(x(spinsAt[h]), 110), width - 120) }}
-        >
-          <div className="tt-payout">{fmtWeight(spinsAt[h])} spins</div>
-          <div className="tt-row">
-            <span>block avg</span>
-            <b>{fmtRtp(points[h])}</b>
-          </div>
-          <div className="tt-row">
-            <span>RTP so far</span>
-            <b>{fmtRtp(cumulative[h])}</b>
-          </div>
-          <div className="tt-row">
-            <span>table RTP</span>
-            <b>{fmtRtp(expectedRtp)}</b>
-          </div>
-        </div>
-      )}
+      <ChartReadout
+        titles={h === null ? [] : [{ text: `${fmtWeight(spinsAt[h])} spins` }]}
+        stats={readoutStats}
+        hint="hover the chart for block detail"
+      />
     </div>
   )
 }
