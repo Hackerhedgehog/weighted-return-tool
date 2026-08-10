@@ -181,6 +181,44 @@ describe('BankrollSim runs', () => {
     expect(screen.queryByRole('button', { name: 'Continue' })).toBeNull()
   })
 
+  it('clicking Run while a chunk is capped terminates the parked worker and starts a fresh one', () => {
+    const workers: FakeWorker[] = []
+    const createWorker = () => {
+      const w = new FakeWorker()
+      workers.push(w)
+      return w
+    }
+    render(
+      <BankrollSim
+        rows={rows}
+        totalWeight={1_000_000}
+        tableRtp={0.95}
+        config={DEFAULT_BANKROLL}
+        onConfig={vi.fn()}
+        chartHeight={260}
+        onChartHeight={vi.fn()}
+        createWorker={createWorker}
+      />,
+    )
+
+    fireEvent.click(screen.getByRole('button', { name: 'Run' }))
+    const first = workers[0]
+
+    reply(first, {
+      type: 'chunk-done',
+      points: [{ spins: 10_000_000, balance: 1200 }],
+      state: state({ spins: 10_000_000 }),
+      capped: true,
+    })
+    expect(screen.getByRole('button', { name: 'Continue' })).toBeDefined()
+
+    fireEvent.click(screen.getByRole('button', { name: 'Run' }))
+    expect(first.terminated).toBe(true)
+    expect(workers).toHaveLength(2)
+    expect(workers[1].posted).toHaveLength(1)
+    expect(workers[1].posted[0].type).toBe('start')
+  })
+
   it('offers no Continue after a bust', () => {
     const w = new FakeWorker()
     renderSim(w)

@@ -1604,6 +1604,11 @@ export function BankrollSim({
 
   const start = () => {
     if (!canRun) return
+    // Run stays clickable on a capped chunk (so a stuck-but-solvent run can be
+    // abandoned for a fresh one), but a capped chunk deliberately keeps its
+    // worker alive for Continue — so this is the one place that has to tear
+    // an existing worker down explicitly, or it runs on unreferenced.
+    stopWorker()
     const worker = (createWorker ?? defaultFactory)()
     workerRef.current = worker
     worker.onmessage = (e) => handleMessage(e.data)
