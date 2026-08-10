@@ -726,3 +726,46 @@ describe('chrome layout', () => {
     expect(document.querySelector('.topbar-sep')).toBeNull()
   })
 })
+
+describe('simulation modes', () => {
+  it('opens on convergence and switches to bankroll', () => {
+    loadRealData()
+    expect(screen.getByLabelText('Spins')).toBeDefined()
+
+    fireEvent.click(screen.getByRole('button', { name: 'Bankroll' }))
+    expect(screen.getByLabelText('Starting credits')).toBeDefined()
+    expect(screen.getByLabelText('Bet')).toBeDefined()
+    expect(screen.getByLabelText('RTP multiplier')).toBeDefined()
+    expect(screen.queryByLabelText('Spins')).toBeNull()
+  })
+
+  it('defaults the bankroll to a million credits at a bet of one', () => {
+    loadRealData()
+    fireEvent.click(screen.getByRole('button', { name: 'Bankroll' }))
+    expect((screen.getByLabelText('Starting credits') as HTMLInputElement).value).toBe('1,000,000')
+    expect((screen.getByLabelText('Bet') as HTMLInputElement).value).toBe('1')
+  })
+
+  it('remembers the mode and the credits across a reload', () => {
+    loadRealData()
+    fireEvent.click(screen.getByRole('button', { name: 'Bankroll' }))
+    const credits = screen.getByLabelText('Starting credits')
+    fireEvent.change(credits, { target: { value: '250k' } })
+    fireEvent.keyDown(credits, { key: 'Enter' })
+
+    // autosave is debounced by 300ms; flush it the way the other reload tests do
+    return new Promise<void>((resolve) => {
+      setTimeout(() => {
+        cleanup()
+        render(<App />)
+        expect(
+          screen.getByRole('button', { name: 'Bankroll' }).getAttribute('aria-pressed'),
+        ).toBe('true')
+        expect((screen.getByLabelText('Starting credits') as HTMLInputElement).value).toBe(
+          '250,000',
+        )
+        resolve()
+      }, 400)
+    })
+  })
+})

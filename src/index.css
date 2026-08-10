@@ -1558,3 +1558,9 @@ input.gcell.editing {
 .notice.warn + .sim-controls {
   margin-top: 10px;
 }
+
+.sim-modes {
+  display: flex;
+  gap: 6px;
+  padding: 10px 14px 0;
+}

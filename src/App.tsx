@@ -1,9 +1,11 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import type {
+  BankrollConfig,
   BucketRow,
   ChartSettings,
   GroupDef,
   RowPatch,
+  SimMode,
   SortKey,
   SortState,
   Targets,
@@ -12,8 +14,10 @@ import type {
 } from './lib/types'
 import {
   CURVE_PRESETS,
+  DEFAULT_BANKROLL,
   DEFAULT_CHART,
   DEFAULT_EXPORT_FILENAME,
+  DEFAULT_SIM_MODE,
   DEFAULT_TARGETS,
   DEFAULT_WEIGHT_STEP,
   volatilityForCurve,
@@ -131,6 +135,10 @@ export default function App() {
     saved?.exportFilename ?? DEFAULT_EXPORT_FILENAME,
   )
   const [simSpins, setSimSpins] = useState(saved?.simSpins ?? DEFAULT_SPINS)
+  const [simMode, setSimMode] = useState<SimMode>(saved?.simMode ?? DEFAULT_SIM_MODE)
+  const [bankroll, setBankroll] = useState<BankrollConfig>(
+    saved?.bankroll === undefined ? DEFAULT_BANKROLL : { ...DEFAULT_BANKROLL, ...saved.bankroll },
+  )
   const [targetsCollapsed, setTargetsCollapsed] = useState(saved?.targetsCollapsed ?? false)
   const [groupsOpen, setGroupsOpen] = useState(false)
   const [sort, setSort] = useState<SortState>({ key: 'id', dir: 1 })
@@ -229,6 +237,8 @@ export default function App() {
         chart,
         exportFilename,
         simSpins,
+        simMode,
+        bankroll,
         weightStep: doc.weightStep,
         chartHeight,
         simChartHeight,
@@ -242,6 +252,8 @@ export default function App() {
     chart,
     exportFilename,
     simSpins,
+    simMode,
+    bankroll,
     chartHeight,
     simChartHeight,
     targetsCollapsed,
@@ -654,11 +666,15 @@ export default function App() {
               </span>
             </div>
             <SimulationPanel
+              mode={simMode}
+              onMode={setSimMode}
               rows={doc.rows}
               totalWeight={totalWeight}
               expectedRtp={achieved.rtp}
               spins={simSpins}
               onSpins={setSimSpins}
+              bankroll={bankroll}
+              onBankroll={setBankroll}
               chartHeight={simChartHeight}
               onChartHeight={setSimChartHeight}
             />
