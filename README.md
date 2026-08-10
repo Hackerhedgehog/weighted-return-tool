@@ -565,6 +565,10 @@ src/
     interact.ts     relative/absolute subset scaling for chart drags
     sim.ts          Monte Carlo core: PRNG, alias sampling, aggregates
     sim.worker.ts   worker shell around sim.ts
+    bankroll.ts     the bankroll core: per-spin balance arithmetic and the
+                    chart's self-decimating point buffer
+    bankroll.worker.ts resumable bankroll worker; retains balance and PRNG
+                       between chunks
     exportTsv.ts    TSV out, clipboard, download
     history.ts      bounded undo/redo
     storage.ts      localStorage workspace
@@ -578,8 +582,11 @@ src/
     DistributionChart.tsx draggable bars, group handles
     ChartValueEntry.tsx  right-click popover for an exact weight or chance
     GroupBarChips.tsx    which groups are drawn as a single bar
-    SimulationPanel.tsx  spins, run control, live stats
+    SimulationPanel.tsx  mode toggle over the two simulation panels
+    ConvergenceSim.tsx  spins, run control, live stats
+    BankrollSim.tsx      credits, bet, RTP multiplier, Run/Continue, bankroll stats
     SimChart.tsx         realtime simulation chart
+    BankrollChart.tsx    the credit balance chart
     ChartReadout.tsx     the hover tooltip anchored under both charts
     GroupSettings.tsx    add, rename, recolor, lock and delete bucket groups
     ChartResizeGrip.tsx  drag or key a chart taller
@@ -592,18 +599,20 @@ src/
 ## Tests
 
 `src/lib` is covered by Vitest — the solver, parser, formatter, expression
-evaluator, grouping rules, drag operations and simulation core are where the
-real risk is. `bars.ts` carries the chart's construction rules and is tested
-directly: group collapse, mean-payout placement, the log-axis zero drop and
-the interaction with equal-payout aggregation. The key one is the export
+evaluator, grouping rules, drag operations and both simulation cores are
+where the real risk is. `bars.ts` carries the chart's construction rules and
+is tested directly: group collapse, mean-payout placement, the log-axis zero
+drop and the interaction with equal-payout aggregation. `bankroll.ts` is
+tested directly too: the balance arithmetic, the bust boundary, `continue`'s
+resumability and the point buffer's decimation. The key one is the export
 acceptance test, which parses `example-input-data.tsv`, applies the weights
 from `example-output-data.tsv`, and asserts the generated text matches the
 reference file byte for byte.
 Component tests drive the chart's drag interactions, the tooltip's contents,
 colors and edge clamping, the resize grip's pointer and keyboard paths, and
-the simulation panel against a faked worker; the App smoke test covers
+both simulation panels against faked workers; the App smoke test covers
 grouping, sorting, the targets panel's collapse and the simulation panel end
-to end.
+to end, including switching modes and persisting which one is active.
 
 ```bash
 npm run test:run
