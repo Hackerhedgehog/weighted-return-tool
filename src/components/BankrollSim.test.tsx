@@ -257,3 +257,54 @@ describe('BankrollSim runs', () => {
     expect(screen.getByText(/zero weight/)).toBeDefined()
   })
 })
+
+describe('BankrollSim stat tiles snapshot the run', () => {
+  it('scales Biggest Win by the run\'s own bet, not the default of 1', () => {
+    const w = new FakeWorker()
+    renderSim(w, { ...DEFAULT_BANKROLL, bet: 4 })
+    fireEvent.click(screen.getByRole('button', { name: 'Run' }))
+
+    reply(w, { type: 'progress', points: [{ spins: 100, balance: 1200 }], state: state({ maxWin: 12 }) })
+
+    const tiles = within(document.querySelector('.sim-stats') as HTMLElement)
+    expect(tiles.getByText('48')).toBeDefined()
+  })
+
+  it('keeps the Biggest Win and RTP tiles pinned to the run after a live Bet edit', () => {
+    const w = new FakeWorker()
+    const onConfig = vi.fn()
+    const props = (config: BankrollConfig) => ({
+      rows,
+      totalWeight: 1_000_000,
+      tableRtp: 0.95,
+      config,
+      onConfig,
+      chartHeight: 260,
+      onChartHeight: vi.fn(),
+      createWorker: () => w,
+    })
+    const { rerender } = render(<BankrollSim {...props(DEFAULT_BANKROLL)} />)
+    fireEvent.click(screen.getByRole('button', { name: 'Run' }))
+
+    reply(w, {
+      type: 'chunk-done',
+      points: [{ spins: 10_000_000, balance: 1200 }],
+      state: state({ spins: 10_000_000, maxWin: 12 }),
+      capped: true,
+    })
+
+    const tiles = () => within(document.querySelector('.sim-stats') as HTMLElement)
+    expect(tiles().getByText('12')).toBeDefined()
+
+    const input = screen.getByLabelText('Bet')
+    fireEvent.change(input, { target: { value: '10' } })
+    fireEvent.keyDown(input, { key: 'Enter' })
+    expect(onConfig).toHaveBeenCalledWith({ ...DEFAULT_BANKROLL, bet: 10 })
+
+    // The parent applies the edit — `config` now carries the new bet — but a
+    // chunk that already ran at bet 1 must not relabel itself as bet 10.
+    rerender(<BankrollSim {...props({ ...DEFAULT_BANKROLL, bet: 10 })} />)
+    expect(tiles().getByText('12')).toBeDefined()
+    expect(tiles().queryByText('120')).toBeNull()
+  })
+})

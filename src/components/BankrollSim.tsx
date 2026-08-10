@@ -49,8 +49,15 @@ interface BankrollSimProps {
 
 interface Run {
   status: 'running' | 'capped' | 'busted' | 'cancelled' | 'error'
-  /** Snapshotted at Run, so the chart's reference matches what ran. */
+  /**
+   * Snapshotted at Run, so the chart's reference and the stat tiles match what
+   * actually ran — a live `config.bet` or a live `effective` would let an edit
+   * mid-run (or a Continue, which keeps the worker's original bet) relabel a
+   * result that never happened.
+   */
   startCredits: number
+  bet: number
+  effective: number
   points: BankrollPoint[]
   state: BankrollState
   error?: string
@@ -135,7 +142,14 @@ export function BankrollSim({
     stopWorker()
     const worker = (createWorker ?? defaultFactory)()
     workerRef.current = worker
-    worker.onmessage = (e) => handleMessage(e.data)
+    worker.onmessage = (e) => {
+      // Stale by construction today (`start` always tears the old worker down
+      // first), but the handler must not act on behalf of a worker that is no
+      // longer the current one — `stopWorker` would terminate whatever
+      // `workerRef.current` holds *now*, not the worker that posted this.
+      if (workerRef.current !== worker) return
+      handleMessage(e.data)
+    }
     worker.postMessage({
       type: 'start',
       payouts: rows.map((r) => r.payout),
@@ -146,6 +160,8 @@ export function BankrollSim({
     setRun({
       status: 'running',
       startCredits: config.credits,
+      bet: config.bet,
+      effective,
       points: [],
       state: initialBankrollState(config.credits),
     })
@@ -288,10 +304,10 @@ export function BankrollSim({
           </div>
           <div className="sim-tile">
             <span className="sim-tile-value">{fmtRtp(realisedRtp(stats))}</span>
-            <span className="sim-tile-label">RTP · table {fmtRtp(effective)}</span>
+            <span className="sim-tile-label">RTP · effective {fmtRtp(run!.effective)}</span>
           </div>
           <div className="sim-tile">
-            <span className="sim-tile-value">{fmtWeight(stats.maxWin * config.bet)}</span>
+            <span className="sim-tile-value">{fmtWeight(stats.maxWin * run!.bet)}</span>
             <span className="sim-tile-label">Biggest Win</span>
           </div>
         </div>

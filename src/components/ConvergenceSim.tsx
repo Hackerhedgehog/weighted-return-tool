@@ -159,7 +159,12 @@ export function ConvergenceSim({
 
     const worker = factory()
     workerRef.current = worker
-    worker.onmessage = (e) => handleMessage(e.data)
+    worker.onmessage = (e) => {
+      // See BankrollSim's identical guard: a handler must not act on behalf
+      // of a worker that is no longer the current one.
+      if (workerRef.current !== worker) return
+      handleMessage(e.data)
+    }
     worker.postMessage({
       payouts: rows.map((r) => r.payout),
       weights: rows.map((r) => Math.max(0, Math.round(r.weight))),
