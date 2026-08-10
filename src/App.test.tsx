@@ -727,6 +727,23 @@ describe('groups', () => {
     )
     expect(options).not.toContain(label)
   })
+
+  it('locks every bucket in a group and undoes it in one step', () => {
+    render(<App />)
+    fireEvent.click(screen.getByRole('button', { name: 'Load sample' }))
+    fireEvent.click(screen.getByRole('button', { name: 'Group settings' }))
+
+    const lockedRows = () => document.querySelectorAll('.gcell.lock.on').length
+    const before = lockedRows()
+
+    // Both the settings row and the chart handle carry this label, so scope it.
+    const settings = within(document.querySelector('.group-settings') as HTMLElement)
+    fireEvent.click(settings.getByRole('button', { name: 'Lock the bonus group' }))
+    expect(lockedRows()).toBeGreaterThan(before)
+
+    fireEvent.click(screen.getByRole('button', { name: '↶ Undo' }))
+    expect(lockedRows()).toBe(before)
+  })
 })
 
 describe('weight id', () => {
@@ -775,5 +792,231 @@ describe('solver switches', () => {
 
     const rtp = document.querySelector('.totals-row .col-weightedValue .gcell')!.textContent!
     expect(Number(rtp)).toBeCloseTo(0.95, 4)
+  })
+})
+
+describe('group bars', () => {
+  it('collapses a group into one bar from the chip row', () => {
+    render(<App />)
+    fireEvent.click(screen.getByRole('button', { name: 'Load sample' }))
+
+    const before = document.querySelectorAll('.bar').length
+    fireEvent.click(screen.getByRole('button', { name: 'bonus' }))
+
+    expect(document.querySelectorAll('.bar').length).toBeLessThan(before)
+    expect(screen.getByRole('button', { name: 'bonus', pressed: true })).toBeDefined()
+  })
+
+  it('restores collapsed groups from a saved workspace', () => {
+    saveWorkspace({
+      version: 1,
+      rows: [
+        { uid: 'b1', bucketId: 0, payout: 2, label: 'bonus3', weight: 500, locked: false, groupId: 'bonus', weightId: '' },
+        { uid: 'b2', bucketId: 1, payout: 8, label: 'bonus4', weight: 500, locked: false, groupId: 'bonus', weightId: '' },
+      ],
+      groups: [{ id: 'bonus', name: 'bonus', color: '#a8d8ea' }],
+      targets: DEFAULT_TARGETS,
+      volatility: 'medium',
+      curve: 0.09,
+      columnWidths: {},
+      chart: { ...DEFAULT_CHART, groupBars: ['bonus'] },
+      exportFilename: 'f.tsv',
+    })
+    render(<App />)
+    expect(screen.getByRole('button', { name: 'bonus', pressed: true })).toBeDefined()
+    expect(document.querySelectorAll('.bar')).toHaveLength(1)
+  })
+})
+
+describe('chrome layout', () => {
+  it('opens group settings from the targets panel', () => {
+    render(<App />)
+    fireEvent.click(screen.getByRole('button', { name: 'Load sample' }))
+    const targets = document.querySelector('.targets')!
+    const btn = screen.getByRole('button', { name: 'Group settings' })
+    expect(targets.contains(btn)).toBe(true)
+    fireEvent.click(btn)
+    expect(screen.getByRole('heading', { name: 'Groups' })).toBeDefined()
+  })
+
+  it('keeps group settings reachable when the targets panel is collapsed', () => {
+    render(<App />)
+    fireEvent.click(screen.getByRole('button', { name: 'Load sample' }))
+    fireEvent.click(screen.getByRole('button', { name: /Targets/ }))
+    expect(screen.getByRole('button', { name: 'Group settings' })).toBeDefined()
+  })
+
+  it('separates import from export in the top bar', () => {
+    render(<App />)
+    fireEvent.click(screen.getByRole('button', { name: 'Load sample' }))
+
+    const blocks = [...document.querySelectorAll('.topbar-block')]
+    expect(blocks.map((b) => b.querySelector('.topbar-block-label')!.textContent)).toEqual([
+      'Import',
+      'Export',
+    ])
+    expect(blocks[0].contains(screen.getByRole('button', { name: 'Paste TSV data' }))).toBe(true)
+    expect(blocks[1].contains(screen.getByRole('button', { name: 'Copy TSV' }))).toBe(true)
+    expect(blocks[1].contains(screen.getByLabelText('Export filename'))).toBe(true)
+
+    // Destructive, and deliberately outside both blocks.
+    const clear = screen.getByRole('button', { name: 'Clear workspace' })
+    expect(blocks.some((b) => b.contains(clear))).toBe(false)
+    expect(document.querySelector('.topbar-sep')).toBeNull()
+  })
+})
+
+describe('simulation modes', () => {
+  it('opens on convergence and switches to bankroll', () => {
+    loadRealData()
+    expect(screen.getByLabelText('Spins')).toBeDefined()
+
+    fireEvent.click(screen.getByRole('button', { name: 'Bankroll' }))
+    expect(screen.getByLabelText('Starting credits')).toBeDefined()
+    expect(screen.getByLabelText('Bet')).toBeDefined()
+    expect(screen.getByLabelText('RTP multiplier')).toBeDefined()
+    expect(screen.queryByLabelText('Spins')).toBeNull()
+  })
+
+  it('defaults the bankroll to a million credits at a bet of one', () => {
+    loadRealData()
+    fireEvent.click(screen.getByRole('button', { name: 'Bankroll' }))
+    expect((screen.getByLabelText('Starting credits') as HTMLInputElement).value).toBe('1,000,000')
+    expect((screen.getByLabelText('Bet') as HTMLInputElement).value).toBe('1')
+  })
+
+  it('remembers the mode and the credits across a reload', () => {
+    loadRealData()
+    fireEvent.click(screen.getByRole('button', { name: 'Bankroll' }))
+    const credits = screen.getByLabelText('Starting credits')
+    fireEvent.change(credits, { target: { value: '250k' } })
+    fireEvent.keyDown(credits, { key: 'Enter' })
+
+    // autosave is debounced by 300ms; flush it the way the other reload tests do
+    return new Promise<void>((resolve) => {
+      setTimeout(() => {
+        cleanup()
+        render(<App />)
+        expect(
+          screen.getByRole('button', { name: 'Bankroll' }).getAttribute('aria-pressed'),
+        ).toBe('true')
+        expect((screen.getByLabelText('Starting credits') as HTMLInputElement).value).toBe(
+          '250,000',
+        )
+        resolve()
+      }, 400)
+    })
+  })
+
+  it('clamps a hand-edited out-of-range bankroll config instead of trusting it', () => {
+    saveWorkspace({
+      version: 1,
+      rows: [
+        { uid: 'b1', bucketId: 0, payout: 2, label: 'x', weight: 500, locked: false, groupId: 'other', weightId: '' },
+      ],
+      targets: DEFAULT_TARGETS,
+      volatility: 'medium',
+      curve: 0.09,
+      columnWidths: {},
+      chart: DEFAULT_CHART,
+      exportFilename: 'f.tsv',
+      // A bet of 0 never busts and burns a full 10M-spin chunk on Continue; a
+      // negative multiplier would pay out negative credits.
+      bankroll: { credits: 5000, bet: 0, rtpMultiplier: -1 },
+    })
+    render(<App />)
+    fireEvent.click(screen.getByRole('button', { name: 'Bankroll' }))
+
+    expect((screen.getByLabelText('Bet') as HTMLInputElement).value).toBe('0.000001')
+    expect((screen.getByLabelText('RTP multiplier') as HTMLInputElement).value).toBe('0')
+    expect((screen.getByLabelText('Starting credits') as HTMLInputElement).value).toBe('5,000')
+  })
+})
+
+describe('distribution chart height', () => {
+  // jsdom implements no layout at all: offsetHeight is always 0 (nothing for
+  // the observer to read) and getBoundingClientRect always returns zeros
+  // (real browsers compute both from actual layout). Stub offsetHeight for
+  // the table panel and the chart panel, and getBoundingClientRect for the
+  // chart svg specifically (the app reads the svg's height that way, not via
+  // offsetHeight — SVG elements have no offsetHeight per spec, it's a
+  // Chromium/WebKit-only extension that Gecko doesn't implement). Put both
+  // back after — ChartReadout and the targets panel measure themselves
+  // through offsetHeight too, and other code calls getBoundingClientRect on
+  // other elements (e.g. the value-entry popover's positioning).
+  const REAL_OFFSET_HEIGHT = Object.getOwnPropertyDescriptor(
+    HTMLElement.prototype,
+    'offsetHeight',
+  )!
+  const REAL_GET_BOUNDING_CLIENT_RECT = Element.prototype.getBoundingClientRect
+
+  // An arbitrary fixed panel height: only its distance from the svg height
+  // below (the `chrome`) is meaningful, since the app derives chrome as
+  // panelHeight - svgHeight.
+  const CHART_PANEL_PX = 1000
+
+  /**
+   * `chrome` stands in for everything the real chart panel has besides its
+   * SVG — panel-head, .chart-controls, the group chips row, the fixed
+   * readout band, the grip. Both stubs return fixed numbers regardless of
+   * what the app renders, so there is nothing here that could oscillate; the
+   * app's own oscillation-safety is what Important 2 is about, not this stub.
+   */
+  const withTableHeight = (tablePx: number, chrome = 150) => {
+    Object.defineProperty(HTMLElement.prototype, 'offsetHeight', {
+      configurable: true,
+      get(this: HTMLElement) {
+        if (this.classList.contains('buckets')) return tablePx
+        if (this.classList.contains('chart')) return CHART_PANEL_PX
+        return 0
+      },
+    })
+    Element.prototype.getBoundingClientRect = function (this: Element) {
+      if (this.getAttribute('aria-label') === 'Bucket distribution') {
+        return { height: CHART_PANEL_PX - chrome } as unknown as DOMRect
+      }
+      return REAL_GET_BOUNDING_CLIENT_RECT.call(this)
+    }
+  }
+
+  afterEach(() => {
+    Object.defineProperty(HTMLElement.prototype, 'offsetHeight', REAL_OFFSET_HEIGHT)
+    Element.prototype.getBoundingClientRect = REAL_GET_BOUNDING_CLIENT_RECT
+  })
+
+  const chart = () => screen.getByRole('img', { name: 'Bucket distribution' })
+
+  it('fits the table minus the chart panel’s own chrome, clamped to the chart range', () => {
+    withTableHeight(500, 150)
+    loadRealData()
+    expect(Number(chart().getAttribute('height'))).toBe(350)
+  })
+
+  it('clamps a table taller than the chart ceiling', () => {
+    withTableHeight(5000, 150)
+    loadRealData()
+    expect(Number(chart().getAttribute('height'))).toBe(900)
+  })
+
+  it('clamps a table shorter than the chart floor', () => {
+    withTableHeight(80, 150)
+    loadRealData()
+    expect(Number(chart().getAttribute('height'))).toBe(220)
+  })
+
+  it('stops fitting once the grip has been dragged, and fits again after a reset', () => {
+    withTableHeight(700, 150)
+    loadRealData()
+    const grip = screen.getByRole('separator', { name: 'Resize the distribution chart' })
+    // Auto-fit height is 700 (table) - 150 (chrome) = 550.
+    expect(Number(chart().getAttribute('height'))).toBe(550)
+
+    fireEvent.pointerDown(grip, { button: 0, clientY: 0 })
+    fireEvent.pointerMove(grip, { clientY: -200 })
+    fireEvent.pointerUp(grip)
+    expect(Number(chart().getAttribute('height'))).toBe(350)
+
+    fireEvent.doubleClick(grip)
+    expect(Number(chart().getAttribute('height'))).toBe(550)
   })
 })

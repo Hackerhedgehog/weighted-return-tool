@@ -89,12 +89,24 @@ body {
   gap: 8px;
 }
 
-/* Thin rules grouping load · export · destructive actions. */
-.topbar-sep {
-  width: 1px;
-  align-self: stretch;
-  min-height: 20px;
-  background: var(--line);
+/* Import and export read as two things, which a hairline rule never conveyed.
+   Same card treatment as the targets panel. */
+.topbar-block {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 7px 10px 8px;
+  border: 1px solid var(--line);
+  border-radius: 6px;
+  background: var(--surface);
+}
+
+.topbar-block-label {
+  font-size: 11px;
+  font-weight: 600;
+  letter-spacing: 0.04em;
+  text-transform: uppercase;
+  color: var(--text-dim);
 }
 
 /* ---------- buttons ---------- */
@@ -777,6 +789,52 @@ input.gcell.editing {
   border-bottom: 1px solid var(--line);
 }
 
+.group-bar-chips {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  flex-wrap: wrap;
+  padding: 8px 14px;
+  border-bottom: 1px solid var(--line);
+}
+
+.group-bar-chips .field-label {
+  margin-right: 2px;
+}
+
+.group-bar-chip {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  font-family: inherit;
+  font-size: 12px;
+  color: var(--text);
+  background: var(--surface);
+  border: 1px solid var(--line);
+  border-radius: 4px;
+  padding: 3px 8px;
+  cursor: pointer;
+}
+
+.group-bar-chip:hover {
+  border-color: var(--line-strong);
+}
+
+.group-bar-chip.on {
+  border-color: var(--accent);
+  background: var(--accent-soft);
+  font-weight: 600;
+}
+
+.chip-swatch {
+  width: 10px;
+  height: 10px;
+  border-radius: 2px;
+  flex: none;
+  /* Hollow until collapsed, so the chip's own state reads at a glance. */
+  box-shadow: inset 0 0 0 1px rgba(31, 35, 40, 0.18);
+}
+
 .checkbox {
   display: inline-flex;
   align-items: center;
@@ -913,6 +971,54 @@ input.gcell.editing {
   white-space: nowrap;
   pointer-events: none;
   z-index: 5;
+}
+
+/* Exact-value entry, opened by right-clicking a bar or a group handle. */
+.chart-entry {
+  position: absolute;
+  z-index: 8;
+  width: 200px;
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  padding: 9px 11px 10px;
+  border: 1px solid var(--line-strong);
+  border-radius: 5px;
+  background: var(--surface);
+  box-shadow: 0 6px 18px rgba(31, 35, 40, 0.18);
+}
+
+.chart-entry-title {
+  font-size: 12px;
+  font-weight: 600;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.chart-entry-field {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+  font-size: 12px;
+  color: var(--text-dim);
+}
+
+.chart-entry-field .panel-num {
+  width: 108px;
+}
+
+.chart-entry-hint {
+  font-size: 11px;
+  color: var(--text-faint);
+  font-variant-numeric: tabular-nums;
+}
+
+.chart-entry-actions {
+  display: flex;
+  justify-content: flex-end;
+  gap: 6px;
 }
 
 /* Five labels fit; a longer list scrolls itself rather than being truncated. */
@@ -1129,6 +1235,21 @@ input.gcell.editing {
   border-top-width: 1px;
   border-top-style: dashed;
   border-color: var(--text-dim);
+}
+
+/* The bankroll chart's own legend swatches — deliberately not sharing
+   `.cumulative` / `.expected` with the convergence chart above: those bind to
+   `--series-0` / `--text-dim`, but `.bankroll-path` and `.bankroll-start-line`
+   (further down) stroke `--accent` and `--line-strong`. Reusing the shared
+   classes here would draw a swatch that doesn't match the line it labels. */
+.legend-line.bankroll-balance {
+  border-color: var(--accent);
+}
+
+.legend-line.bankroll-start {
+  border-top-width: 1px;
+  border-top-style: dashed;
+  border-color: var(--line-strong);
 }
 
 .legend-note {
@@ -1394,4 +1515,92 @@ input.gcell.editing {
 .bridge-error {
   opacity: 1;
   color: #ff6b6b;
+}
+
+.group-lock {
+  font-family: inherit;
+  font-size: 13px;
+  line-height: 1;
+  padding: 3px 5px;
+  border: 1px solid transparent;
+  border-radius: 4px;
+  background: none;
+  cursor: pointer;
+  opacity: 0.45;
+}
+
+.group-lock:hover:not(:disabled) {
+  opacity: 1;
+  border-color: var(--line);
+}
+
+.group-lock.on,
+.group-lock.partial {
+  opacity: 1;
+}
+
+.group-lock.partial {
+  opacity: 0.7;
+}
+
+.group-lock:disabled {
+  cursor: default;
+  opacity: 0.2;
+}
+
+.handle-lock {
+  cursor: pointer;
+  font-size: 11px;
+  opacity: 0.35;
+}
+
+.handle-lock:hover,
+.handle-lock.on {
+  opacity: 1;
+}
+
+.handle-lock:focus-visible {
+  opacity: 1;
+  outline: 2px solid var(--accent-soft);
+  outline-offset: 1px;
+}
+
+.handle-lock.partial {
+  opacity: 0.65;
+}
+
+/* ---------- bankroll chart ---------- */
+
+.bankroll-path {
+  fill: none;
+  stroke: var(--accent);
+  stroke-width: 1.6;
+  stroke-linejoin: round;
+}
+
+.bankroll-start-line {
+  stroke: var(--line-strong);
+  stroke-width: 1;
+  stroke-dasharray: 4 3;
+}
+
+.bankroll-bust line {
+  stroke: var(--danger);
+  stroke-width: 1;
+  stroke-dasharray: 2 2;
+}
+
+.bankroll-bust circle {
+  fill: var(--danger);
+}
+
+.sim-controls + .sim-stats,
+.notice.warn + .sim-controls {
+  margin-top: 10px;
+}
+
+.sim-modes {
+  display: flex;
+  gap: 6px;
+  padding: 10px 14px 0;
 }

@@ -1,9 +1,11 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import type {
+  BankrollConfig,
   BucketRow,
   ChartSettings,
   GroupDef,
   RowPatch,
+  SimMode,
   SortKey,
   SortState,
   Targets,
@@ -12,17 +14,20 @@ import type {
 } from './lib/types'
 import {
   CURVE_PRESETS,
+  DEFAULT_BANKROLL,
   DEFAULT_CHART,
   DEFAULT_EXPORT_FILENAME,
+  DEFAULT_SIM_MODE,
   DEFAULT_TARGETS,
   DEFAULT_WEIGHT_STEP,
   volatilityForCurve,
 } from './lib/types'
+import { clampBankrollConfig } from './lib/bankroll'
 import { DEFAULT_WIDTHS, sortRows } from './lib/columns'
 import { parseTsv, SAMPLE_TSV } from './lib/parse'
 import { rescaleToTotal, retargetRtp, solveWeights, statsOf, stepBlockWarning } from './lib/distribute'
 import { buildTsv, copyTsv, downloadTsv, withTsvExtension } from './lib/exportTsv'
-import { buildGrouping, nextGroupColor, nextGroupId, seedGroups } from './lib/groups'
+import { buildGrouping, groupLockState, nextGroupColor, nextGroupId, seedGroups, type LockState } from './lib/groups'
 import { emptyHistory, pushHistory, redo, undo, type HistoryState } from './lib/history'
 import { DEFAULT_SPINS } from './lib/sim'
 import { clearWorkspace, loadWorkspace, saveWorkspace } from './lib/storage'
@@ -40,6 +45,9 @@ const SAVE_DEBOUNCE_MS = 300
 
 const offStepNotice = (step: number) =>
   `The current weights are not multiples of ${step} — run Auto-Distribute first, or set the weight step to free.`
+
+const pinnedNotice =
+  'Every other unlocked bucket is locked — the grand total pins this weight where it is. Unlock something to move it.'
 
 /** Everything undo covers. View state deliberately lives outside. */
 interface Doc {
@@ -122,6 +130,15 @@ export default function App() {
   const [chartHeight, setChartHeight] = useState(() =>
     clampHeight(saved?.chartHeight ?? DIST_HEIGHT.fallback, DIST_HEIGHT),
   )
+  /**
+   * Auto-fit defaults on, even for a workspace that already has a chartHeight:
+   * that field is written on every save, not only on a manual resize, so its
+   * presence says nothing about whether the user ever chose it.
+   */
+  const [chartHeightAuto, setChartHeightAuto] = useState(saved?.chartHeightAuto ?? true)
+  const [tableHeight, setTableHeight] = useState<number | null>(null)
+  /** The chart panel's own chrome (everything besides its SVG) — see rowRef. */
+  const [chartChrome, setChartChrome] = useState(0)
   const [simChartHeight, setSimChartHeight] = useState(() =>
     clampHeight(saved?.simChartHeight ?? SIM_HEIGHT.fallback, SIM_HEIGHT),
   )
@@ -129,6 +146,15 @@ export default function App() {
     saved?.exportFilename ?? DEFAULT_EXPORT_FILENAME,
   )
   const [simSpins, setSimSpins] = useState(saved?.simSpins ?? DEFAULT_SPINS)
+  const [simMode, setSimMode] = useState<SimMode>(saved?.simMode ?? DEFAULT_SIM_MODE)
+  // Clamped on the way in, like chartHeight above: a hand-edited bet of 0
+  // never busts and burns a full 10M-spin chunk per Continue, and a negative
+  // multiplier pays out negative credits.
+  const [bankroll, setBankroll] = useState<BankrollConfig>(() =>
+    clampBankrollConfig(
+      saved?.bankroll === undefined ? DEFAULT_BANKROLL : { ...DEFAULT_BANKROLL, ...saved.bankroll },
+    ),
+  )
   const [targetsCollapsed, setTargetsCollapsed] = useState(saved?.targetsCollapsed ?? false)
   const [groupsOpen, setGroupsOpen] = useState(false)
   const [sort, setSort] = useState<SortState>({ key: 'id', dir: 1 })
@@ -149,10 +175,46 @@ export default function App() {
   const rowRef = useCallback((el: HTMLDivElement | null) => {
     if (el === null) return
     const check = () => {
-      const [table, chart] = [...el.children] as HTMLElement[]
-      if (table === undefined || chart === undefined) return
-      const stacked = table.offsetTop !== chart.offsetTop
+      const [table, chartPanel] = [...el.children] as HTMLElement[]
+      if (table === undefined || chartPanel === undefined) return
+      const stacked = table.offsetTop !== chartPanel.offsetTop
       if (el.classList.contains('stacked') !== stacked) el.classList.toggle('stacked', stacked)
+
+      // The chart defaults to the table's height. Safe against a feedback loop:
+      // the two panels are independent flex items under align-items: flex-start,
+      // so the table's height never depends on the chart's — a chart resize
+      // re-fires this, reads an unchanged table, and the update no-ops.
+      const h = table.offsetHeight
+      setTableHeight((prev) => (prev === null || Math.abs(prev - h) >= 1 ? h : prev))
+
+      // The chart panel's chrome: everything in it besides the SVG itself —
+      // panel-head, .chart-controls, the group chips row and the chart-wrap's
+      // fixed readout band and grip. Fitting the *panels* to the same height
+      // (rather than fitting the table to the chart's bare SVG) means
+      // subtracting this from the table's height before it becomes the SVG's
+      // height. This cannot feed back on itself: none of that chrome resizes
+      // when the SVG does (they're independent siblings stacked in normal
+      // block flow, not a layout that redistributes space by content), so
+      // recomputing chrome after the SVG height changes yields the same
+      // number — the `>= 1` guard below then skips the no-op update.
+      //
+      // The selector has to name the chart specifically rather than just
+      // "svg": a positional match would find whatever SVG happens to be
+      // first in the panel today, and if an icon svg is ever added above the
+      // chart, `chrome` would silently start including that icon's height —
+      // which *does* depend on nothing stable, and reintroduces the very
+      // oscillation this measurement exists to avoid.
+      //
+      // getBoundingClientRect().height, not offsetHeight: offsetHeight is an
+      // HTMLElement property that SVG elements don't have per spec (only
+      // Chromium/WebKit expose it as a non-standard extension — Gecko
+      // doesn't), and every other SVG measurement in this codebase already
+      // uses getBoundingClientRect for exactly that reason.
+      const svg = chartPanel.querySelector('svg[aria-label="Bucket distribution"]')
+      if (svg !== null) {
+        const chrome = chartPanel.offsetHeight - svg.getBoundingClientRect().height
+        setChartChrome((prev) => (Math.abs(prev - chrome) >= 1 ? chrome : prev))
+      }
     }
     check()
     const obs = new ResizeObserver(check)
@@ -160,6 +222,11 @@ export default function App() {
     for (const child of el.children) obs.observe(child)
     return () => obs.disconnect()
   }, [])
+
+  const effectiveChartHeight =
+    chartHeightAuto && tableHeight !== null
+      ? clampHeight(tableHeight - chartChrome, DIST_HEIGHT)
+      : chartHeight
 
   const targetsRef = useCallback((el: HTMLElement | null) => {
     const root = document.documentElement
@@ -233,8 +300,11 @@ export default function App() {
         chart,
         exportFilename,
         simSpins,
+        simMode,
+        bankroll,
         weightStep: doc.weightStep,
         chartHeight,
+        chartHeightAuto,
         simChartHeight,
         targetsCollapsed,
       })
@@ -246,7 +316,10 @@ export default function App() {
     chart,
     exportFilename,
     simSpins,
+    simMode,
+    bankroll,
     chartHeight,
+    chartHeightAuto,
     simChartHeight,
     targetsCollapsed,
   ])
@@ -314,6 +387,9 @@ export default function App() {
 
       const seeded = seedGroups(rows)
       commit((d) => ({ ...d, rows: seeded.rows, groups: seeded.groups }))
+      // New data means new groups; a collapsed id from the old table would
+      // either dangle or, worse, collapse an unrelated group of the same name.
+      setChart((c) => ({ ...c, groupBars: [] }))
       setPasteOpen(false)
       setPasteText('')
       setPasteError(null)
@@ -418,8 +494,8 @@ export default function App() {
     [commit],
   )
 
-  const handleDragBlocked = useCallback(() => {
-    setNotices([offStepNotice(docRef.current.weightStep)])
+  const handleBlocked = useCallback((reason: 'off-step' | 'pinned') => {
+    setNotices([reason === 'off-step' ? offStepNotice(docRef.current.weightStep) : pinnedNotice])
   }, [])
 
   // ---- groups ----
@@ -467,9 +543,32 @@ export default function App() {
           rows: d.rows.map((r) => (r.groupId === id ? { ...r, groupId: fallback } : r)),
         }
       })
+      // A deleted id must not linger in view state — nextGroupId can reissue
+      // it, and a brand-new group must never start out pre-collapsed.
+      setChart((c) => ({ ...c, groupBars: c.groupBars.filter((g) => g !== id) }))
     },
     [commit],
   )
+
+  /**
+   * A group lock is just its rows' locks, set together — so undo, the solver
+   * and the export need to know nothing about groups.
+   */
+  const setGroupLocked = useCallback(
+    (id: string, locked: boolean) => {
+      commit((d) => ({
+        ...d,
+        rows: d.rows.map((r) => (r.groupId === id ? { ...r, locked } : r)),
+      }))
+    },
+    [commit],
+  )
+
+  const groupLockStates = useMemo(() => {
+    const m = new Map<string, LockState>()
+    for (const g of doc.groups) m.set(g.id, groupLockState(doc.rows, g.id))
+    return m
+  }, [doc.groups, doc.rows])
 
   const exportText = useCallback(
     () => buildTsv(sortRows(docRef.current.rows, sort, totalWeight, grouping.rank), totalWeight),
@@ -528,87 +627,87 @@ export default function App() {
           <span className="brand-sub">slot engine bucket weights</span>
         </div>
         <div className="topbar-actions">
-          <button type="button" className="btn" onClick={() => loadData(SAMPLE_TSV)}>
-            Load sample
-          </button>
-          <button type="button" className="btn" onClick={() => setPasteOpen(true)}>
-            Paste TSV data
-          </button>
+          <div className="topbar-block">
+            <span className="topbar-block-label">Import</span>
+            <button type="button" className="btn" onClick={() => loadData(SAMPLE_TSV)}>
+              Load sample
+            </button>
+            <button type="button" className="btn" onClick={() => setPasteOpen(true)}>
+              Paste TSV data
+            </button>
+          </div>
           {hasRows && (
             <>
-              <button
-                type="button"
-                className={`btn ${groupsOpen ? 'primary' : ''}`}
-                aria-expanded={groupsOpen}
-                onClick={() => setGroupsOpen((v) => !v)}
-              >
-                Group settings
-              </button>
-              <span className="topbar-sep" aria-hidden="true" />
-              <input
-                className="filename-input"
-                value={exportFilename}
-                aria-label="Export filename"
-                spellCheck={false}
-                onChange={(e) => setExportFilename(e.target.value)}
-              />
-              <button type="button" className="btn" onClick={handleCopy}>
-                {copyState === 'ok' ? 'Copied ✓' : copyState === 'fail' ? 'Copy failed' : 'Copy TSV'}
-              </button>
-              <button
-                type="button"
-                className="btn"
-                onClick={() => downloadTsv(exportText(), exportFilename)}
-              >
-                Download .tsv
-              </button>
-              {session !== null && saveState !== 'conflict' && (
+              <div className="topbar-block">
+                <span className="topbar-block-label">Export</span>
+                <input
+                  className="filename-input"
+                  value={exportFilename}
+                  aria-label="Export filename"
+                  spellCheck={false}
+                  onChange={(e) => setExportFilename(e.target.value)}
+                />
+                <button type="button" className="btn" onClick={handleCopy}>
+                  {copyState === 'ok' ? 'Copied ✓' : copyState === 'fail' ? 'Copy failed' : 'Copy TSV'}
+                </button>
                 <button
                   type="button"
-                  className="btn primary"
-                  disabled={saveState === 'saving'}
-                  title={`Saves to ${session.dir}`}
-                  onClick={() => void doSave(exportFilename, false)}
+                  className="btn"
+                  onClick={() => downloadTsv(exportText(), exportFilename)}
                 >
-                  {saveState === 'saving'
-                    ? 'Saving…'
-                    : saveState === 'saved'
-                      ? 'Saved ✓'
-                      : saveState === 'error'
-                        ? 'Save failed'
-                        : 'Auto save data'}
+                  Download .tsv
                 </button>
-              )}
-              {session !== null && saveState === 'conflict' && (
-                <span className="bridge-conflict">
-                  <span className="bridge-conflict-msg">already exists —</span>
-                  <input
-                    className="filename-input"
-                    value={conflictName}
-                    aria-label="Save as filename"
-                    spellCheck={false}
-                    onChange={(e) => setConflictName(e.target.value)}
-                  />
-                  <button type="button" className="btn danger" onClick={() => void doSave(conflictName, true)}>
-                    Overwrite
+                {/* Bridge controls join the Export block — saving to disk is an
+                    export, and they only exist when the CLI launched us. */}
+                {session !== null && saveState !== 'conflict' && (
+                  <button
+                    type="button"
+                    className="btn primary"
+                    disabled={saveState === 'saving'}
+                    title={`Saves to ${session.dir}`}
+                    onClick={() => void doSave(exportFilename, false)}
+                  >
+                    {saveState === 'saving'
+                      ? 'Saving…'
+                      : saveState === 'saved'
+                        ? 'Saved ✓'
+                        : saveState === 'error'
+                          ? 'Save failed'
+                          : 'Auto save data'}
                   </button>
-                  <button type="button" className="btn" onClick={() => void doSave(conflictName, false)}>
-                    Save as
-                  </button>
-                  <button type="button" className="btn" onClick={() => setSaveState('idle')}>
-                    Cancel
-                  </button>
-                </span>
-              )}
-              {session !== null && saveState === 'error' && (
-                <span className="bridge-hint bridge-error">{saveMessage}</span>
-              )}
-              {session !== null && saveState !== 'conflict' && saveState !== 'error' && (
-                <span className="bridge-hint">
-                  {session.game === '' ? `→ ${session.dir}` : `${session.game} → ${session.dir}`}
-                </span>
-              )}
-              <span className="topbar-sep" aria-hidden="true" />
+                )}
+                {session !== null && saveState === 'conflict' && (
+                  <span className="bridge-conflict">
+                    <span className="bridge-conflict-msg">already exists —</span>
+                    <input
+                      className="filename-input"
+                      value={conflictName}
+                      aria-label="Save as filename"
+                      spellCheck={false}
+                      onChange={(e) => setConflictName(e.target.value)}
+                    />
+                    <button type="button" className="btn danger" onClick={() => void doSave(conflictName, true)}>
+                      Overwrite
+                    </button>
+                    <button type="button" className="btn" onClick={() => void doSave(conflictName, false)}>
+                      Save as
+                    </button>
+                    <button type="button" className="btn" onClick={() => setSaveState('idle')}>
+                      Cancel
+                    </button>
+                  </span>
+                )}
+                {session !== null && saveState === 'error' && (
+                  <span className="bridge-hint bridge-error">{saveMessage}</span>
+                )}
+                {session !== null && saveState !== 'conflict' && saveState !== 'error' && (
+                  <span className="bridge-hint">
+                    {session.game === '' ? `→ ${session.dir}` : `${session.game} → ${session.dir}`}
+                  </span>
+                )}
+              </div>
+              {/* Destructive, so it stands apart from the two blocks rather
+                  than sitting among the actions used constantly. */}
               <button type="button" className="btn danger" onClick={handleClear}>
                 Clear workspace
               </button>
@@ -622,6 +721,7 @@ export default function App() {
           <TargetsPanel
             panelRef={targetsRef}
             collapsed={targetsCollapsed}
+            groupsOpen={groupsOpen}
             onCollapsed={setTargetsCollapsed}
             targets={doc.targets}
             volatility={doc.volatility}
@@ -640,6 +740,7 @@ export default function App() {
             onAutoDistribute={autoDistribute}
             onUndo={doUndo}
             onRedo={doRedo}
+            onGroupSettings={() => setGroupsOpen((v) => !v)}
           />
 
           {groupsOpen && (
@@ -653,11 +754,13 @@ export default function App() {
               <GroupSettings
                 groups={doc.groups}
                 counts={groupCounts}
+                lockStates={groupLockStates}
                 fallbackName={doc.groups[0]?.name ?? ''}
                 onAdd={addGroup}
                 onRename={renameGroup}
                 onRecolor={recolorGroup}
                 onDelete={deleteGroup}
+                onLock={setGroupLocked}
               />
             </section>
           )}
@@ -704,12 +807,17 @@ export default function App() {
               chart={chart}
               grouping={grouping}
               weightStep={doc.weightStep}
-              height={chartHeight}
+              height={effectiveChartHeight}
               onChart={setChart}
-              onHeight={setChartHeight}
+              onHeight={(h) => {
+                setChartHeight(h)
+                setChartHeightAuto(false)
+              }}
+              onHeightReset={() => setChartHeightAuto(true)}
               onPreview={setPreview}
               onCommit={handleDragCommit}
-              onDragBlocked={handleDragBlocked}
+              onBlocked={handleBlocked}
+              onGroupLock={setGroupLocked}
             />
           </section>
           </div>
@@ -723,11 +831,15 @@ export default function App() {
               </span>
             </div>
             <SimulationPanel
+              mode={simMode}
+              onMode={setSimMode}
               rows={doc.rows}
               totalWeight={totalWeight}
               expectedRtp={achieved.rtp}
               spins={simSpins}
               onSpins={setSimSpins}
+              bankroll={bankroll}
+              onBankroll={setBankroll}
               chartHeight={simChartHeight}
               onChartHeight={setSimChartHeight}
             />

@@ -1,4 +1,13 @@
-import type { BucketRow, ChartSettings, GroupDef, Targets, Volatility, WeightStep } from './types'
+import type {
+  BankrollConfig,
+  BucketRow,
+  ChartSettings,
+  GroupDef,
+  SimMode,
+  Targets,
+  Volatility,
+  WeightStep,
+} from './types'
 import { isHexColor } from './palette'
 
 /**
@@ -28,6 +37,11 @@ export interface Workspace {
   simChartHeight?: number
   /** Optional — absent in workspaces saved before the panel could collapse. */
   targetsCollapsed?: boolean
+  /** Optional — absent in workspaces saved before bankroll mode existed. */
+  simMode?: SimMode
+  bankroll?: BankrollConfig
+  /** Optional — absent before the chart could fit itself to the table. */
+  chartHeightAuto?: boolean
 }
 
 const isObject = (v: unknown): v is Record<string, unknown> =>
@@ -73,7 +87,19 @@ function isChart(v: unknown): v is ChartSettings {
     (v.metric === 'weights' || v.metric === 'chance') &&
     typeof v.logY === 'boolean' &&
     typeof v.logX === 'boolean' &&
-    typeof v.aggregate === 'boolean'
+    typeof v.aggregate === 'boolean' &&
+    // Optional: absent in workspaces saved before groups could be collapsed.
+    (v.groupBars === undefined ||
+      (Array.isArray(v.groupBars) && v.groupBars.every((s) => typeof s === 'string')))
+  )
+}
+
+function isBankroll(v: unknown): v is BankrollConfig {
+  return (
+    isObject(v) &&
+    isFiniteNumber(v.credits) &&
+    isFiniteNumber(v.bet) &&
+    isFiniteNumber(v.rtpMultiplier)
   )
 }
 
@@ -97,7 +123,10 @@ function isWorkspace(v: unknown): v is Workspace {
       v.weightStep === 100) &&
     (v.chartHeight === undefined || isFiniteNumber(v.chartHeight)) &&
     (v.simChartHeight === undefined || isFiniteNumber(v.simChartHeight)) &&
-    (v.targetsCollapsed === undefined || typeof v.targetsCollapsed === 'boolean')
+    (v.targetsCollapsed === undefined || typeof v.targetsCollapsed === 'boolean') &&
+    (v.simMode === undefined || v.simMode === 'convergence' || v.simMode === 'bankroll') &&
+    (v.bankroll === undefined || isBankroll(v.bankroll)) &&
+    (v.chartHeightAuto === undefined || typeof v.chartHeightAuto === 'boolean')
   )
 }
 

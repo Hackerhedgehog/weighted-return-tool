@@ -1,6 +1,6 @@
 import { describe, it, expect, beforeEach } from 'vitest'
 import { clearWorkspace, loadWorkspace, saveWorkspace, STORAGE_KEY, type Workspace } from './storage'
-import { DEFAULT_CHART, DEFAULT_EXPORT_FILENAME, DEFAULT_TARGETS } from './types'
+import { DEFAULT_BANKROLL, DEFAULT_CHART, DEFAULT_EXPORT_FILENAME, DEFAULT_TARGETS } from './types'
 
 // vitest runs these in the node environment, which has no localStorage.
 const store = new Map<string, string>()
@@ -133,5 +133,59 @@ describe('storage', () => {
 
     store.set(STORAGE_KEY, JSON.stringify({ ...workspace, targetsCollapsed: 'yes' }))
     expect(loadWorkspace()).toBeNull()
+  })
+
+  it('rejects a workspace whose groupBars is not a list of strings', () => {
+    store.set(
+      STORAGE_KEY,
+      JSON.stringify({ ...workspace, chart: { ...DEFAULT_CHART, groupBars: 'bonus' } }),
+    )
+    expect(loadWorkspace()).toBeNull()
+  })
+
+  it('accepts a workspace saved before groupBars existed', () => {
+    const chart: Record<string, unknown> = { ...DEFAULT_CHART }
+    delete chart.groupBars
+    store.set(STORAGE_KEY, JSON.stringify({ ...workspace, chart }))
+    expect(loadWorkspace()).not.toBeNull()
+  })
+
+  it('round-trips the simulation mode and rejects an unknown one', () => {
+    saveWorkspace({ ...workspace, simMode: 'bankroll' })
+    expect(loadWorkspace()?.simMode).toBe('bankroll')
+
+    store.set(STORAGE_KEY, JSON.stringify({ ...workspace, simMode: 'roulette' }))
+    expect(loadWorkspace()).toBeNull()
+  })
+
+  it('round-trips the bankroll config and rejects a malformed one', () => {
+    saveWorkspace({ ...workspace, bankroll: { credits: 500, bet: 0.5, rtpMultiplier: 0.9 } })
+    expect(loadWorkspace()?.bankroll).toEqual({ credits: 500, bet: 0.5, rtpMultiplier: 0.9 })
+
+    store.set(
+      STORAGE_KEY,
+      JSON.stringify({ ...workspace, bankroll: { ...DEFAULT_BANKROLL, bet: 'one' } }),
+    )
+    expect(loadWorkspace()).toBeNull()
+
+    store.set(STORAGE_KEY, JSON.stringify({ ...workspace, bankroll: { credits: 500 } }))
+    expect(loadWorkspace()).toBeNull()
+  })
+
+  it('round-trips the chart auto-height flag and rejects a non-boolean', () => {
+    saveWorkspace({ ...workspace, chartHeightAuto: false })
+    expect(loadWorkspace()?.chartHeightAuto).toBe(false)
+
+    store.set(STORAGE_KEY, JSON.stringify({ ...workspace, chartHeightAuto: 'yes' }))
+    expect(loadWorkspace()).toBeNull()
+  })
+
+  it('accepts a workspace saved before any of the new fields existed', () => {
+    saveWorkspace(workspace)
+    const loaded = loadWorkspace()
+    expect(loaded).not.toBeNull()
+    expect(loaded?.simMode).toBeUndefined()
+    expect(loaded?.bankroll).toBeUndefined()
+    expect(loaded?.chartHeightAuto).toBeUndefined()
   })
 })

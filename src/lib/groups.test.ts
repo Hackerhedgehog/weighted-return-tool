@@ -1,6 +1,6 @@
 import { describe, it, expect } from 'vitest'
 import type { BucketRow } from './types'
-import { buildGrouping, groupRows, seedGroups } from './groups'
+import { buildGrouping, groupLockState, groupRows, seedGroups } from './groups'
 
 let n = 0
 const row = (payout: number, label: string): BucketRow => ({
@@ -226,5 +226,39 @@ describe('seedGroups and buildGrouping', () => {
     expect(g.groups[0].name).toBe('low wins')
     expect(g.groups[0].color).toBe('#e58bb0')
     expect(g.groups[0].tint).toContain('229, 139, 176')
+  })
+})
+
+describe('groupLockState', () => {
+  const rows = (locks: boolean[]): BucketRow[] =>
+    locks.map((locked, i) => ({
+      uid: `u${i}`,
+      bucketId: i,
+      payout: i,
+      label: `l${i}`,
+      weight: 100,
+      locked,
+      groupId: i === 0 ? 'other' : 'g1',
+      weightId: '',
+    }))
+
+  it('reports none when no member is locked', () => {
+    expect(groupLockState(rows([false, false, false]), 'g1')).toBe('none')
+  })
+
+  it('reports some when only part of the group is locked', () => {
+    expect(groupLockState(rows([false, true, false]), 'g1')).toBe('some')
+  })
+
+  it('reports all when every member is locked', () => {
+    expect(groupLockState(rows([false, true, true]), 'g1')).toBe('all')
+  })
+
+  it('ignores rows outside the group', () => {
+    expect(groupLockState(rows([true, false, false]), 'g1')).toBe('none')
+  })
+
+  it('reports none for a group with no buckets', () => {
+    expect(groupLockState(rows([false, false, false]), 'empty')).toBe('none')
   })
 })

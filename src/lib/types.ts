@@ -138,6 +138,12 @@ export interface ChartSettings {
    * are always relative — chances must sum to 1.
    */
   relative: boolean
+  /**
+   * Group ids drawn as a single aggregated bar instead of their buckets.
+   * View state, so it is persisted but not undoable. Never mutated in place —
+   * DEFAULT_CHART's empty array is shared by every fresh workspace.
+   */
+  groupBars: string[]
 }
 
 export const DEFAULT_CHART: ChartSettings = {
@@ -146,6 +152,7 @@ export const DEFAULT_CHART: ChartSettings = {
   logX: false,
   aggregate: true,
   relative: true,
+  groupBars: [],
 }
 
 export const DEFAULT_EXPORT_FILENAME = 'ref-weights-regular.tsv'
@@ -155,4 +162,25 @@ let uidCounter = 0
 export function nextUid(): string {
   uidCounter += 1
   return `b${uidCounter}`
+}
+
+/** Which question the simulation panel is answering. */
+export type SimMode = 'convergence' | 'bankroll'
+
+export const DEFAULT_SIM_MODE: SimMode = 'convergence'
+
+/** A bankroll run's inputs. Persisted with the workspace, like Targets. */
+export interface BankrollConfig {
+  /** Starting balance, in credits. */
+  credits: number
+  /** Stake per spin, in credits. */
+  bet: number
+  /** Every payout is multiplied by this before the alias table is built. */
+  rtpMultiplier: number
+}
+
+export const DEFAULT_BANKROLL: BankrollConfig = {
+  credits: 1_000_000,
+  bet: 1,
+  rtpMultiplier: 1,
 }

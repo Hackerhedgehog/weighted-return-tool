@@ -173,20 +173,33 @@ export type SimWorkerMessage =
 export const MAX_SPINS = 1_000_000_000
 export const DEFAULT_SPINS = 100_000_000
 
+export interface AmountOptions {
+  min: number
+  max: number
+  /** Round to a whole number. Spins and credits are integers; bets are not. */
+  integer: boolean
+}
+
 /**
- * Spin-count field: plain integers with , or space or _ separators, plus
- * k / m / b shorthand ("100m" → 100,000,000). Null when unreadable; clamped
- * to [1, 1e9] — a billion spins is ~25s of worker time, a sane ceiling.
+ * Numeric field parser: plain numbers with , or space or _ separators, plus
+ * k / m / b shorthand ("100m" → 100,000,000). Null when unreadable; clamped to
+ * the caller's range. The regex admits no sign, so a negative is unreadable
+ * rather than clamped — typing "-5" is a mistake, not a request for the floor.
  */
-export function parseSpinsInput(text: string): number | null {
+export function parseAmount(text: string, opts: AmountOptions): number | null {
   const cleaned = text.replace(/[,\s_]/g, '')
   const m = /^(\d+(?:\.\d+)?)([kmb])?$/i.exec(cleaned)
   if (m === null) return null
   const mult = { k: 1e3, m: 1e6, b: 1e9 }[m[2]?.toLowerCase() as 'k' | 'm' | 'b'] ?? 1
-  const n = Math.round(Number(m[1]) * mult)
-  if (!Number.isFinite(n)) return null
-  return Math.min(Math.max(n, 1), MAX_SPINS)
+  const raw = Number(m[1]) * mult
+  if (!Number.isFinite(raw)) return null
+  const n = opts.integer ? Math.round(raw) : raw
+  return Math.min(Math.max(n, opts.min), opts.max)
 }
+
+/** Spin-count field: whole spins, clamped to [1, MAX_SPINS]. */
+export const parseSpinsInput = (text: string): number | null =>
+  parseAmount(text, { min: 1, max: MAX_SPINS, integer: true })
 
 /**
  * One chart point per 0.1% of the requested spins — 100M spins → 1000 points
