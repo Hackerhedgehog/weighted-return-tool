@@ -1,4 +1,5 @@
 import type { AliasTable } from './sim'
+import type { BankrollConfig } from './types'
 
 /**
  * Bankroll simulation core: the per-spin money arithmetic and the chart's
@@ -178,3 +179,32 @@ export function sealPoint(buf: PointBuffer, s: BankrollState): void {
     buf.points.push({ spins: s.spins, balance: s.balance })
   }
 }
+
+/**
+ * Worker protocol. Lives here so the panel and the worker share one shape,
+ * exactly as the convergence protocol lives in sim.ts.
+ *
+ * Unlike that one-shot protocol, this one is resumable: the worker retains the
+ * balance, the PRNG and the alias table between messages, so a `continue`
+ * produces exactly the sequence an uninterrupted run would have produced.
+ */
+export type BankrollRequest =
+  | {
+      type: 'start'
+      payouts: number[]
+      weights: number[]
+      config: BankrollConfig
+      seed: number
+    }
+  | { type: 'continue' }
+
+export type BankrollMessage =
+  | { type: 'progress'; points: BankrollPoint[]; state: BankrollState }
+  | {
+      type: 'chunk-done'
+      points: BankrollPoint[]
+      state: BankrollState
+      /** True when the chunk hit the spin cap — the run can be continued. */
+      capped: boolean
+    }
+  | { type: 'error'; message: string }
