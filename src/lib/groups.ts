@@ -215,3 +215,22 @@ export function nextGroupColor(groups: GroupDef[]): string {
     PASTEL_COLORS[groups.length % PASTEL_COLORS.length]
   )
 }
+
+/**
+ * How much of a group is locked. A group has no lock of its own: it is locked
+ * when every one of its buckets is, which keeps row locks the single source of
+ * truth for the solver, for `interact.ts` and for the export.
+ */
+export type LockState = 'none' | 'some' | 'all'
+
+export function groupLockState(rows: BucketRow[], groupId: string): LockState {
+  let members = 0
+  let locked = 0
+  for (const r of rows) {
+    if (r.groupId !== groupId) continue
+    members += 1
+    if (r.locked) locked += 1
+  }
+  if (members === 0 || locked === 0) return 'none'
+  return locked === members ? 'all' : 'some'
+}

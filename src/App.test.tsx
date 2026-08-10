@@ -588,6 +588,23 @@ describe('groups', () => {
     )
     expect(options).not.toContain(label)
   })
+
+  it('locks every bucket in a group and undoes it in one step', () => {
+    render(<App />)
+    fireEvent.click(screen.getByRole('button', { name: 'Load sample' }))
+    fireEvent.click(screen.getByRole('button', { name: 'Group settings' }))
+
+    const lockedRows = () => document.querySelectorAll('.gcell.lock.on').length
+    const before = lockedRows()
+
+    // Both the settings row and the chart handle carry this label, so scope it.
+    const settings = within(document.querySelector('.group-settings') as HTMLElement)
+    fireEvent.click(settings.getByRole('button', { name: 'Lock the bonus group' }))
+    expect(lockedRows()).toBeGreaterThan(before)
+
+    fireEvent.click(screen.getByRole('button', { name: '↶ Undo' }))
+    expect(lockedRows()).toBe(before)
+  })
 })
 
 describe('weight id', () => {
@@ -636,5 +653,76 @@ describe('solver switches', () => {
 
     const rtp = document.querySelector('.totals-row .col-weightedValue .gcell')!.textContent!
     expect(Number(rtp)).toBeCloseTo(0.95, 4)
+  })
+})
+
+describe('group bars', () => {
+  it('collapses a group into one bar from the chip row', () => {
+    render(<App />)
+    fireEvent.click(screen.getByRole('button', { name: 'Load sample' }))
+
+    const before = document.querySelectorAll('.bar').length
+    fireEvent.click(screen.getByRole('button', { name: 'bonus' }))
+
+    expect(document.querySelectorAll('.bar').length).toBeLessThan(before)
+    expect(screen.getByRole('button', { name: 'bonus', pressed: true })).toBeDefined()
+  })
+
+  it('restores collapsed groups from a saved workspace', () => {
+    saveWorkspace({
+      version: 1,
+      rows: [
+        { uid: 'b1', bucketId: 0, payout: 2, label: 'bonus3', weight: 500, locked: false, groupId: 'bonus', weightId: '' },
+        { uid: 'b2', bucketId: 1, payout: 8, label: 'bonus4', weight: 500, locked: false, groupId: 'bonus', weightId: '' },
+      ],
+      groups: [{ id: 'bonus', name: 'bonus', color: '#a8d8ea' }],
+      targets: DEFAULT_TARGETS,
+      volatility: 'medium',
+      curve: 0.09,
+      columnWidths: {},
+      chart: { ...DEFAULT_CHART, groupBars: ['bonus'] },
+      exportFilename: 'f.tsv',
+    })
+    render(<App />)
+    expect(screen.getByRole('button', { name: 'bonus', pressed: true })).toBeDefined()
+    expect(document.querySelectorAll('.bar')).toHaveLength(1)
+  })
+})
+
+describe('chrome layout', () => {
+  it('opens group settings from the targets panel', () => {
+    render(<App />)
+    fireEvent.click(screen.getByRole('button', { name: 'Load sample' }))
+    const targets = document.querySelector('.targets')!
+    const btn = screen.getByRole('button', { name: 'Group settings' })
+    expect(targets.contains(btn)).toBe(true)
+    fireEvent.click(btn)
+    expect(screen.getByRole('heading', { name: 'Groups' })).toBeDefined()
+  })
+
+  it('keeps group settings reachable when the targets panel is collapsed', () => {
+    render(<App />)
+    fireEvent.click(screen.getByRole('button', { name: 'Load sample' }))
+    fireEvent.click(screen.getByRole('button', { name: /Targets/ }))
+    expect(screen.getByRole('button', { name: 'Group settings' })).toBeDefined()
+  })
+
+  it('separates import from export in the top bar', () => {
+    render(<App />)
+    fireEvent.click(screen.getByRole('button', { name: 'Load sample' }))
+
+    const blocks = [...document.querySelectorAll('.topbar-block')]
+    expect(blocks.map((b) => b.querySelector('.topbar-block-label')!.textContent)).toEqual([
+      'Import',
+      'Export',
+    ])
+    expect(blocks[0].contains(screen.getByRole('button', { name: 'Paste TSV data' }))).toBe(true)
+    expect(blocks[1].contains(screen.getByRole('button', { name: 'Copy TSV' }))).toBe(true)
+    expect(blocks[1].contains(screen.getByLabelText('Export filename'))).toBe(true)
+
+    // Destructive, and deliberately outside both blocks.
+    const clear = screen.getByRole('button', { name: 'Clear workspace' })
+    expect(blocks.some((b) => b.contains(clear))).toBe(false)
+    expect(document.querySelector('.topbar-sep')).toBeNull()
   })
 })

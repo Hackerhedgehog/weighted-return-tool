@@ -1,10 +1,13 @@
 import { useEffect, useMemo, useRef, useState } from 'react'
 import type { BucketRow, ChartSettings, WeightStep } from '../lib/types'
 import type { Grouping } from '../lib/groups'
+import { buildBars, type ChartBar, type Segment } from '../lib/bars'
 import { scaleSubset, setSubsetTotal } from '../lib/interact'
 import { fmtPayout, fmtPct, fmtRtp, fmtWeight } from '../lib/format'
 import { ChartReadout, type ReadoutStat, type ReadoutTitle } from './ChartReadout'
+import { ChartValueEntry, type ValueEntryTarget } from './ChartValueEntry'
 import { ChartResizeGrip } from './ChartResizeGrip'
+import { GroupBarChips } from './GroupBarChips'
 import { DIST_HEIGHT, linearBarWidth, logBarWidth, niceCeil, useContainerWidth } from './chartUtils'
 
 /**
@@ -12,19 +15,26 @@ import { DIST_HEIGHT, linearBarWidth, logBarWidth, niceCeil, useContainerWidth }
  *
  *  - bars are colored by bucket group (stacked segments when an aggregated
  *    bar spans groups) and can be dragged vertically to change a bucket's
- *    weight or chance;
+ *    weight or chance. The chip row above the plot (`GroupBarChips`) doubles
+ *    as a legend and lets any group collapse into one solid bar instead of
+ *    its buckets;
  *  - each group gets a handle on the right edge at the height of its total
- *    (in the current metric and axis mode), draggable to rescale the whole
- *    group while in-group proportions are preserved;
+ *    (in the current metric and axis mode), draggable like a bar, and
+ *    carrying a padlock that locks or unlocks every bucket in the group at
+ *    once;
  *  - drags are relative by default — other unlocked buckets absorb the
  *    change so the grand total (and Σchance == 1) holds. Weights mode can
- *    switch that off; chance mode cannot.
+ *    switch that off; chance mode cannot;
+ *  - right-clicking a bar or a handle opens `ChartValueEntry`, a popover for
+ *    typing an exact weight or chance. It commits through the same
+ *    `scaleSubset` / `setSubsetTotal` path a drag commits through, so the two
+ *    ways of setting a value can never disagree.
  *
  * During a drag the pointer math and the rendered axis both use the scale
  * captured at pointer-down: recomputing the scale per move would rescale the
  * axis under the pointer and feed back into the drag. Previews stream
- * through onPreview; one onCommit fires at pointer-up so undo sees a single
- * step. Escape cancels a live drag.
+ * through onPreview; one onCommit fires at pointer-up (or from the popover's
+ * Set) so undo sees a single step. Escape cancels a live drag.
  */
 
 interface DistributionChartProps {
@@ -38,24 +48,9 @@ interface DistributionChartProps {
   onHeight: (h: number) => void
   onPreview: (rows: BucketRow[] | null) => void
   onCommit: (rows: BucketRow[]) => void
-  onDragBlocked: () => void
-}
-
-interface Segment {
-  color: string
-  weight: number
-  chance: number
-}
-
-interface Bar {
-  payout: number
-  chance: number
-  weight: number
-  labels: string[]
-  uids: string[]
-  /** One per group present in the bar, in group order — stacked bottom-up. */
-  segments: Segment[]
-  allLocked: boolean
+  /** 'off-step' when the table can't be partitioned on the step, 'pinned' when locks leave nothing free to move. */
+  onBlocked: (reason: 'off-step' | 'pinned') => void
+  onGroupLock: (id: string, locked: boolean) => void
 }
 
 interface Scale {
@@ -69,12 +64,15 @@ interface DragState {
   baseTotal: number
   uids: string[]
   scale: Scale
+  /** Pointer y at press, and the subset's own position on the frozen axis. */
+  startY: number
+  startFrac: number
   moved: boolean
   lastRows: BucketRow[] | null
   blockedNotified: boolean
 }
 
-const MARGIN = { top: 18, right: 128, bottom: 46, left: 64 }
+const MARGIN = { top: 18, right: 150, bottom: 46, left: 64 }
 const HANDLE_GAP = 30
 const SEGMENT_GAP = 2
 
@@ -138,7 +136,8 @@ export function DistributionChart({
   onHeight,
   onPreview,
   onCommit,
-  onDragBlocked,
+  onBlocked,
+  onGroupLock,
 }: DistributionChartProps) {
   const [containerRef, width] = useContainerWidth()
   const [hover, setHover] = useState<number | null>(null)
@@ -150,8 +149,12 @@ export function DistributionChart({
    * Non-null exactly while a drag is live.
    */
   const [dragScale, setDragScale] = useState<Scale | null>(null)
+  /** Non-null while the exact-value popover is open. */
+  const [entry, setEntry] = useState<
+    { target: ValueEntryTarget; x: number; y: number; containerHeight: number } | null
+  >(null)
 
-  const { metric, logY, logX, aggregate, relative } = chart
+  const { metric, logY, logX, aggregate, relative, groupBars } = chart
   const set = (patch: Partial<ChartSettings>) => onChart({ ...chart, ...patch })
 
   useEffect(() => {
@@ -166,61 +169,16 @@ export function DistributionChart({
     return () => window.removeEventListener('keydown', onKey)
   }, [onPreview])
 
-  const allBars: Bar[] = useMemo(() => {
-    const chanceOf = (w: number) => (totalWeight > 0 ? w / totalWeight : 0)
-    const rankOf = (uid: string) => grouping.rank.get(uid) ?? Number.MAX_SAFE_INTEGER
-    const colorOf = (uid: string) => grouping.byUid.get(uid)?.color ?? 'var(--bar)'
-
-    const toBar = (members: BucketRow[]): Bar => {
-      const byRank = new Map<number, Segment>()
-      for (const r of [...members].sort((a, b) => rankOf(a.uid) - rankOf(b.uid))) {
-        const seg = byRank.get(rankOf(r.uid))
-        if (seg) {
-          seg.weight += r.weight
-          seg.chance += chanceOf(r.weight)
-        } else {
-          byRank.set(rankOf(r.uid), {
-            color: colorOf(r.uid),
-            weight: r.weight,
-            chance: chanceOf(r.weight),
-          })
-        }
-      }
-      return {
-        payout: members[0].payout,
-        weight: members.reduce((a, r) => a + r.weight, 0),
-        chance: chanceOf(members.reduce((a, r) => a + r.weight, 0)),
-        labels: members.map((r) => r.label),
-        uids: members.map((r) => r.uid),
-        segments: [...byRank.values()],
-        allLocked: members.every((r) => r.locked),
-      }
-    }
-
-    if (aggregate) {
-      const byPayout = new Map<number, BucketRow[]>()
-      for (const r of rows) {
-        const list = byPayout.get(r.payout)
-        if (list === undefined) byPayout.set(r.payout, [r])
-        else list.push(r)
-      }
-      return [...byPayout.values()].map(toBar).sort((a, b) => a.payout - b.payout)
-    }
-
-    return [...rows]
-      .sort((a, b) => a.payout - b.payout || a.bucketId - b.bucketId)
-      .map((r) => toBar([r]))
-  }, [rows, totalWeight, aggregate, grouping])
-
-  // A logarithmic payout axis has nowhere to put a 0x bucket.
-  const bars = useMemo(() => (logX ? allBars.filter((b) => b.payout > 0) : allBars), [allBars, logX])
-  const droppedZero = logX ? allBars.length - bars.length : 0
+  const { bars, droppedZero } = useMemo(
+    () => buildBars(rows, grouping, totalWeight, { aggregate, groupBars, logX }),
+    [rows, grouping, totalWeight, aggregate, groupBars, logX],
+  )
 
   const plotW = width - MARGIN.left - MARGIN.right
   const plotH = height - MARGIN.top - MARGIN.bottom
   const plotRight = width - MARGIN.right
 
-  const valueOf = (b: Bar) => (metric === 'weights' ? b.weight : b.chance)
+  const valueOf = (b: ChartBar) => (metric === 'weights' ? b.weight : b.chance)
 
   /** Group totals drive the handles and stretch the axis to hold them. */
   const groupStats = useMemo(() => {
@@ -229,12 +187,14 @@ export function DistributionChart({
       let weight = 0
       let weightedValue = 0
       let allLocked = true
+      let anyLocked = false
       for (const uid of g.uids) {
         const r = byUid.get(uid)
         if (r === undefined) continue
         weight += r.weight
         weightedValue += r.payout * r.weight
         if (!r.locked) allLocked = false
+        if (r.locked) anyLocked = true
       }
       const chance = totalWeight > 0 ? weight / totalWeight : 0
       return {
@@ -244,6 +204,7 @@ export function DistributionChart({
         value: metric === 'weights' ? weight : chance,
         weightedValue: totalWeight > 0 ? weightedValue / totalWeight : 0,
         allLocked,
+        anyLocked,
       }
     })
   }, [rows, grouping, totalWeight, metric])
@@ -286,13 +247,39 @@ export function DistributionChart({
 
   // ---- dragging ----
 
-  const fracFromPointer = (clientY: number): number => {
-    const top = svgRef.current?.getBoundingClientRect().top ?? 0
-    const y = clientY - top
-    return clamp((MARGIN.top + plotH - y) / plotH, 0, 1)
+  /**
+   * The three-way rule that turns a value into a subset's weights: chance
+   * mode scales to a fraction of the frozen total, weights mode scales
+   * relatively when the toggle is on, and otherwise sets the subset's
+   * absolute total. The drag and the typed-value popover both funnel through
+   * this one rule, so they can never compute the result differently — the
+   * caller supplies the row set and its total rather than this closing over
+   * `rows`, since a drag operates on the rows frozen at pointer-down while the
+   * popover operates on whatever is current.
+   */
+  const weightsForValue = (
+    baseRows: BucketRow[],
+    uids: string[],
+    baseTotal: number,
+    value: number,
+  ): number[] | null => {
+    if (metric === 'chance') return scaleSubset(baseRows, uids, clamp(value, 0, 1) * baseTotal, weightStep)
+    if (relative) return scaleSubset(baseRows, uids, value, weightStep)
+    return setSubsetTotal(baseRows, uids, value, weightStep)
   }
 
-  const beginDrag = (e: React.PointerEvent, uids: string[], disabled: boolean) => {
+  /**
+   * `currentValue` is the subset's value in the chart's current metric. It is
+   * what makes the drag relative: the value moves by the pointer's delta from
+   * where it started, so pressing on a bar never changes it and a bar can be
+   * grabbed anywhere along its length.
+   */
+  const beginDrag = (
+    e: React.PointerEvent,
+    uids: string[],
+    disabled: boolean,
+    currentValue: number,
+  ) => {
     if (disabled || e.button !== 0) return
     ;(e.currentTarget as Element).setPointerCapture?.(e.pointerId)
     dragRef.current = {
@@ -300,6 +287,8 @@ export function DistributionChart({
       baseTotal: rows.reduce((a, r) => a + Math.max(0, Math.round(r.weight)), 0),
       uids,
       scale: liveScale,
+      startY: e.clientY,
+      startFrac: liveScale.frac(currentValue),
       moved: false,
       lastRows: null,
       blockedNotified: false,
@@ -310,23 +299,18 @@ export function DistributionChart({
   const moveDrag = (e: React.PointerEvent) => {
     const d = dragRef.current
     if (d === null) return
-    const f = fracFromPointer(e.clientY)
+    // Measured in axis fractions, so sensitivity keeps the meaning the chart is
+    // already showing: a constant multiplier per pixel on a log axis, a
+    // constant amount on a linear one.
+    const f = clamp(d.startFrac + (d.startY - e.clientY) / plotH, 0, 1)
     const value = d.scale.invert(f)
-
-    let weights: number[] | null
-    if (metric === 'chance') {
-      weights = scaleSubset(d.baseRows, d.uids, clamp(value, 0, 1) * d.baseTotal, weightStep)
-    } else if (relative) {
-      weights = scaleSubset(d.baseRows, d.uids, value, weightStep)
-    } else {
-      weights = setSubsetTotal(d.baseRows, d.uids, value, weightStep)
-    }
+    const weights = weightsForValue(d.baseRows, d.uids, d.baseTotal, value)
 
     if (weights === null) {
       // Off-step table: the drag has nowhere legal to move. Say so once.
       if (!d.blockedNotified) {
         d.blockedNotified = true
-        onDragBlocked()
+        onBlocked('off-step')
       }
       return
     }
@@ -346,6 +330,56 @@ export function DistributionChart({
     else if (d.moved) onPreview(null)
   }
 
+  /**
+   * The typed-value path. Deliberately the same rule the drag uses, so the
+   * weight step, the locked rows and the grand-total invariant cannot drift
+   * apart between the two ways of setting a value.
+   */
+  const commitValue = (uids: string[], value: number): boolean => {
+    const baseTotal = rows.reduce((a, r) => a + Math.max(0, Math.round(r.weight)), 0)
+    const target = metric === 'chance' ? value / 100 : value
+    const weights = weightsForValue(rows, uids, baseTotal, target)
+    if (weights === null) {
+      onBlocked('off-step')
+      return false
+    }
+    // scaleSubset has a second refusal mode that isn't `null`: with no unlocked
+    // row on one side of the subset, the grand-total invariant pins the total
+    // exactly where it is and it hands back the weights unchanged. Compare with
+    // the same normalisation interact.ts applies on the way in, so a fractional
+    // stored weight can't read as a spurious change and mask a real refusal.
+    const unchanged = rows.every((r, i) => Math.max(0, Math.round(r.weight)) === weights[i])
+    if (unchanged) {
+      onBlocked('pinned')
+      return false
+    }
+    onCommit(rows.map((r, i) => (r.weight === weights[i] ? r : { ...r, weight: weights[i] })))
+    return true
+  }
+
+  const openEntry = (
+    e: React.MouseEvent,
+    title: string,
+    uids: string[],
+    value: number,
+    disabled: boolean,
+  ) => {
+    e.preventDefault()
+    if (disabled) return
+    const rect = containerRef.current?.getBoundingClientRect()
+    setEntry({
+      target: {
+        title,
+        uids,
+        current: metric === 'chance' ? Math.round(value * 1e6) / 1e4 : Math.round(value),
+        unit: metric === 'chance' ? '%' : 'weight',
+      },
+      x: e.clientX - (rect?.left ?? 0),
+      y: e.clientY - (rect?.top ?? 0),
+      containerHeight: rect?.height ?? 0,
+    })
+  }
+
   // ---- handle layout ----
 
   const handleYs = useMemo(() => {
@@ -358,6 +392,14 @@ export function DistributionChart({
 
   const labelEvery = Math.max(1, Math.ceil(n / Math.max(1, Math.floor(plotW / 62))))
   const hovered = hover !== null && hover < bars.length ? bars[hover] : null
+
+  /** What the popover calls a bar: its label when there is one, else a summary. */
+  const barTitle = (b: ChartBar) =>
+    b.kind === 'group'
+      ? b.name
+      : b.labels.length === 1
+        ? b.labels[0]
+        : `${b.labels.length} buckets · ×${fmtPayout(b.payout)}`
 
   /**
    * Labels are colored per bucket, not per bar segment: segments are merged by
@@ -376,10 +418,20 @@ export function DistributionChart({
     hovered === null
       ? []
       : [
-          { label: 'payout', value: `×${fmtPayout(hovered.payout)}` },
+          hovered.kind === 'group'
+            ? {
+                label: 'payout',
+                value: `×${fmtPayout(hovered.payoutRange[0])} – ×${fmtPayout(hovered.payoutRange[1])}`,
+              }
+            : { label: 'payout', value: `×${fmtPayout(hovered.payout)}` },
+          ...(hovered.kind === 'group'
+            ? [{ label: 'avg', value: `×${fmtPayout(Math.round(hovered.payout * 100) / 100)}` }]
+            : []),
           { label: 'weight', value: fmtWeight(hovered.weight) },
           { label: 'chance', value: fmtPct(hovered.chance, 4) },
-          // The bar's slice of RTP — the table's Weighted Value column.
+          // payout × chance is Σ(payout × weight) / total either way: a group
+          // bar's payout is already weight-weighted, so the product still lands
+          // on the group's true slice of RTP.
           { label: 'weighted', value: fmtRtp(hovered.payout * hovered.chance) },
         ]
 
@@ -430,6 +482,12 @@ export function DistributionChart({
         )}
         <span className="panel-hint">drag a bar or a group handle to reshape</span>
       </div>
+
+      <GroupBarChips
+        groups={grouping.groups}
+        groupBars={groupBars}
+        onGroupBars={(ids) => set({ groupBars: ids })}
+      />
 
       <div className="chart-wrap" ref={containerRef}>
         {n === 0 ? (
@@ -512,7 +570,9 @@ export function DistributionChart({
               })}
 
               {bars.map((b, i) =>
-                i % labelEvery === 0 ? (
+                // Group bars are the coarse landmarks of the view and there are
+                // few of them, so they are never thinned out.
+                b.kind === 'group' || i % labelEvery === 0 ? (
                   <text
                     key={i}
                     className="axis-label"
@@ -520,7 +580,7 @@ export function DistributionChart({
                     y={height - MARGIN.bottom + 18}
                     textAnchor="middle"
                   >
-                    ×{fmtPayout(b.payout)}
+                    {b.kind === 'group' ? b.name : `×${fmtPayout(b.payout)}`}
                   </text>
                 ) : null,
               )}
@@ -552,10 +612,11 @@ export function DistributionChart({
                     aria-valuenow={
                       metric === 'weights' ? Math.round(s.weight) : Math.round(s.chance * 1000) / 10
                     }
-                    onPointerDown={(e) => beginDrag(e, s.group.uids, s.allLocked)}
+                    onPointerDown={(e) => beginDrag(e, s.group.uids, s.allLocked, s.value)}
                     onPointerMove={moveDrag}
                     onPointerUp={endDrag}
                     onPointerCancel={endDrag}
+                    onContextMenu={(e) => openEntry(e, s.group.name, s.group.uids, s.value, s.allLocked)}
                   >
                     <line
                       className="handle-connector"
@@ -587,6 +648,37 @@ export function DistributionChart({
                       height={30}
                       fill="transparent"
                     />
+                    <g
+                      role="button"
+                      tabIndex={0}
+                      className={`handle-lock ${s.allLocked ? 'on' : ''} ${!s.allLocked && s.anyLocked ? 'partial' : ''}`}
+                      aria-label={`${s.allLocked ? 'Unlock' : 'Lock'} the ${s.group.name} group`}
+                      // The padlock sits inside the handle's drag target, so
+                      // its press must not also start a drag, and its own
+                      // context menu must not also open the handle's popover.
+                      onPointerDown={(e) => e.stopPropagation()}
+                      onContextMenu={(e) => e.stopPropagation()}
+                      onClick={() => onGroupLock(s.group.id, !s.allLocked)}
+                      onKeyDown={(e) => {
+                        if (e.key === 'Enter') onGroupLock(s.group.id, !s.allLocked)
+                        else if (e.key === ' ') {
+                          e.preventDefault()
+                          onGroupLock(s.group.id, !s.allLocked)
+                        }
+                      }}
+                    >
+                      <rect
+                        x={plotRight + MARGIN.right - 26}
+                        y={yLabel - 10}
+                        width={20}
+                        height={20}
+                        rx={3}
+                        fill="transparent"
+                      />
+                      <text x={plotRight + MARGIN.right - 16} y={yLabel + 4} textAnchor="middle">
+                        {s.allLocked ? '🔒' : '🔓'}
+                      </text>
+                    </g>
                   </g>
                 )
               })}
@@ -606,10 +698,11 @@ export function DistributionChart({
                     if (!dragging) setHover(i)
                   }}
                   onMouseLeave={() => setHover(null)}
-                  onPointerDown={(e) => beginDrag(e, b.uids, b.allLocked)}
+                  onPointerDown={(e) => beginDrag(e, b.uids, b.allLocked, valueOf(b))}
                   onPointerMove={moveDrag}
                   onPointerUp={endDrag}
                   onPointerCancel={endDrag}
+                  onContextMenu={(e) => openEntry(e, barTitle(b), b.uids, valueOf(b), b.allLocked)}
                 />
               ))}
             </svg>
@@ -620,6 +713,19 @@ export function DistributionChart({
               anchor={hover !== null && hover < centres.length ? centres[hover] : null}
               width={width}
             />
+
+            {entry !== null && (
+              <ChartValueEntry
+                target={entry.target}
+                x={entry.x}
+                y={entry.y}
+                width={width}
+                containerHeight={entry.containerHeight}
+                weightStep={weightStep}
+                onCommit={(v) => commitValue(entry.target.uids, v)}
+                onClose={() => setEntry(null)}
+              />
+            )}
 
             <ChartResizeGrip
               height={height}

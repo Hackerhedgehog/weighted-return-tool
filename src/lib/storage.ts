@@ -73,7 +73,10 @@ function isChart(v: unknown): v is ChartSettings {
     (v.metric === 'weights' || v.metric === 'chance') &&
     typeof v.logY === 'boolean' &&
     typeof v.logX === 'boolean' &&
-    typeof v.aggregate === 'boolean'
+    typeof v.aggregate === 'boolean' &&
+    // Optional: absent in workspaces saved before groups could be collapsed.
+    (v.groupBars === undefined ||
+      (Array.isArray(v.groupBars) && v.groupBars.every((s) => typeof s === 'string')))
   )
 }
 

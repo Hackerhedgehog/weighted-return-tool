@@ -22,12 +22,19 @@ beforeEach(() => {
 
 afterEach(cleanup)
 
-function renderChart(chart: Partial<ChartSettings>, rows = baseRows(), height = 340) {
+function renderChart(
+  chart: Partial<ChartSettings>,
+  rows = baseRows(),
+  height = 340,
+  weightStep: 1 | 10 | 100 = 1,
+  extra: Partial<React.ComponentProps<typeof DistributionChart>> = {},
+) {
   const onChart = vi.fn()
   const onPreview = vi.fn()
   const onCommit = vi.fn()
-  const onDragBlocked = vi.fn()
+  const onBlocked = vi.fn()
   const onHeight = vi.fn()
+  const onGroupLock = vi.fn()
   const total = rows.reduce((a, r) => a + r.weight, 0)
   render(
     <DistributionChart
@@ -35,16 +42,18 @@ function renderChart(chart: Partial<ChartSettings>, rows = baseRows(), height = 
       totalWeight={total}
       chart={{ ...DEFAULT_CHART, logY: false, aggregate: false, ...chart }}
       grouping={groupRows(rows)}
-      weightStep={1}
+      weightStep={weightStep}
       height={height}
       onChart={onChart}
       onPreview={onPreview}
       onCommit={onCommit}
-      onDragBlocked={onDragBlocked}
+      onBlocked={onBlocked}
       onHeight={onHeight}
+      onGroupLock={onGroupLock}
+      {...extra}
     />,
   )
-  return { onChart, onPreview, onCommit, onDragBlocked, onHeight, rows, total }
+  return { onChart, onPreview, onCommit, onBlocked, onHeight, onGroupLock, rows, total }
 }
 
 const lastRows = (fn: ReturnType<typeof vi.fn>): BucketRow[] =>
@@ -262,6 +271,62 @@ describe('DistributionChart readout', () => {
   })
 })
 
+describe('DistributionChart group bars', () => {
+  it('draws one bar for a collapsed group and none for its buckets', () => {
+    renderChart({ metric: 'weights', groupBars: ['bonus'] })
+    // 0x, 0-1x and the collapsed bonus group
+    expect(document.querySelectorAll('.bar')).toHaveLength(3)
+  })
+
+  it('labels a group bar with the group name instead of a payout', () => {
+    renderChart({ metric: 'weights', groupBars: ['bonus'] })
+    const labels = [...document.querySelectorAll('.axis-label')].map((el) => el.textContent)
+    expect(labels).toContain('bonus')
+  })
+
+  it('reports the payout range and the mean in the readout', () => {
+    renderChart({ metric: 'weights', groupBars: ['bonus'] })
+    // bars ascend: 0x, 0-1x, then bonus at its weighted mean of ×31
+    fireEvent.mouseOver(document.querySelectorAll('.bar-hit')[2])
+    const stats = readoutStats()
+    expect(stats.payout).toBe('×8 – ×100')
+    expect(stats.avg).toBe('×31')
+    expect(stats.weight).toBe('200,000')
+    // Σ(payout × weight) / total = (8×150,000 + 100×50,000) / 1,000,000
+    expect(stats.weighted).toBe('6.2000')
+  })
+
+  it('names every bucket of a collapsed group in the readout', () => {
+    renderChart({ metric: 'weights', groupBars: ['bonus'] })
+    fireEvent.mouseOver(document.querySelectorAll('.bar-hit')[2])
+    const lines = [...document.querySelectorAll('.readout-title')].map((el) => el.textContent)
+    expect(lines).toEqual(['bonus3', 'bonus4'])
+  })
+
+  it('rescales the whole group when its bar is dragged', () => {
+    const { onPreview, onCommit } = renderChart({ metric: 'weights', groupBars: ['bonus'] })
+    const hit = document.querySelectorAll('.bar-hit')[2]
+
+    fireEvent.pointerDown(hit, { pointerId: 1, clientY: 250 })
+    fireEvent.pointerMove(hit, { pointerId: 1, clientY: 150 })
+
+    const preview = lastRows(onPreview)
+    expect(sum(weightsOf(preview))).toBe(1_000_000)
+    expect(preview[2].weight + preview[3].weight).not.toBe(200_000)
+    // in-group proportions hold at ≈ 3:1
+    expect(preview[2].weight / preview[3].weight).toBeGreaterThan(2.7)
+    expect(preview[2].weight / preview[3].weight).toBeLessThan(3.3)
+
+    fireEvent.pointerUp(hit, { pointerId: 1, clientY: 150 })
+    expect(onCommit).toHaveBeenCalledTimes(1)
+  })
+
+  it('still draws the group handle for a collapsed group', () => {
+    renderChart({ metric: 'weights', groupBars: ['bonus'] })
+    expect(screen.getByRole('slider', { name: 'bonus group' })).toBeDefined()
+  })
+})
+
 describe('DistributionChart height', () => {
   it('draws at the height it is given', () => {
     renderChart({ metric: 'weights' }, baseRows(), 500)
@@ -274,5 +339,180 @@ describe('DistributionChart height', () => {
     fireEvent.pointerDown(grip, { pointerId: 1, clientY: 0 })
     fireEvent.pointerMove(grip, { pointerId: 1, clientY: 60 })
     expect(onHeight).toHaveBeenLastCalledWith(400)
+  })
+})
+
+describe('DistributionChart delta dragging', () => {
+  it('does not move a bar when the pointer is pressed and not moved', () => {
+    // The regression this feature exists for: the old drag jumped the bar to
+    // wherever the pointer happened to land, destroying its value on contact.
+    const { onPreview } = renderChart({ metric: 'weights', relative: true })
+    const hit = document.querySelectorAll('.bar-hit')[1]
+
+    fireEvent.pointerDown(hit, { pointerId: 1, clientY: 250 })
+    fireEvent.pointerMove(hit, { pointerId: 1, clientY: 250 })
+
+    expect(weightsOf(lastRows(onPreview))).toEqual([500_000, 300_000, 150_000, 50_000])
+  })
+
+  it('gives the same result for the same delta from different grab points', () => {
+    const low = renderChart({ metric: 'weights', relative: true })
+    const lowHit = document.querySelectorAll('.bar-hit')[1]
+    fireEvent.pointerDown(lowHit, { pointerId: 1, clientY: 300 })
+    fireEvent.pointerMove(lowHit, { pointerId: 1, clientY: 260 })
+    const fromLow = weightsOf(lastRows(low.onPreview))
+    cleanup()
+
+    const high = renderChart({ metric: 'weights', relative: true })
+    const highHit = document.querySelectorAll('.bar-hit')[1]
+    fireEvent.pointerDown(highHit, { pointerId: 1, clientY: 120 })
+    fireEvent.pointerMove(highHit, { pointerId: 1, clientY: 80 })
+
+    expect(weightsOf(lastRows(high.onPreview))).toEqual(fromLow)
+  })
+
+  it('raises the value when the pointer moves up and lowers it when it moves down', () => {
+    const { onPreview } = renderChart({ metric: 'weights', relative: true })
+    const hit = document.querySelectorAll('.bar-hit')[1]
+
+    fireEvent.pointerDown(hit, { pointerId: 1, clientY: 200 })
+    fireEvent.pointerMove(hit, { pointerId: 1, clientY: 160 })
+    expect(lastRows(onPreview)[1].weight).toBeGreaterThan(300_000)
+
+    fireEvent.pointerMove(hit, { pointerId: 1, clientY: 240 })
+    expect(lastRows(onPreview)[1].weight).toBeLessThan(300_000)
+  })
+
+  it('starts a group handle drag from the group’s own value', () => {
+    const { onPreview } = renderChart({ metric: 'weights', relative: true })
+    const handle = screen.getByRole('slider', { name: 'bonus group' })
+
+    fireEvent.pointerDown(handle, { pointerId: 1, clientY: 200 })
+    fireEvent.pointerMove(handle, { pointerId: 1, clientY: 200 })
+
+    expect(weightsOf(lastRows(onPreview))).toEqual([500_000, 300_000, 150_000, 50_000])
+  })
+})
+
+describe('DistributionChart value entry', () => {
+  it('opens a pre-filled popover when a bar is right-clicked', () => {
+    renderChart({ metric: 'weights' })
+    fireEvent.contextMenu(document.querySelectorAll('.bar-hit')[1], { clientX: 200, clientY: 150 })
+    expect(screen.getByRole('dialog')).toBeDefined()
+    expect((screen.getByLabelText('Weight') as HTMLInputElement).value).toBe('300000')
+  })
+
+  it('opens from a group handle with the group total', () => {
+    renderChart({ metric: 'weights' })
+    fireEvent.contextMenu(screen.getByRole('slider', { name: 'bonus group' }), {
+      clientX: 800,
+      clientY: 100,
+    })
+    expect((screen.getByLabelText('Weight') as HTMLInputElement).value).toBe('200000')
+  })
+
+  it('commits a typed weight as one undo step, preserving the grand total', () => {
+    const { onCommit } = renderChart({ metric: 'weights', relative: true })
+    fireEvent.contextMenu(document.querySelectorAll('.bar-hit')[1], { clientX: 200, clientY: 150 })
+    fireEvent.change(screen.getByLabelText('Weight'), { target: { value: '250000' } })
+    fireEvent.keyDown(screen.getByLabelText('Weight'), { key: 'Enter' })
+
+    expect(onCommit).toHaveBeenCalledTimes(1)
+    const rows = lastRows(onCommit)
+    expect(rows[1].weight).toBe(250_000)
+    expect(sum(weightsOf(rows))).toBe(1_000_000)
+  })
+
+  it('commits a typed percentage in chance mode', () => {
+    const { onCommit } = renderChart({ metric: 'chance' })
+    fireEvent.contextMenu(document.querySelectorAll('.bar-hit')[1], { clientX: 200, clientY: 150 })
+    fireEvent.change(screen.getByLabelText('Chance %'), { target: { value: '25' } })
+    fireEvent.keyDown(screen.getByLabelText('Chance %'), { key: 'Enter' })
+    expect(lastRows(onCommit)[1].weight).toBe(250_000)
+  })
+
+  it('reports a step-blocked entry and keeps the weights', () => {
+    // 1,000,005 free weight cannot be partitioned on a step of 10.
+    const rows = baseRows().map((r) => (r.uid === 'a' ? { ...r, weight: 500_005 } : r))
+    const { onCommit, onBlocked } = renderChart({ metric: 'weights', relative: true }, rows, 340, 10)
+    fireEvent.contextMenu(document.querySelectorAll('.bar-hit')[1], { clientX: 200, clientY: 150 })
+    fireEvent.change(screen.getByLabelText('Weight'), { target: { value: '250000' } })
+    fireEvent.keyDown(screen.getByLabelText('Weight'), { key: 'Enter' })
+    expect(onBlocked).toHaveBeenCalledWith('off-step')
+    expect(onCommit).not.toHaveBeenCalled()
+  })
+
+  it('reports a pinned entry, rather than silently no-opping, when every other unlocked bucket is locked', () => {
+    // Locking c and d leaves b (the dragged subset) as the only unlocked row
+    // outside the target — scaleSubset has nowhere to put the complementary
+    // change and hands back the weights unchanged.
+    const rows = baseRows().map((r) => (r.uid === 'b' ? r : { ...r, locked: true }))
+    const { onCommit, onBlocked } = renderChart({ metric: 'weights', relative: true }, rows)
+    fireEvent.contextMenu(document.querySelectorAll('.bar-hit')[1], { clientX: 200, clientY: 150 })
+    fireEvent.change(screen.getByLabelText('Weight'), { target: { value: '250000' } })
+    fireEvent.keyDown(screen.getByLabelText('Weight'), { key: 'Enter' })
+
+    expect(onCommit).not.toHaveBeenCalled()
+    expect(onBlocked).toHaveBeenCalledWith('pinned')
+    expect(screen.getByRole('dialog')).toBeDefined()
+  })
+
+  it('does not open on a locked bar', () => {
+    const rows = baseRows().map((r) => (r.uid === 'a' ? { ...r, locked: true } : r))
+    renderChart({ metric: 'weights' }, rows)
+    fireEvent.contextMenu(document.querySelectorAll('.bar-hit')[0], { clientX: 100, clientY: 150 })
+    expect(screen.queryByRole('dialog')).toBeNull()
+  })
+
+  it('does not open from a fully locked group handle', () => {
+    const rows = baseRows().map((r) => (r.payout >= 8 ? { ...r, locked: true } : r))
+    renderChart({ metric: 'weights' }, rows)
+    fireEvent.contextMenu(screen.getByRole('slider', { name: 'bonus group' }), {
+      clientX: 800,
+      clientY: 100,
+    })
+    expect(screen.queryByRole('dialog')).toBeNull()
+  })
+})
+
+describe('DistributionChart group locks', () => {
+  it('locks an unlocked group from its handle', () => {
+    const onGroupLock = vi.fn()
+    renderChart({ metric: 'weights' }, baseRows(), 340, 1, { onGroupLock })
+    fireEvent.click(screen.getByRole('button', { name: 'Lock the bonus group' }))
+    expect(onGroupLock).toHaveBeenCalledWith('bonus', true)
+  })
+
+  it('unlocks a fully locked group from its handle', () => {
+    const onGroupLock = vi.fn()
+    const rows = baseRows().map((r) => (r.payout >= 8 ? { ...r, locked: true } : r))
+    renderChart({ metric: 'weights' }, rows, 340, 1, { onGroupLock })
+    fireEvent.click(screen.getByRole('button', { name: 'Unlock the bonus group' }))
+    expect(onGroupLock).toHaveBeenCalledWith('bonus', false)
+  })
+
+  it('locks the rest of a partly locked group', () => {
+    const onGroupLock = vi.fn()
+    const rows = baseRows().map((r) => (r.uid === 'c' ? { ...r, locked: true } : r))
+    renderChart({ metric: 'weights' }, rows, 340, 1, { onGroupLock })
+    fireEvent.click(screen.getByRole('button', { name: 'Lock the bonus group' }))
+    expect(onGroupLock).toHaveBeenCalledWith('bonus', true)
+  })
+
+  it('locks a group when Enter is pressed on its focused padlock', () => {
+    const onGroupLock = vi.fn()
+    renderChart({ metric: 'weights' }, baseRows(), 340, 1, { onGroupLock })
+    fireEvent.keyDown(screen.getByRole('button', { name: 'Lock the bonus group' }), { key: 'Enter' })
+    expect(onGroupLock).toHaveBeenCalledWith('bonus', true)
+  })
+
+  it('does not start a drag when the padlock is pressed', () => {
+    const { onPreview } = renderChart({ metric: 'weights' }, baseRows(), 340, 1, {
+      onGroupLock: vi.fn(),
+    })
+    const lock = screen.getByRole('button', { name: 'Lock the bonus group' })
+    fireEvent.pointerDown(lock, { pointerId: 1, clientY: 250 })
+    fireEvent.pointerMove(lock, { pointerId: 1, clientY: 100 })
+    expect(onPreview).not.toHaveBeenCalled()
   })
 })

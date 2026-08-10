@@ -22,7 +22,7 @@ import { DEFAULT_WIDTHS, sortRows } from './lib/columns'
 import { parseTsv, SAMPLE_TSV } from './lib/parse'
 import { rescaleToTotal, retargetRtp, solveWeights, statsOf, stepBlockWarning } from './lib/distribute'
 import { buildTsv, copyTsv, downloadTsv } from './lib/exportTsv'
-import { buildGrouping, nextGroupColor, nextGroupId, seedGroups } from './lib/groups'
+import { buildGrouping, groupLockState, nextGroupColor, nextGroupId, seedGroups, type LockState } from './lib/groups'
 import { emptyHistory, pushHistory, redo, undo, type HistoryState } from './lib/history'
 import { DEFAULT_SPINS } from './lib/sim'
 import { clearWorkspace, loadWorkspace, saveWorkspace } from './lib/storage'
@@ -39,6 +39,9 @@ const SAVE_DEBOUNCE_MS = 300
 
 const offStepNotice = (step: number) =>
   `The current weights are not multiples of ${step} — run Auto-Distribute first, or set the weight step to free.`
+
+const pinnedNotice =
+  'Every other unlocked bucket is locked — the grand total pins this weight where it is. Unlock something to move it.'
 
 /** Everything undo covers. View state deliberately lives outside. */
 interface Doc {
@@ -307,6 +310,9 @@ export default function App() {
 
       const seeded = seedGroups(rows)
       commit((d) => ({ ...d, rows: seeded.rows, groups: seeded.groups }))
+      // New data means new groups; a collapsed id from the old table would
+      // either dangle or, worse, collapse an unrelated group of the same name.
+      setChart((c) => ({ ...c, groupBars: [] }))
       setPasteOpen(false)
       setPasteText('')
       setPasteError(null)
@@ -388,8 +394,8 @@ export default function App() {
     [commit],
   )
 
-  const handleDragBlocked = useCallback(() => {
-    setNotices([offStepNotice(docRef.current.weightStep)])
+  const handleBlocked = useCallback((reason: 'off-step' | 'pinned') => {
+    setNotices([reason === 'off-step' ? offStepNotice(docRef.current.weightStep) : pinnedNotice])
   }, [])
 
   // ---- groups ----
@@ -437,9 +443,32 @@ export default function App() {
           rows: d.rows.map((r) => (r.groupId === id ? { ...r, groupId: fallback } : r)),
         }
       })
+      // A deleted id must not linger in view state — nextGroupId can reissue
+      // it, and a brand-new group must never start out pre-collapsed.
+      setChart((c) => ({ ...c, groupBars: c.groupBars.filter((g) => g !== id) }))
     },
     [commit],
   )
+
+  /**
+   * A group lock is just its rows' locks, set together — so undo, the solver
+   * and the export need to know nothing about groups.
+   */
+  const setGroupLocked = useCallback(
+    (id: string, locked: boolean) => {
+      commit((d) => ({
+        ...d,
+        rows: d.rows.map((r) => (r.groupId === id ? { ...r, locked } : r)),
+      }))
+    },
+    [commit],
+  )
+
+  const groupLockStates = useMemo(() => {
+    const m = new Map<string, LockState>()
+    for (const g of doc.groups) m.set(g.id, groupLockState(doc.rows, g.id))
+    return m
+  }, [doc.groups, doc.rows])
 
   const exportText = useCallback(
     () => buildTsv(sortRows(docRef.current.rows, sort, totalWeight, grouping.rank), totalWeight),
@@ -473,41 +502,39 @@ export default function App() {
           <span className="brand-sub">slot engine bucket weights</span>
         </div>
         <div className="topbar-actions">
-          <button type="button" className="btn" onClick={() => loadData(SAMPLE_TSV)}>
-            Load sample
-          </button>
-          <button type="button" className="btn" onClick={() => setPasteOpen(true)}>
-            Paste TSV data
-          </button>
+          <div className="topbar-block">
+            <span className="topbar-block-label">Import</span>
+            <button type="button" className="btn" onClick={() => loadData(SAMPLE_TSV)}>
+              Load sample
+            </button>
+            <button type="button" className="btn" onClick={() => setPasteOpen(true)}>
+              Paste TSV data
+            </button>
+          </div>
           {hasRows && (
             <>
-              <button
-                type="button"
-                className={`btn ${groupsOpen ? 'primary' : ''}`}
-                aria-expanded={groupsOpen}
-                onClick={() => setGroupsOpen((v) => !v)}
-              >
-                Group settings
-              </button>
-              <span className="topbar-sep" aria-hidden="true" />
-              <input
-                className="filename-input"
-                value={exportFilename}
-                aria-label="Export filename"
-                spellCheck={false}
-                onChange={(e) => setExportFilename(e.target.value)}
-              />
-              <button type="button" className="btn" onClick={handleCopy}>
-                {copyState === 'ok' ? 'Copied ✓' : copyState === 'fail' ? 'Copy failed' : 'Copy TSV'}
-              </button>
-              <button
-                type="button"
-                className="btn"
-                onClick={() => downloadTsv(exportText(), exportFilename)}
-              >
-                Download .tsv
-              </button>
-              <span className="topbar-sep" aria-hidden="true" />
+              <div className="topbar-block">
+                <span className="topbar-block-label">Export</span>
+                <input
+                  className="filename-input"
+                  value={exportFilename}
+                  aria-label="Export filename"
+                  spellCheck={false}
+                  onChange={(e) => setExportFilename(e.target.value)}
+                />
+                <button type="button" className="btn" onClick={handleCopy}>
+                  {copyState === 'ok' ? 'Copied ✓' : copyState === 'fail' ? 'Copy failed' : 'Copy TSV'}
+                </button>
+                <button
+                  type="button"
+                  className="btn"
+                  onClick={() => downloadTsv(exportText(), exportFilename)}
+                >
+                  Download .tsv
+                </button>
+              </div>
+              {/* Destructive, so it stands apart from the two blocks rather
+                  than sitting among the actions used constantly. */}
               <button type="button" className="btn danger" onClick={handleClear}>
                 Clear workspace
               </button>
@@ -521,6 +548,7 @@ export default function App() {
           <TargetsPanel
             panelRef={targetsRef}
             collapsed={targetsCollapsed}
+            groupsOpen={groupsOpen}
             onCollapsed={setTargetsCollapsed}
             targets={doc.targets}
             volatility={doc.volatility}
@@ -539,6 +567,7 @@ export default function App() {
             onAutoDistribute={autoDistribute}
             onUndo={doUndo}
             onRedo={doRedo}
+            onGroupSettings={() => setGroupsOpen((v) => !v)}
           />
 
           {groupsOpen && (
@@ -552,11 +581,13 @@ export default function App() {
               <GroupSettings
                 groups={doc.groups}
                 counts={groupCounts}
+                lockStates={groupLockStates}
                 fallbackName={doc.groups[0]?.name ?? ''}
                 onAdd={addGroup}
                 onRename={renameGroup}
                 onRecolor={recolorGroup}
                 onDelete={deleteGroup}
+                onLock={setGroupLocked}
               />
             </section>
           )}
@@ -608,7 +639,8 @@ export default function App() {
               onHeight={setChartHeight}
               onPreview={setPreview}
               onCommit={handleDragCommit}
-              onDragBlocked={handleDragBlocked}
+              onBlocked={handleBlocked}
+              onGroupLock={setGroupLocked}
             />
           </section>
           </div>

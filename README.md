@@ -20,11 +20,13 @@ weights — then exports a `.tsv` the engine can read back.
   - [Weight step](#weight-step)
   - [The targets panel](#the-targets-panel)
   - [Locks](#locks)
+    - [Group locks](#group-locks)
   - [Keyboard](#keyboard)
   - [In-cell arithmetic](#in-cell-arithmetic)
   - [The totals row](#the-totals-row)
   - [Bucket groups](#bucket-groups)
-  - [Dragging the distribution chart](#dragging-the-distribution-chart)
+  - [Dragging and setting values on the chart](#dragging-and-setting-values-on-the-chart)
+    - [Group bars](#group-bars)
   - [The tooltip, and chart height](#the-tooltip-and-chart-height)
   - [Simulation](#simulation)
   - [Layout](#layout)
@@ -203,16 +205,18 @@ and the panel names the nearest totals that would work.
 
 Everything sits on one wrapping row — Target RTP, Preferred Hit Chance,
 Preferred Win Chance, Chance tolerance, Volatility, Curve c, the weight step,
-then `Auto-Distribute` and undo/redo.
+then `Auto-Distribute`, `Group settings` and undo/redo.
 
 The panel **sticks to the top of the viewport** as you scroll, and
 **collapses**: the ▾ toggle at its left folds the inputs away, leaving a slim
-bar that reads every setting back as `name: value` — RTP, hit, win, tolerance,
-volatility, curve and step — alongside the `Auto-Distribute`, `Undo` and
-`Redo` buttons. So you can still act on the table from the bottom
-of a long page; only editing the targets needs an expand. The collapsed state
-is remembered with the workspace. The table header and the chart panel offset
-themselves by the panel's measured height, so nothing slides underneath it.
+bar that reads every setting back as `name: value` — RTP, hit, win,
+tolerance, volatility, curve and step — alongside the `Auto-Distribute`,
+`Group settings`, `Undo` and `Redo` buttons, so you can still act on the
+table from the bottom of a long page; only editing the targets needs an
+expand. `Group settings` appears in exactly one of the two rows at a time,
+never both. The collapsed state is remembered with the workspace. The table
+header and the chart panel offset themselves by the panel's measured height,
+so nothing slides underneath it.
 
 A target that is switched off greys out and its badge stops being flagged; it
 is a readout, not a goal. Every other target shows its achieved value beside it
@@ -230,6 +234,15 @@ Auto-Distribute, rescaling and RTP retargeting all work around locked rows. If
 locks overrun a group's share of the total, the panel says so rather than
 missing the target silently. A locked row keeps its group color and only
 deepens a shade, so the grouping stays readable while rows are pinned.
+
+#### Group locks
+
+Whole groups lock too. A group is locked when every bucket in it is, and the
+padlock — in **Group settings** beside each group's name, and on the group's
+handle at the chart's right edge — locks or unlocks all of them in one
+undoable step. A group with some buckets locked shows a half-lit padlock;
+clicking it locks the rest. There is no separate group-level lock: row locks
+stay the single thing the solver, the export and the chart all read.
 
 ### Keyboard
 
@@ -301,18 +314,32 @@ are yours. The detector's rules, in priority order:
 
 After the import the heuristics never run again, so nothing you do can be
 silently undone by them. Change a bucket's group from the **Group** column's
-dropdown, and manage the groups themselves from **Group settings** in the top
-bar: add, rename, recolor from a palette of 20 pastels, or delete. Deleting a
-group never deletes buckets — they move to the first remaining group. All of
-it is undoable and saved with the workspace.
+dropdown, and manage the groups themselves from **Group settings** in the
+targets panel: add, rename, recolor from a palette of 20 pastels, lock, or
+delete. Deleting a group never deletes buckets — they move to the first
+remaining group. All of it is undoable and saved with the workspace.
 
-### Dragging the distribution chart
+### Dragging and setting values on the chart
 
-Bars are draggable: press and move vertically to set the bucket's weight
-(weights mode) or chance (% mode). With **Relative drag** on — the default —
-the grand total is preserved: other unlocked buckets absorb the change, and
-chances keep summing to 1. Switch it off (weights mode only) to move a single
-bar and let the total drift. Chance mode is always relative.
+Bars and group handles are draggable: press and move vertically to change the
+bucket's weight (weights mode) or chance (% mode). **Drags move by how far the
+pointer moves, not to where it is** — the bar never jumps on press, so it can
+be grabbed anywhere along its length, and a given pixel distance means the
+same thing wherever you grabbed: a constant multiplier on a log Y axis, a
+constant amount on a linear one. Escape cancels a drag in flight; a drag
+previews live in the table and commits as one undo step on release.
+
+**Right-click a bar or a handle to type an exact value** — a drag cannot land
+on 4,200 reliably. The popover pre-fills with the current weight, or the
+current percentage in % Chance mode, and accepts arithmetic like the grid
+cells do (`4150+50`). It commits through the same machinery a drag does, so
+locked rows, the weight step and the grand-total invariant behave identically,
+and it lands as one undo step. Enter sets, Escape and click-away cancel.
+
+With **Relative drag** on — the default — the grand total is preserved: other
+unlocked buckets absorb the change, and chances keep summing to 1. Switch it
+off (weights mode only) to move a single bar and let the total drift. Chance
+mode is always relative.
 
 The view has its own controls: **Weights / % Chance** switches the metric,
 **Log Y** and **Log X** flip the axes to log scale, and **Aggregate equal
@@ -326,8 +353,24 @@ while proportions inside the group are preserved.
 
 Aggregated bars that span several groups draw as stacked segments; a drag
 moves all their rows together. Locked rows never move; a fully locked group's
-handle is disabled. A drag previews live in the table and commits as **one
-undo step** on release. Escape cancels a drag in flight.
+handle is disabled.
+
+#### Group bars
+
+Any group can be **collapsed into a single bar**. The chip row under the
+chart controls has one chip per group — click to collapse or expand it, or
+use `All` / `None`. Collapsed groups are taken out first and each becomes one
+solid bar; whatever is left still aggregates by equal payout as before, so the
+two never double-count a bucket.
+
+A group bar sits at the group's **weight-weighted mean payout**,
+`Σ(payout × weight) / Σ weight`, so it is placed where the group's mass
+actually is and its position against the loose bars still means something. It
+is labelled with the group name rather than a payout, and drags and
+right-clicks exactly like that group's handle. Its tooltip gives the payout
+range, the mean, and the group's weight, chance and weighted value. The chip
+row doubles as the chart's legend. Which groups are collapsed is remembered
+with the workspace, and reset when new data is imported.
 
 ### The tooltip, and chart height
 
@@ -414,20 +457,23 @@ chance to its full 15 decimals.
 
 ### Export
 
-`Copy TSV` puts the document on the clipboard; `Download .tsv` saves it, named
-`ref-weights-regular.tsv` by default. Both sit in the top bar next to
-`Load sample` and `Paste TSV data`, with the editable filename field between
-them — it is remembered with the workspace.
+The top bar carries two blocks. **Import** holds `Load sample` and
+`Paste TSV data`; **Export** holds the editable filename, `Copy TSV` and
+`Download .tsv`. `Copy TSV` puts the document on the clipboard;
+`Download .tsv` saves it, named `ref-weights-regular.tsv` by default.
+`Clear workspace` sits outside both, at the far right, since it destroys the
+table.
 
 ### Persistence
 
 The table, targets, volatility, weight step, column widths, chart settings,
-both chart heights, the groups and their colors, whether the targets panel is
-collapsed, export filename and simulation spin count autosave to
-`localStorage` and come back on reload. A workspace saved before groups became
-data is migrated on load — the detector seeds it once, exactly as an import
-would. `Clear workspace`, at the right of the top bar, wipes it after
-confirming. Undo history and simulation results are not persisted.
+which groups are collapsed into bars, both chart heights, the groups and
+their colors, whether the targets panel is collapsed, export filename and
+simulation spin count autosave to `localStorage` and come back on reload.
+A workspace saved before groups became data is migrated on load — the
+detector seeds it once, exactly as an import would. `Clear workspace`, at the
+right of the top bar, wipes it after confirming. Undo history and simulation
+results are not persisted.
 
 ## Project layout
 
@@ -441,6 +487,7 @@ src/
     expr.ts         in-cell arithmetic parser
     distribute.ts   the solver, rescaling, RTP retargeting
     groups.ts       bucket grouping heuristics and colors
+    bars.ts         chart bar construction, including collapsed groups
     interact.ts     relative/absolute subset scaling for chart drags
     sim.ts          Monte Carlo core: PRNG, alias sampling, aggregates
     sim.worker.ts   worker shell around sim.ts
@@ -455,10 +502,12 @@ src/
     useGridNavigation.ts selection and edit state machine
     TargetsPanel.tsx     targets, volatility, weight step, undo
     DistributionChart.tsx draggable bars, group handles
+    ChartValueEntry.tsx  right-click popover for an exact weight or chance
+    GroupBarChips.tsx    which groups are drawn as a single bar
     SimulationPanel.tsx  spins, run control, live stats
     SimChart.tsx         realtime simulation chart
     ChartReadout.tsx     the hover tooltip anchored under both charts
-    GroupSettings.tsx    add, rename, recolor and delete bucket groups
+    GroupSettings.tsx    add, rename, recolor, lock and delete bucket groups
     ChartResizeGrip.tsx  drag or key a chart taller
     chartUtils.ts        shared axis, width, bar-geometry and height helpers
     RtpGauge.tsx
@@ -470,9 +519,12 @@ src/
 
 `src/lib` is covered by Vitest — the solver, parser, formatter, expression
 evaluator, grouping rules, drag operations and simulation core are where the
-real risk is. The key one is the export acceptance test, which parses
-`example-input-data.tsv`, applies the weights from `example-output-data.tsv`,
-and asserts the generated text matches the reference file byte for byte.
+real risk is. `bars.ts` carries the chart's construction rules and is tested
+directly: group collapse, mean-payout placement, the log-axis zero drop and
+the interaction with equal-payout aggregation. The key one is the export
+acceptance test, which parses `example-input-data.tsv`, applies the weights
+from `example-output-data.tsv`, and asserts the generated text matches the
+reference file byte for byte.
 Component tests drive the chart's drag interactions, the tooltip's contents,
 colors and edge clamping, the resize grip's pointer and keyboard paths, and
 the simulation panel against a faked worker; the App smoke test covers
