@@ -163,3 +163,24 @@ export function nextUid(): string {
   uidCounter += 1
   return `b${uidCounter}`
 }
+
+/** Which question the simulation panel is answering. */
+export type SimMode = 'convergence' | 'bankroll'
+
+export const DEFAULT_SIM_MODE: SimMode = 'convergence'
+
+/** A bankroll run's inputs. Persisted with the workspace, like Targets. */
+export interface BankrollConfig {
+  /** Starting balance, in credits. */
+  credits: number
+  /** Stake per spin, in credits. */
+  bet: number
+  /** Every payout is multiplied by this before the alias table is built. */
+  rtpMultiplier: number
+}
+
+export const DEFAULT_BANKROLL: BankrollConfig = {
+  credits: 1_000_000,
+  bet: 1,
+  rtpMultiplier: 1,
+}

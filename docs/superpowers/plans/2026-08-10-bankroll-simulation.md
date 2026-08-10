@@ -744,13 +744,25 @@ interface Run {
 }
 
 let run: Run | null = null
+/**
+ * True while a `runChunk` chain is actually mid-flight for `run`. This guards
+ * something the identity check below cannot: `continue` calls `runChunk` on
+ * the *same* `run` object, so `run !== r` never trips for a second `continue`
+ * dispatched while the first chunk is still running — a chunk is up to 10M
+ * spins over many 24ms slices, so that overlap is the normal case, not an
+ * edge case. `busy` closes that gap by making a second `continue` a no-op
+ * instead of a second concurrent loop drawing from the same PRNG.
+ */
+let busy = false
 
 function runChunk(r: Run): void {
   let chunkSpins = 0
   let lastEmit = Date.now()
+  busy = true
 
   const step = () => {
     // A newer `start` has replaced this run — abandon the old timeslice chain.
+    // (This says nothing about `continue`; that overlap is `busy`'s job.)
     if (run !== r) return
 
     const start = Date.now()
@@ -768,6 +780,10 @@ function runChunk(r: Run): void {
     }
 
     if (r.state.busted || chunkSpins >= BANKROLL_CHUNK_SPINS) {
+      // Clear before posting: by the time the panel could react to
+      // `chunk-done` with another `continue`, this chain must already read
+      // as free, not as still owning the run.
+      busy = false
       sealPoint(r.buf, r.state)
       scope.postMessage({
         type: 'chunk-done',
@@ -795,6 +811,7 @@ scope.onmessage = (e: MessageEvent<BankrollRequest>) => {
     const table = buildAlias(scalePayouts(msg.payouts, msg.config.rtpMultiplier), msg.weights)
     if (table === null) {
       run = null
+      busy = false
       scope.postMessage({
         type: 'error',
         message: 'Every bucket has zero weight — nothing to play.',
@@ -816,6 +833,9 @@ scope.onmessage = (e: MessageEvent<BankrollRequest>) => {
     scope.postMessage({ type: 'error', message: 'Nothing to continue — start a run first.' })
     return
   }
+  // A chunk is already mid-flight for this run — the caller's request to
+  // continue it is already satisfied, not an error and not a second chain.
+  if (busy) return
   runChunk(run)
 }
 ```
@@ -1584,6 +1604,11 @@ export function BankrollSim({
 
   const start = () => {
     if (!canRun) return
+    // Run stays clickable on a capped chunk (so a stuck-but-solvent run can be
+    // abandoned for a fresh one), but a capped chunk deliberately keeps its
+    // worker alive for Continue — so this is the one place that has to tear
+    // an existing worker down explicitly, or it runs on unreferenced.
+    stopWorker()
     const worker = (createWorker ?? defaultFactory)()
     workerRef.current = worker
     worker.onmessage = (e) => handleMessage(e.data)
@@ -1860,9 +1885,137 @@ git commit -m "feat: bankroll panel with credits, bet, RTP multiplier and Contin
 
 ---
 
-### Task 7: Split the simulation panel
+### Task 7: Persist the new settings
+
+**Files:**
+- Modify: `src/lib/storage.ts:11-31` (the `Workspace` interface) and `:83-105` (`isWorkspace`)
+- Test: `src/lib/storage.test.ts` (append)
+
+**Interfaces:**
+- Consumes: `SimMode`, `BankrollConfig` from `types.ts` (Task 2)
+- Produces: `Workspace` gains `simMode?`, `bankroll?`, `chartHeightAuto?`
+
+- [ ] **Step 1: Write the failing tests**
+
+Append to the final `describe` block in `src/lib/storage.test.ts`, and add `DEFAULT_BANKROLL` to its imports from `./types`:
+
+```ts
+  it('round-trips the simulation mode and rejects an unknown one', () => {
+    saveWorkspace({ ...workspace, simMode: 'bankroll' })
+    expect(loadWorkspace()?.simMode).toBe('bankroll')
+
+    store.set(STORAGE_KEY, JSON.stringify({ ...workspace, simMode: 'roulette' }))
+    expect(loadWorkspace()).toBeNull()
+  })
+
+  it('round-trips the bankroll config and rejects a malformed one', () => {
+    saveWorkspace({ ...workspace, bankroll: { credits: 500, bet: 0.5, rtpMultiplier: 0.9 } })
+    expect(loadWorkspace()?.bankroll).toEqual({ credits: 500, bet: 0.5, rtpMultiplier: 0.9 })
+
+    store.set(
+      STORAGE_KEY,
+      JSON.stringify({ ...workspace, bankroll: { ...DEFAULT_BANKROLL, bet: 'one' } }),
+    )
+    expect(loadWorkspace()).toBeNull()
+
+    store.set(STORAGE_KEY, JSON.stringify({ ...workspace, bankroll: { credits: 500 } }))
+    expect(loadWorkspace()).toBeNull()
+  })
+
+  it('round-trips the chart auto-height flag and rejects a non-boolean', () => {
+    saveWorkspace({ ...workspace, chartHeightAuto: false })
+    expect(loadWorkspace()?.chartHeightAuto).toBe(false)
+
+    store.set(STORAGE_KEY, JSON.stringify({ ...workspace, chartHeightAuto: 'yes' }))
+    expect(loadWorkspace()).toBeNull()
+  })
+
+  it('accepts a workspace saved before any of the new fields existed', () => {
+    saveWorkspace(workspace)
+    const loaded = loadWorkspace()
+    expect(loaded).not.toBeNull()
+    expect(loaded?.simMode).toBeUndefined()
+    expect(loaded?.bankroll).toBeUndefined()
+    expect(loaded?.chartHeightAuto).toBeUndefined()
+  })
+```
+
+- [ ] **Step 2: Run the tests to verify they fail**
+
+Run: `npx vitest --run src/lib/storage.test.ts`
+Expected: FAIL — TypeScript rejects `simMode` on `Workspace`.
+
+- [ ] **Step 3: Implement**
+
+In `src/lib/storage.ts`, extend the import on line 1:
+
+```ts
+import type {
+  BankrollConfig,
+  BucketRow,
+  ChartSettings,
+  GroupDef,
+  SimMode,
+  Targets,
+  Volatility,
+  WeightStep,
+} from './types'
+```
+
+Add to the `Workspace` interface, after `targetsCollapsed`:
+
+```ts
+  /** Optional — absent in workspaces saved before bankroll mode existed. */
+  simMode?: SimMode
+  bankroll?: BankrollConfig
+  /** Optional — absent before the chart could fit itself to the table. */
+  chartHeightAuto?: boolean
+```
+
+Add a validator beside `isChart`:
+
+```ts
+function isBankroll(v: unknown): v is BankrollConfig {
+  return (
+    isObject(v) &&
+    isFiniteNumber(v.credits) &&
+    isFiniteNumber(v.bet) &&
+    isFiniteNumber(v.rtpMultiplier)
+  )
+}
+```
+
+Add to `isWorkspace`, before the closing `)`:
+
+```ts
+    (v.simMode === undefined || v.simMode === 'convergence' || v.simMode === 'bankroll') &&
+    (v.bankroll === undefined || isBankroll(v.bankroll)) &&
+    (v.chartHeightAuto === undefined || typeof v.chartHeightAuto === 'boolean')
+```
+
+- [ ] **Step 4: Run the tests to verify they pass**
+
+Run: `npx vitest --run src/lib/storage.test.ts`
+Expected: PASS.
+
+- [ ] **Step 5: Commit**
+
+```bash
+git add src/lib/storage.ts src/lib/storage.test.ts
+git commit -m "feat: persist the simulation mode, bankroll config and auto-height flag"
+```
+
+---
+
+### Task 8: Split the simulation panel and wire it into App
 
 `SimulationPanel` becomes a thin shell over two modes. Today's content moves to `ConvergenceSim` unchanged, and its test file moves with it.
+
+**The split and the App wiring are one task deliberately.** Changing
+`SimulationPanel`'s props while `App` still passes the old ones is a
+TypeScript error, so splitting them would land a commit that neither builds
+nor tests. Steps 1–6 do the split, steps 7–11 update the only caller, and the
+whole thing commits once with the suite green.
 
 **Files:**
 - Create: `src/components/ConvergenceSim.tsx` (moved content)
@@ -1870,9 +2023,11 @@ git commit -m "feat: bankroll panel with credits, bet, RTP multiplier and Contin
 - Delete: `src/components/SimulationPanel.test.tsx`
 - Modify: `src/components/SimulationPanel.tsx` (replaced with the shell)
 - Modify: `src/index.css` (append)
+- Modify: `src/App.tsx` — imports, state near `:127-136`, the save payload near `:233-245`, the panel render near `:656-664`
+- Test: `src/App.test.tsx` (append)
 
 **Interfaces:**
-- Consumes: `BankrollSim`, `BankrollWorkerLike` (Task 6); `SimMode`, `BankrollConfig` from `types.ts`
+- Consumes: `BankrollSim`, `BankrollWorkerLike` (Task 6); `SimMode`, `BankrollConfig`, `DEFAULT_BANKROLL`, `DEFAULT_SIM_MODE` from `types.ts` (Task 2); the `simMode` / `bankroll` storage fields (Task 7)
 - Produces: `SimulationPanel` with props `{ mode, onMode, rows, totalWeight, expectedRtp, spins, onSpins, bankroll, onBankroll, chartHeight, onChartHeight, createWorker?, createBankrollWorker? }`; `ConvergenceSim` keeping today's props and re-exporting `SimWorkerLike`
 
 - [ ] **Step 1: Move the convergence panel**
@@ -2100,154 +2255,7 @@ Append to `src/index.css`:
 }
 ```
 
-- [ ] **Step 7: Run the suite**
-
-Run: `npm run test:run`
-Expected: the four shell tests pass; `App.test.tsx` fails because `App` still passes the old props. That is expected and Task 9 fixes it — do not change `App.tsx` yet.
-
-- [ ] **Step 8: Commit**
-
-```bash
-git add src/components/SimulationPanel.tsx src/components/SimulationPanel.test.tsx \
-        src/components/ConvergenceSim.tsx src/components/ConvergenceSim.test.tsx src/index.css
-git commit -m "refactor: split the simulation panel into a mode shell over two panels"
-```
-
----
-
-### Task 8: Persist the new settings
-
-**Files:**
-- Modify: `src/lib/storage.ts:11-31` (the `Workspace` interface) and `:83-105` (`isWorkspace`)
-- Test: `src/lib/storage.test.ts` (append)
-
-**Interfaces:**
-- Consumes: `SimMode`, `BankrollConfig` from `types.ts` (Task 2)
-- Produces: `Workspace` gains `simMode?`, `bankroll?`, `chartHeightAuto?`
-
-- [ ] **Step 1: Write the failing tests**
-
-Append to the final `describe` block in `src/lib/storage.test.ts`, and add `DEFAULT_BANKROLL` to its imports from `./types`:
-
-```ts
-  it('round-trips the simulation mode and rejects an unknown one', () => {
-    saveWorkspace({ ...workspace, simMode: 'bankroll' })
-    expect(loadWorkspace()?.simMode).toBe('bankroll')
-
-    store.set(STORAGE_KEY, JSON.stringify({ ...workspace, simMode: 'roulette' }))
-    expect(loadWorkspace()).toBeNull()
-  })
-
-  it('round-trips the bankroll config and rejects a malformed one', () => {
-    saveWorkspace({ ...workspace, bankroll: { credits: 500, bet: 0.5, rtpMultiplier: 0.9 } })
-    expect(loadWorkspace()?.bankroll).toEqual({ credits: 500, bet: 0.5, rtpMultiplier: 0.9 })
-
-    store.set(
-      STORAGE_KEY,
-      JSON.stringify({ ...workspace, bankroll: { ...DEFAULT_BANKROLL, bet: 'one' } }),
-    )
-    expect(loadWorkspace()).toBeNull()
-
-    store.set(STORAGE_KEY, JSON.stringify({ ...workspace, bankroll: { credits: 500 } }))
-    expect(loadWorkspace()).toBeNull()
-  })
-
-  it('round-trips the chart auto-height flag and rejects a non-boolean', () => {
-    saveWorkspace({ ...workspace, chartHeightAuto: false })
-    expect(loadWorkspace()?.chartHeightAuto).toBe(false)
-
-    store.set(STORAGE_KEY, JSON.stringify({ ...workspace, chartHeightAuto: 'yes' }))
-    expect(loadWorkspace()).toBeNull()
-  })
-
-  it('accepts a workspace saved before any of the new fields existed', () => {
-    saveWorkspace(workspace)
-    const loaded = loadWorkspace()
-    expect(loaded).not.toBeNull()
-    expect(loaded?.simMode).toBeUndefined()
-    expect(loaded?.bankroll).toBeUndefined()
-    expect(loaded?.chartHeightAuto).toBeUndefined()
-  })
-```
-
-- [ ] **Step 2: Run the tests to verify they fail**
-
-Run: `npx vitest --run src/lib/storage.test.ts`
-Expected: FAIL — TypeScript rejects `simMode` on `Workspace`.
-
-- [ ] **Step 3: Implement**
-
-In `src/lib/storage.ts`, extend the import on line 1:
-
-```ts
-import type {
-  BankrollConfig,
-  BucketRow,
-  ChartSettings,
-  GroupDef,
-  SimMode,
-  Targets,
-  Volatility,
-  WeightStep,
-} from './types'
-```
-
-Add to the `Workspace` interface, after `targetsCollapsed`:
-
-```ts
-  /** Optional — absent in workspaces saved before bankroll mode existed. */
-  simMode?: SimMode
-  bankroll?: BankrollConfig
-  /** Optional — absent before the chart could fit itself to the table. */
-  chartHeightAuto?: boolean
-```
-
-Add a validator beside `isChart`:
-
-```ts
-function isBankroll(v: unknown): v is BankrollConfig {
-  return (
-    isObject(v) &&
-    isFiniteNumber(v.credits) &&
-    isFiniteNumber(v.bet) &&
-    isFiniteNumber(v.rtpMultiplier)
-  )
-}
-```
-
-Add to `isWorkspace`, before the closing `)`:
-
-```ts
-    (v.simMode === undefined || v.simMode === 'convergence' || v.simMode === 'bankroll') &&
-    (v.bankroll === undefined || isBankroll(v.bankroll)) &&
-    (v.chartHeightAuto === undefined || typeof v.chartHeightAuto === 'boolean')
-```
-
-- [ ] **Step 4: Run the tests to verify they pass**
-
-Run: `npx vitest --run src/lib/storage.test.ts`
-Expected: PASS.
-
-- [ ] **Step 5: Commit**
-
-```bash
-git add src/lib/storage.ts src/lib/storage.test.ts
-git commit -m "feat: persist the simulation mode, bankroll config and auto-height flag"
-```
-
----
-
-### Task 9: Wire the bankroll into App
-
-**Files:**
-- Modify: `src/App.tsx` — imports, state near `:127-136`, the save payload near `:233-245`, the panel render near `:656-664`
-- Test: `src/App.test.tsx` (append)
-
-**Interfaces:**
-- Consumes: `SimulationPanel` (Task 7), storage fields (Task 8), `DEFAULT_BANKROLL`, `DEFAULT_SIM_MODE` (Task 2)
-- Produces: nothing consumed downstream
-
-- [ ] **Step 1: Write the failing test**
+- [ ] **Step 7: Write the failing test**
 
 Append to `src/App.test.tsx`:
 
@@ -2296,12 +2304,12 @@ describe('simulation modes', () => {
 })
 ```
 
-- [ ] **Step 2: Run it to verify it fails**
+- [ ] **Step 8: Run it to verify it fails**
 
 Run: `npx vitest --run src/App.test.tsx`
 Expected: FAIL — no `Bankroll` button; `SimulationPanel` is missing required props.
 
-- [ ] **Step 3: Implement**
+- [ ] **Step 9: Implement**
 
 In `src/App.tsx`, extend the `./lib/types` import to include `DEFAULT_BANKROLL`, `DEFAULT_SIM_MODE`, and the types `BankrollConfig`, `SimMode`.
 
@@ -2334,21 +2342,24 @@ Replace the `<SimulationPanel .../>` element with:
             />
 ```
 
-- [ ] **Step 4: Run the full suite**
+- [ ] **Step 10: Run the full suite**
 
-Run: `npm run test:run`
-Expected: PASS — including the `SimulationPanel` shell tests that Task 7 left red.
+Run: `npm run build && npm run test:run`
+Expected: both PASS — the split and the wiring land together, so nothing is
+transiently red.
 
-- [ ] **Step 5: Commit**
+- [ ] **Step 11: Commit**
 
 ```bash
-git add src/App.tsx src/App.test.tsx
-git commit -m "feat: bankroll mode reaches the app, and is remembered with the workspace"
+git add src/components/SimulationPanel.tsx src/components/SimulationPanel.test.tsx \
+        src/components/ConvergenceSim.tsx src/components/ConvergenceSim.test.tsx \
+        src/index.css src/App.tsx src/App.test.tsx
+git commit -m "feat: a mode toggle splits the simulation panel, and bankroll reaches the app"
 ```
 
 ---
 
-### Task 10: The distribution chart fits the table
+### Task 9: The distribution chart fits the table
 
 **Files:**
 - Modify: `src/components/ChartResizeGrip.tsx:14-19, 61, 67-70`
@@ -2358,7 +2369,7 @@ git commit -m "feat: bankroll mode reaches the app, and is remembered with the w
 - Test: `src/App.test.tsx` (append)
 
 **Interfaces:**
-- Consumes: `chartHeightAuto` storage field (Task 8)
+- Consumes: `chartHeightAuto` storage field (Task 7)
 - Produces: `ChartResizeGrip` gains `onReset?: () => void`; `DistributionChart` gains `onHeightReset?: () => void`
 
 - [ ] **Step 1: Write the failing grip test**
@@ -2571,7 +2582,7 @@ git commit -m "feat: the distribution chart defaults to the table's height"
 
 ---
 
-### Task 11: Categorize the README
+### Task 10: Categorize the README
 
 **Files:**
 - Modify: `README.md`
@@ -2643,16 +2654,20 @@ git commit -m "docs: categorize the README and document bankroll mode"
 | §1 core, bust rule, peak/low, multiplier | 2 |
 | §1 `parseAmount` prerequisite | 1 |
 | §2 protocol, chunking, resumability, decimation | 3, 4 |
-| §3 panel split, fields, RTP≥1 warning, tiles | 6, 7 |
+| §3 panel split, fields, RTP≥1 warning, tiles | 6, 8 |
 | §4 `BankrollChart` | 5 |
-| §5 chart auto-height, grip reset | 10 |
-| §6 README | 11 |
-| Persistence of all new settings | 8, 9 |
+| §5 chart auto-height, grip reset | 9 |
+| §6 README | 10 |
+| Persistence of all new settings | 7, 8 |
+
+**Fixed during the pre-flight scan (after the plan was first committed):**
+
+- The original Task 7 split `SimulationPanel` while leaving `App` passing the old props, so both `npm run build` and the suite failed until the original Task 9 — a commit in history that did not compile. The split and the wiring are now one task (Task 8), storage moved ahead of it (Task 7), and everything after renumbered down by one. Ten tasks, every commit green.
 
 **Fixed during review:**
 
-- Task 9's reload test ignored the 300ms autosave debounce; it now uses the `setTimeout(…, 400)` flush the other reload tests use.
-- Task 10's tests asserted an invented `aria-label`; corrected to `Bucket distribution`, and the `offsetHeight` stub now restores the real descriptor in `afterEach` so it cannot leak into other tests in the file.
+- Task 8's reload test ignored the 300ms autosave debounce; it now uses the `setTimeout(…, 400)` flush the other reload tests use.
+- Task 9's tests asserted an invented `aria-label`; corrected to `Bucket distribution`, and the `offsetHeight` stub now restores the real descriptor in `afterEach` so it cannot leak into other tests in the file.
 - `chunkProgress` read 0% at exactly the cap, because `spins % CHUNK` is 0 there; a capped chunk now pins to 100%.
 - `handleMessage`'s status ternary had an unreachable third branch; replaced with an explicit `resumable` flag that gates both the status and whether the worker is kept alive.
 - Task 6's bust test used `getByText(/busted/)`, which matches both the progress line and the chart legend and would throw; now scoped to `.sim-progress-text`.
@@ -2661,5 +2676,5 @@ git commit -m "docs: categorize the README and document bankroll mode"
 **Known gaps, accepted deliberately:**
 
 - `bankroll.worker.ts` has no direct unit test, matching `sim.worker.ts`. The logic that can be wrong is in `bankroll.ts` (Tasks 2–3); the message contract is exercised by `FakeWorker` in Task 6.
-- Task 10's App tests stub `offsetHeight` because jsdom has no layout engine, so they pin the wiring rather than the real fitting. Confirming it actually looks right needs a browser.
-- Task 11's README steps specify the heading structure exactly but describe the prose by required content rather than supplying finished paragraphs.
+- Task 9's App tests stub `offsetHeight` because jsdom has no layout engine, so they pin the wiring rather than the real fitting. Confirming it actually looks right needs a browser.
+- Task 10's README steps specify the heading structure exactly but describe the prose by required content rather than supplying finished paragraphs.

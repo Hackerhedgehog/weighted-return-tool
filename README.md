@@ -12,25 +12,30 @@ weights — then exports a `.tsv` the engine can read back.
 - [Data formats](#data-formats)
   - [Input — what you paste](#input--what-you-paste)
   - [Output — what you export](#output--what-you-export)
-- [Features](#features)
-  - [Getting started](#getting-started)
+- [Getting started](#getting-started)
+- [Solving weights](#solving-weights)
   - [The solver](#the-solver)
   - [Tolerance](#tolerance)
   - [Volatility](#volatility)
   - [Weight step](#weight-step)
   - [The targets panel](#the-targets-panel)
-  - [Locks](#locks)
-    - [Group locks](#group-locks)
+- [Editing the table](#editing-the-table)
   - [Keyboard](#keyboard)
   - [In-cell arithmetic](#in-cell-arithmetic)
   - [The totals row](#the-totals-row)
+  - [Locks](#locks)
+    - [Group locks](#group-locks)
   - [Bucket groups](#bucket-groups)
+  - [Columns](#columns)
+- [The distribution chart](#the-distribution-chart)
   - [Dragging and setting values on the chart](#dragging-and-setting-values-on-the-chart)
     - [Group bars](#group-bars)
   - [The tooltip, and chart height](#the-tooltip-and-chart-height)
-  - [Simulation](#simulation)
+- [Simulation](#simulation)
+  - [Convergence mode](#convergence-mode)
+  - [Bankroll mode](#bankroll-mode)
+- [Workspace](#workspace)
   - [Layout](#layout)
-  - [Columns](#columns)
   - [Export](#export)
   - [Persistence](#persistence)
 - [Project layout](#project-layout)
@@ -101,15 +106,17 @@ with the extra column still pastes back cleanly, Weight IDs included.
 header and totals rows are ignored — so you can export, adjust in Excel, and
 paste the result back without editing anything out.
 
-## Features
-
-### Getting started
+## Getting started
 
 First launch opens the paste screen. `Load sample` builds the table from a
 bundled sample (14 buckets); `Paste TSV data` takes your own bucket list
 and stays available in the top bar afterwards. `Clear workspace`, at the far
 right of the top bar, wipes everything and returns to the paste screen, after
 confirming.
+
+## Solving weights
+
+How the tool turns targets into weights, and the knobs that shape the result.
 
 ### The solver
 
@@ -227,22 +234,10 @@ The `= current` button under each chance copies the achieved figure into the
 target — handy after hand-editing weights, to adopt the current state as the
 new goal.
 
-### Locks
+## Editing the table
 
-Click the padlock column (or press Space on it) to freeze a row's weight.
-Auto-Distribute, rescaling and RTP retargeting all work around locked rows. If
-locks overrun a group's share of the total, the panel says so rather than
-missing the target silently. A locked row keeps its group color and only
-deepens a shade, so the grouping stays readable while rows are pinned.
-
-#### Group locks
-
-Whole groups lock too. A group is locked when every bucket in it is, and the
-padlock — in **Group settings** beside each group's name, and on the group's
-handle at the chart's right edge — locks or unlocks all of them in one
-undoable step. A group with some buckets locked shows a half-lit padlock;
-clicking it locks the rest. There is no separate group-level lock: row locks
-stay the single thing the solver, the export and the chart all read.
+The grid itself — navigating it, typing arithmetic into it, locking rows,
+grouping buckets and shaping the columns around them.
 
 ### Keyboard
 
@@ -294,6 +289,23 @@ Total weight is always the sum of the column, so there is no drift to reconcile.
 Editing a single bucket's Chance or Weighted Value solves for the weight that
 makes the typed figure true *after* the total moves with it.
 
+### Locks
+
+Click the padlock column (or press Space on it) to freeze a row's weight.
+Auto-Distribute, rescaling and RTP retargeting all work around locked rows. If
+locks overrun a group's share of the total, the panel says so rather than
+missing the target silently. A locked row keeps its group color and only
+deepens a shade, so the grouping stays readable while rows are pinned.
+
+#### Group locks
+
+Whole groups lock too. A group is locked when every bucket in it is, and the
+padlock — in **Group settings** beside each group's name, and on the group's
+handle at the chart's right edge — locks or unlocks all of them in one
+undoable step. A group with some buckets locked shows a half-lit padlock;
+clicking it locks the rest. There is no separate group-level lock: row locks
+stay the single thing the solver, the export and the chart all read.
+
 ### Bucket groups
 
 Every bucket belongs to a group, and groups drive the chart bar colors, the
@@ -318,6 +330,23 @@ dropdown, and manage the groups themselves from **Group settings** in the
 targets panel: add, rename, recolor from a palette of 20 pastels, lock, or
 delete. Deleting a group never deletes buckets — they move to the first
 remaining group. All of it is undoable and saved with the workspace.
+
+### Columns
+
+The table carries **Group**, **ID**, **Weight ID**, **Avg Payout**, **Label**,
+**Weights**, **Weighted Value** and **Chance**, plus the lock toggle. Weight ID
+is free text the tool never interprets — somewhere to put your own identifier
+when the bucket id is not the one that matters downstream.
+
+Drag a header edge to resize; double-click it to fit the content. Click a header
+to sort. Widths persist with the workspace. The defaults are sized to fit the
+table in its half of the page; widen the Chance column when you want to read a
+chance to its full 15 decimals.
+
+## The distribution chart
+
+The same weights, read as bars — drag or right-click one to change the table,
+collapse groups into a single bar, and size the chart to what you're doing.
 
 ### Dragging and setting values on the chart
 
@@ -388,17 +417,29 @@ measured width rather than an assumed one, so a wide tooltip never overhangs
 the panel. The band is always in the layout, so a hover never shifts the page.
 
 Both charts can be made **taller**: drag the grip below the tooltip band, or
-focus it and use ↑/↓ (16px), PageUp/PageDown (64px), or Home to reset. The
-distribution chart runs 220–900px and the simulation chart 160–800px — the
-simulation grip works before a run too — and both heights are remembered with
-the rest of the workspace.
+focus it and use ↑/↓ (16px) or PageUp/PageDown (64px). The distribution chart
+defaults to the height of the data table beside it, clamped to 220–900px, so
+the two line up with no resizing at all; dragging the grip pins your own
+height instead and stops the fitting, and double-clicking the grip — or
+pressing Home while it's focused — drops the pin and goes back to fitting the
+table. The simulation chart is unchanged: it runs 160–800px, its grip works
+before a run too, and Home on it resets to its own fixed default. Both
+heights, and whether the distribution chart is pinned, are remembered with the
+rest of the workspace.
 
-### Simulation
+## Simulation
 
-The Simulation panel (bottom of the page) spins the current table with a
-Monte Carlo run in a Web Worker — alias-method sampling, so 100M spins take a
-few seconds without freezing the page. It reports **RTP, standard deviation,
-hit rate, win rate and max win × bet**, live while the run progresses.
+The Simulation panel, at the bottom of the page, runs the current table in a
+Web Worker under one of two modes — `Convergence`, which asks what the table
+pays out on average, and `Bankroll`, which asks how long a real balance lasts
+on it.
+
+### Convergence mode
+
+Spins the current table for a fixed spin count and reports **RTP, standard
+deviation, hit rate, win rate and max win × bet**, live while the run
+progresses. Alias-method sampling makes 100M spins take a few seconds without
+freezing the page.
 
 The spins field accepts plain numbers or `250k` / `100m` / `1b` shorthand
 (default 100,000,000, persisted). The chart stores one point per **0.1% of
@@ -413,6 +454,51 @@ values.
 
 The run snapshots the table when Run is clicked, so edits made mid-run don't
 bend an in-flight simulation. Cancel keeps the partial statistics.
+
+### Bankroll mode
+
+Plays the table with a real balance rather than an average: start with a
+stake, bet a fixed amount every spin, and watch the balance until it runs dry.
+
+Three fields set up the run — **Credits** (default 1,000,000), **Bet**
+(default 1) and **RTP×** (default 1) — and all three take `1m` / `250k`
+shorthand where a whole number makes sense; Bet and RTP× also take decimals.
+
+The multiplier scales every payout before the run starts, so realised RTP
+scales with it exactly: a table paying 0.95 plays at 0.855 under a 0.9
+multiplier. Hit rate is untouched — a zero payout stays zero at any
+multiplier — but win rate shifts slightly, because a "win" is a payout above 1
+and scaling the payouts moves where that boundary falls. The table on screen
+is never modified; the multiplier is a property of the run, not an edit.
+
+The run plays until the balance can no longer cover the bet — which is why it
+can bust holding change smaller than a single bet — or until it reaches
+10,000,000 spins. `Continue` extends the same run rather than starting a new
+one: the worker keeps the balance and the PRNG between chunks, so the
+continued run is exactly the sequence an uninterrupted one would have
+produced, and the chart's x axis just keeps growing. It appears only when a
+chunk reached the cap with credit still in the balance — never after a bust.
+
+An effective RTP of 1 or above — the table's RTP times the multiplier — warns
+but still runs. Above 1 the balance drifts upward, so a bust becomes very
+unlikely; not impossible, since variance can still take down a short
+bankroll.
+
+The chart draws the credit balance, with zero always on the axis since
+busting is the story, a dashed reference line at the starting credits, and a
+marker where the run busted. The stat tiles read **balance, spins survived,
+peak, lowest, realised RTP and biggest win**, taken from the running totals
+rather than the chart's own points, so peak and lowest stay exact no matter
+how much the chart has thinned. Chart resolution starts at one point per 100
+spins, and the buffer halves itself once it holds 2,000 points, so a run of
+any length draws in a bounded amount of data; points are dropped rather than
+averaged, since a balance curve is a random walk and averaging would smooth
+away the drawdowns worth seeing.
+
+## Workspace
+
+How the page lays itself out, what leaves it on export, and what survives a
+reload.
 
 ### Layout
 
@@ -442,18 +528,6 @@ width once the table genuinely needs more than its half.
 
 The sticky chart is bounded by the table's row, so it follows you down the
 table and then stops — it never rides over the simulation panel below.
-
-### Columns
-
-The table carries **Group**, **ID**, **Weight ID**, **Avg Payout**, **Label**,
-**Weights**, **Weighted Value** and **Chance**, plus the lock toggle. Weight ID
-is free text the tool never interprets — somewhere to put your own identifier
-when the bucket id is not the one that matters downstream.
-
-Drag a header edge to resize; double-click it to fit the content. Click a header
-to sort. Widths persist with the workspace. The defaults are sized to fit the
-table in its half of the page; widen the Chance column when you want to read a
-chance to its full 15 decimals.
 
 ### Export
 
@@ -491,6 +565,10 @@ src/
     interact.ts     relative/absolute subset scaling for chart drags
     sim.ts          Monte Carlo core: PRNG, alias sampling, aggregates
     sim.worker.ts   worker shell around sim.ts
+    bankroll.ts     the bankroll core: per-spin balance arithmetic and the
+                    chart's self-decimating point buffer
+    bankroll.worker.ts resumable bankroll worker; retains balance and PRNG
+                       between chunks
     exportTsv.ts    TSV out, clipboard, download
     history.ts      bounded undo/redo
     storage.ts      localStorage workspace
@@ -504,8 +582,11 @@ src/
     DistributionChart.tsx draggable bars, group handles
     ChartValueEntry.tsx  right-click popover for an exact weight or chance
     GroupBarChips.tsx    which groups are drawn as a single bar
-    SimulationPanel.tsx  spins, run control, live stats
+    SimulationPanel.tsx  mode toggle over the two simulation panels
+    ConvergenceSim.tsx  spins, run control, live stats
+    BankrollSim.tsx      credits, bet, RTP multiplier, Run/Continue, bankroll stats
     SimChart.tsx         realtime simulation chart
+    BankrollChart.tsx    the credit balance chart
     ChartReadout.tsx     the hover tooltip anchored under both charts
     GroupSettings.tsx    add, rename, recolor, lock and delete bucket groups
     ChartResizeGrip.tsx  drag or key a chart taller
@@ -518,18 +599,20 @@ src/
 ## Tests
 
 `src/lib` is covered by Vitest — the solver, parser, formatter, expression
-evaluator, grouping rules, drag operations and simulation core are where the
-real risk is. `bars.ts` carries the chart's construction rules and is tested
-directly: group collapse, mean-payout placement, the log-axis zero drop and
-the interaction with equal-payout aggregation. The key one is the export
+evaluator, grouping rules, drag operations and both simulation cores are
+where the real risk is. `bars.ts` carries the chart's construction rules and
+is tested directly: group collapse, mean-payout placement, the log-axis zero
+drop and the interaction with equal-payout aggregation. `bankroll.ts` is
+tested directly too: the balance arithmetic, the bust boundary, `continue`'s
+resumability and the point buffer's decimation. The key one is the export
 acceptance test, which parses `example-input-data.tsv`, applies the weights
 from `example-output-data.tsv`, and asserts the generated text matches the
 reference file byte for byte.
 Component tests drive the chart's drag interactions, the tooltip's contents,
 colors and edge clamping, the resize grip's pointer and keyboard paths, and
-the simulation panel against a faked worker; the App smoke test covers
+both simulation panels against faked workers; the App smoke test covers
 grouping, sorting, the targets panel's collapse and the simulation panel end
-to end.
+to end, including switching modes and persisting which one is active.
 
 ```bash
 npm run test:run

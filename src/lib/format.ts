@@ -73,6 +73,25 @@ export function fmtWeight(n: number): string {
   return Number.isFinite(n) ? Math.round(n).toLocaleString('en-US') : EM_DASH
 }
 
+/**
+ * Credits: grouped integer at 1000 and above, two decimal places below.
+ *
+ * Weights are always whole numbers, so `fmtWeight` rounding them to
+ * integers loses nothing. Bankroll credits are not: `BET.integer` is
+ * `false`, payouts are floats, and a run can easily bust holding a
+ * fraction of a credit. Rounding that display to the nearest integer would
+ * show "1" for a balance of 0.5 sitting right next to a legend that says
+ * there is no credit left to bet — technically an integer, but a lie about
+ * what actually happened. Below 1000 there's no grouping to lose anyway, so
+ * the cents show through; at 1000 and above the grouped integer matches
+ * every other large-number display in the tool, and a run that size was
+ * never going to be read to the cent regardless.
+ */
+export function fmtCredits(n: number): string {
+  if (!Number.isFinite(n)) return EM_DASH
+  return Math.abs(n) >= 1000 ? Math.round(n).toLocaleString('en-US') : fmtDecimal(n, 2)
+}
+
 /** Hit and win chance in the targets panel. */
 export function fmtFixed3(n: number): string {
   return Number.isFinite(n) ? n.toFixed(3) : EM_DASH

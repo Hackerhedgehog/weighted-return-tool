@@ -77,4 +77,26 @@ describe('ChartResizeGrip', () => {
     expect(grip.getAttribute('aria-valuemax')).toBe('900')
     expect(grip.getAttribute('tabindex')).toBe('0')
   })
+
+  it('calls onReset instead of the fallback when one is given', () => {
+    const onHeight = vi.fn()
+    const onReset = vi.fn()
+    render(
+      <ChartResizeGrip
+        height={400}
+        range={{ min: 220, max: 900, fallback: 340 }}
+        label="Resize"
+        onHeight={onHeight}
+        onReset={onReset}
+      />,
+    )
+    const grip = screen.getByRole('separator', { name: 'Resize' })
+
+    fireEvent.doubleClick(grip)
+    expect(onReset).toHaveBeenCalledTimes(1)
+
+    fireEvent.keyDown(grip, { key: 'Home' })
+    expect(onReset).toHaveBeenCalledTimes(2)
+    expect(onHeight).not.toHaveBeenCalled()
+  })
 })

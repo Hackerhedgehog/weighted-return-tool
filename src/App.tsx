@@ -1,9 +1,11 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import type {
+  BankrollConfig,
   BucketRow,
   ChartSettings,
   GroupDef,
   RowPatch,
+  SimMode,
   SortKey,
   SortState,
   Targets,
@@ -12,12 +14,15 @@ import type {
 } from './lib/types'
 import {
   CURVE_PRESETS,
+  DEFAULT_BANKROLL,
   DEFAULT_CHART,
   DEFAULT_EXPORT_FILENAME,
+  DEFAULT_SIM_MODE,
   DEFAULT_TARGETS,
   DEFAULT_WEIGHT_STEP,
   volatilityForCurve,
 } from './lib/types'
+import { clampBankrollConfig } from './lib/bankroll'
 import { DEFAULT_WIDTHS, sortRows } from './lib/columns'
 import { parseTsv, SAMPLE_TSV } from './lib/parse'
 import { rescaleToTotal, retargetRtp, solveWeights, statsOf, stepBlockWarning } from './lib/distribute'
@@ -124,6 +129,15 @@ export default function App() {
   const [chartHeight, setChartHeight] = useState(() =>
     clampHeight(saved?.chartHeight ?? DIST_HEIGHT.fallback, DIST_HEIGHT),
   )
+  /**
+   * Auto-fit defaults on, even for a workspace that already has a chartHeight:
+   * that field is written on every save, not only on a manual resize, so its
+   * presence says nothing about whether the user ever chose it.
+   */
+  const [chartHeightAuto, setChartHeightAuto] = useState(saved?.chartHeightAuto ?? true)
+  const [tableHeight, setTableHeight] = useState<number | null>(null)
+  /** The chart panel's own chrome (everything besides its SVG) — see rowRef. */
+  const [chartChrome, setChartChrome] = useState(0)
   const [simChartHeight, setSimChartHeight] = useState(() =>
     clampHeight(saved?.simChartHeight ?? SIM_HEIGHT.fallback, SIM_HEIGHT),
   )
@@ -131,6 +145,15 @@ export default function App() {
     saved?.exportFilename ?? DEFAULT_EXPORT_FILENAME,
   )
   const [simSpins, setSimSpins] = useState(saved?.simSpins ?? DEFAULT_SPINS)
+  const [simMode, setSimMode] = useState<SimMode>(saved?.simMode ?? DEFAULT_SIM_MODE)
+  // Clamped on the way in, like chartHeight above: a hand-edited bet of 0
+  // never busts and burns a full 10M-spin chunk per Continue, and a negative
+  // multiplier pays out negative credits.
+  const [bankroll, setBankroll] = useState<BankrollConfig>(() =>
+    clampBankrollConfig(
+      saved?.bankroll === undefined ? DEFAULT_BANKROLL : { ...DEFAULT_BANKROLL, ...saved.bankroll },
+    ),
+  )
   const [targetsCollapsed, setTargetsCollapsed] = useState(saved?.targetsCollapsed ?? false)
   const [groupsOpen, setGroupsOpen] = useState(false)
   const [sort, setSort] = useState<SortState>({ key: 'id', dir: 1 })
@@ -151,10 +174,46 @@ export default function App() {
   const rowRef = useCallback((el: HTMLDivElement | null) => {
     if (el === null) return
     const check = () => {
-      const [table, chart] = [...el.children] as HTMLElement[]
-      if (table === undefined || chart === undefined) return
-      const stacked = table.offsetTop !== chart.offsetTop
+      const [table, chartPanel] = [...el.children] as HTMLElement[]
+      if (table === undefined || chartPanel === undefined) return
+      const stacked = table.offsetTop !== chartPanel.offsetTop
       if (el.classList.contains('stacked') !== stacked) el.classList.toggle('stacked', stacked)
+
+      // The chart defaults to the table's height. Safe against a feedback loop:
+      // the two panels are independent flex items under align-items: flex-start,
+      // so the table's height never depends on the chart's — a chart resize
+      // re-fires this, reads an unchanged table, and the update no-ops.
+      const h = table.offsetHeight
+      setTableHeight((prev) => (prev === null || Math.abs(prev - h) >= 1 ? h : prev))
+
+      // The chart panel's chrome: everything in it besides the SVG itself —
+      // panel-head, .chart-controls, the group chips row and the chart-wrap's
+      // fixed readout band and grip. Fitting the *panels* to the same height
+      // (rather than fitting the table to the chart's bare SVG) means
+      // subtracting this from the table's height before it becomes the SVG's
+      // height. This cannot feed back on itself: none of that chrome resizes
+      // when the SVG does (they're independent siblings stacked in normal
+      // block flow, not a layout that redistributes space by content), so
+      // recomputing chrome after the SVG height changes yields the same
+      // number — the `>= 1` guard below then skips the no-op update.
+      //
+      // The selector has to name the chart specifically rather than just
+      // "svg": a positional match would find whatever SVG happens to be
+      // first in the panel today, and if an icon svg is ever added above the
+      // chart, `chrome` would silently start including that icon's height —
+      // which *does* depend on nothing stable, and reintroduces the very
+      // oscillation this measurement exists to avoid.
+      //
+      // getBoundingClientRect().height, not offsetHeight: offsetHeight is an
+      // HTMLElement property that SVG elements don't have per spec (only
+      // Chromium/WebKit expose it as a non-standard extension — Gecko
+      // doesn't), and every other SVG measurement in this codebase already
+      // uses getBoundingClientRect for exactly that reason.
+      const svg = chartPanel.querySelector('svg[aria-label="Bucket distribution"]')
+      if (svg !== null) {
+        const chrome = chartPanel.offsetHeight - svg.getBoundingClientRect().height
+        setChartChrome((prev) => (Math.abs(prev - chrome) >= 1 ? chrome : prev))
+      }
     }
     check()
     const obs = new ResizeObserver(check)
@@ -162,6 +221,11 @@ export default function App() {
     for (const child of el.children) obs.observe(child)
     return () => obs.disconnect()
   }, [])
+
+  const effectiveChartHeight =
+    chartHeightAuto && tableHeight !== null
+      ? clampHeight(tableHeight - chartChrome, DIST_HEIGHT)
+      : chartHeight
 
   const targetsRef = useCallback((el: HTMLElement | null) => {
     const root = document.documentElement
@@ -229,8 +293,11 @@ export default function App() {
         chart,
         exportFilename,
         simSpins,
+        simMode,
+        bankroll,
         weightStep: doc.weightStep,
         chartHeight,
+        chartHeightAuto,
         simChartHeight,
         targetsCollapsed,
       })
@@ -242,7 +309,10 @@ export default function App() {
     chart,
     exportFilename,
     simSpins,
+    simMode,
+    bankroll,
     chartHeight,
+    chartHeightAuto,
     simChartHeight,
     targetsCollapsed,
   ])
@@ -634,9 +704,13 @@ export default function App() {
               chart={chart}
               grouping={grouping}
               weightStep={doc.weightStep}
-              height={chartHeight}
+              height={effectiveChartHeight}
               onChart={setChart}
-              onHeight={setChartHeight}
+              onHeight={(h) => {
+                setChartHeight(h)
+                setChartHeightAuto(false)
+              }}
+              onHeightReset={() => setChartHeightAuto(true)}
               onPreview={setPreview}
               onCommit={handleDragCommit}
               onBlocked={handleBlocked}
@@ -654,11 +728,15 @@ export default function App() {
               </span>
             </div>
             <SimulationPanel
+              mode={simMode}
+              onMode={setSimMode}
               rows={doc.rows}
               totalWeight={totalWeight}
               expectedRtp={achieved.rtp}
               spins={simSpins}
               onSpins={setSimSpins}
+              bankroll={bankroll}
+              onBankroll={setBankroll}
               chartHeight={simChartHeight}
               onChartHeight={setSimChartHeight}
             />
