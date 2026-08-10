@@ -146,6 +146,15 @@ export const emptyPointBuffer = (): PointBuffer => ({
  *
  * Dropping the odd indices keeps the newest point and leaves the survivors
  * uniformly spaced at the doubled block.
+ *
+ * Callers must advance no further than the next block boundary before each call
+ * — i.e. batch size ≤ `nextAt - spins`. The worker does this by construction
+ * via `Math.min(CHUNK - chunkSpins, Math.max(1, buf.nextAt - state.spins))`.
+ * If a caller overshoots, this function records only the batch's end state,
+ * `nextAt` falls permanently behind `spins`, and spacing degrades to the batch
+ * size until decimation doubles `blockSpins` past it. This cannot be repaired
+ * here because the intermediate balances at the missed boundaries were never
+ * observed — they are gone forever — so the precondition sits on the caller.
  */
 export function samplePoint(buf: PointBuffer, s: BankrollState): void {
   if (s.spins < buf.nextAt) return
