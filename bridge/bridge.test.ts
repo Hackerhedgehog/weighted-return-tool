@@ -86,6 +86,18 @@ describe('resolveSavePath', () => {
     })
   })
 
+  it('rejects an NTFS alternate-data-stream name', () => {
+    expect(resolveSavePath(DIR, 'ref-weights-regular.tsv:stream.tsv').ok).toBe(false)
+  })
+
+  it('rejects a drive-relative colon path', () => {
+    expect(resolveSavePath(DIR, 'C:out.tsv').ok).toBe(false)
+  })
+
+  it('rejects a NUL byte', () => {
+    expect(resolveSavePath(DIR, 'out\u0000.tsv').ok).toBe(false)
+  })
+
   it('rejects traversal', () => {
     expect(resolveSavePath(DIR, '../out.tsv').ok).toBe(false)
     expect(resolveSavePath(DIR, '..\\out.tsv').ok).toBe(false)
