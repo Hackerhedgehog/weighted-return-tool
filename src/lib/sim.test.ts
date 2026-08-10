@@ -1,6 +1,7 @@
 import { describe, it, expect } from 'vitest'
 import {
   parseSpinsInput,
+  parseAmount,
   blockPlan,
   buildAlias,
   emptyAggregate,
@@ -163,5 +164,37 @@ describe('parseSpinsInput', () => {
     expect(parseSpinsInput('')).toBeNull()
     expect(parseSpinsInput('spin')).toBeNull()
     expect(parseSpinsInput('-5')).toBeNull()
+  })
+})
+
+describe('parseAmount', () => {
+  it('keeps fractions when integer is false', () => {
+    expect(parseAmount('0.5', { min: 0, max: 10, integer: false })).toBe(0.5)
+    expect(parseAmount('1.25', { min: 0, max: 10, integer: false })).toBe(1.25)
+  })
+
+  it('rounds when integer is true', () => {
+    expect(parseAmount('0.5', { min: 0, max: 10, integer: true })).toBe(1)
+    expect(parseAmount('2.4', { min: 0, max: 10, integer: true })).toBe(2)
+  })
+
+  it('applies k/m/b shorthand before clamping', () => {
+    expect(parseAmount('2m', { min: 0, max: 1e12, integer: true })).toBe(2_000_000)
+    expect(parseAmount('250k', { min: 0, max: 1e12, integer: true })).toBe(250_000)
+  })
+
+  it('clamps to the given range', () => {
+    expect(parseAmount('999', { min: 0, max: 10, integer: false })).toBe(10)
+    expect(parseAmount('0', { min: 1, max: 10, integer: true })).toBe(1)
+  })
+
+  it('allows zero when min is zero', () => {
+    expect(parseAmount('0', { min: 0, max: 10, integer: false })).toBe(0)
+  })
+
+  it('rejects text it cannot read', () => {
+    expect(parseAmount('abc', { min: 0, max: 10, integer: false })).toBeNull()
+    expect(parseAmount('-5', { min: 0, max: 10, integer: false })).toBeNull()
+    expect(parseAmount('', { min: 0, max: 10, integer: false })).toBeNull()
   })
 })
