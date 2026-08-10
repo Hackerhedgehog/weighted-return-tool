@@ -1553,3 +1553,8 @@ input.gcell.editing {
 .bankroll-bust circle {
   fill: var(--danger);
 }
+
+.sim-controls + .sim-stats,
+.notice.warn + .sim-controls {
+  margin-top: 10px;
+}
