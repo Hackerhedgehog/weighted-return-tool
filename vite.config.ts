@@ -12,6 +12,6 @@ export default defineConfig({
     // Library tests run in node; the App smoke test opts into jsdom with a
     // per-file `@vitest-environment` comment.
     environment: 'node',
-    include: ['src/**/*.test.ts', 'src/**/*.test.tsx'],
+    include: ['src/**/*.test.ts', 'src/**/*.test.tsx', 'bridge/**/*.test.ts'],
   },
 })
