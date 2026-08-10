@@ -135,6 +135,8 @@ export default function App() {
    */
   const [chartHeightAuto, setChartHeightAuto] = useState(saved?.chartHeightAuto ?? true)
   const [tableHeight, setTableHeight] = useState<number | null>(null)
+  /** The chart panel's own chrome (everything besides its SVG) — see rowRef. */
+  const [chartChrome, setChartChrome] = useState(0)
   const [simChartHeight, setSimChartHeight] = useState(() =>
     clampHeight(saved?.simChartHeight ?? SIM_HEIGHT.fallback, SIM_HEIGHT),
   )
@@ -166,9 +168,9 @@ export default function App() {
   const rowRef = useCallback((el: HTMLDivElement | null) => {
     if (el === null) return
     const check = () => {
-      const [table, chart] = [...el.children] as HTMLElement[]
-      if (table === undefined || chart === undefined) return
-      const stacked = table.offsetTop !== chart.offsetTop
+      const [table, chartPanel] = [...el.children] as HTMLElement[]
+      if (table === undefined || chartPanel === undefined) return
+      const stacked = table.offsetTop !== chartPanel.offsetTop
       if (el.classList.contains('stacked') !== stacked) el.classList.toggle('stacked', stacked)
 
       // The chart defaults to the table's height. Safe against a feedback loop:
@@ -177,6 +179,22 @@ export default function App() {
       // re-fires this, reads an unchanged table, and the update no-ops.
       const h = table.offsetHeight
       setTableHeight((prev) => (prev === null || Math.abs(prev - h) >= 1 ? h : prev))
+
+      // The chart panel's chrome: everything in it besides the SVG itself —
+      // panel-head, .chart-controls, the group chips row and the chart-wrap's
+      // fixed readout band and grip. Fitting the *panels* to the same height
+      // (rather than fitting the table to the chart's bare SVG) means
+      // subtracting this from the table's height before it becomes the SVG's
+      // height. This cannot feed back on itself: none of that chrome resizes
+      // when the SVG does (they're independent siblings stacked in normal
+      // block flow, not a layout that redistributes space by content), so
+      // recomputing chrome after the SVG height changes yields the same
+      // number — the `>= 1` guard below then skips the no-op update.
+      const svg = chartPanel.querySelector('svg') as unknown as HTMLElement | null
+      if (svg !== null) {
+        const chrome = chartPanel.offsetHeight - svg.offsetHeight
+        setChartChrome((prev) => (Math.abs(prev - chrome) >= 1 ? chrome : prev))
+      }
     }
     check()
     const obs = new ResizeObserver(check)
@@ -187,7 +205,7 @@ export default function App() {
 
   const effectiveChartHeight =
     chartHeightAuto && tableHeight !== null
-      ? clampHeight(tableHeight, DIST_HEIGHT)
+      ? clampHeight(tableHeight - chartChrome, DIST_HEIGHT)
       : chartHeight
 
   const targetsRef = useCallback((el: HTMLElement | null) => {

@@ -772,57 +772,91 @@ describe('simulation modes', () => {
 
 describe('distribution chart height', () => {
   // jsdom lays nothing out, so offsetHeight is always 0 and the observer has
-  // nothing to read. Stub it for the table panel only, and put it back after —
-  // ChartReadout and the targets panel measure themselves through it too.
+  // nothing to read. Stub it for the table panel and the chart panel, and put
+  // it back after — ChartReadout and the targets panel measure themselves
+  // through it too. The chart panel's own SVG needs a separate stub: SVG
+  // elements don't inherit HTMLElement's offsetHeight, in jsdom or in the DOM
+  // spec, even though real browsers give svg roots a working offsetHeight too.
   const REAL_OFFSET_HEIGHT = Object.getOwnPropertyDescriptor(
     HTMLElement.prototype,
     'offsetHeight',
   )!
+  const REAL_SVG_OFFSET_HEIGHT = Object.getOwnPropertyDescriptor(
+    SVGElement.prototype,
+    'offsetHeight',
+  )
 
-  const withTableHeight = (px: number) => {
+  // An arbitrary fixed panel height: only its distance from the svg height
+  // below (the `chrome`) is meaningful, since the app derives chrome as
+  // panelHeight - svgHeight.
+  const CHART_PANEL_PX = 1000
+
+  /**
+   * `chrome` stands in for everything the real chart panel has besides its
+   * SVG — panel-head, .chart-controls, the group chips row, the fixed
+   * readout band, the grip. Both getters return fixed numbers regardless of
+   * what the app renders, so there is nothing here that could oscillate; the
+   * app's own oscillation-safety is what Important 2 is about, not this stub.
+   */
+  const withTableHeight = (tablePx: number, chrome = 150) => {
     Object.defineProperty(HTMLElement.prototype, 'offsetHeight', {
       configurable: true,
       get(this: HTMLElement) {
-        return this.classList.contains('buckets') ? px : 0
+        if (this.classList.contains('buckets')) return tablePx
+        if (this.classList.contains('chart')) return CHART_PANEL_PX
+        return 0
+      },
+    })
+    Object.defineProperty(SVGElement.prototype, 'offsetHeight', {
+      configurable: true,
+      get() {
+        return CHART_PANEL_PX - chrome
       },
     })
   }
 
   afterEach(() => {
     Object.defineProperty(HTMLElement.prototype, 'offsetHeight', REAL_OFFSET_HEIGHT)
+    if (REAL_SVG_OFFSET_HEIGHT === undefined) {
+      delete (SVGElement.prototype as unknown as { offsetHeight?: number }).offsetHeight
+    } else {
+      Object.defineProperty(SVGElement.prototype, 'offsetHeight', REAL_SVG_OFFSET_HEIGHT)
+    }
   })
 
   const chart = () => screen.getByRole('img', { name: 'Bucket distribution' })
 
-  it('fits the table, clamped to the chart range', () => {
-    withTableHeight(500)
+  it('fits the table minus the chart panel’s own chrome, clamped to the chart range', () => {
+    withTableHeight(500, 150)
     loadRealData()
-    expect(Number(chart().getAttribute('height'))).toBe(500)
+    expect(Number(chart().getAttribute('height'))).toBe(350)
   })
 
   it('clamps a table taller than the chart ceiling', () => {
-    withTableHeight(5000)
+    withTableHeight(5000, 150)
     loadRealData()
     expect(Number(chart().getAttribute('height'))).toBe(900)
   })
 
   it('clamps a table shorter than the chart floor', () => {
-    withTableHeight(80)
+    withTableHeight(80, 150)
     loadRealData()
     expect(Number(chart().getAttribute('height'))).toBe(220)
   })
 
   it('stops fitting once the grip has been dragged, and fits again after a reset', () => {
-    withTableHeight(500)
+    withTableHeight(700, 150)
     loadRealData()
     const grip = screen.getByRole('separator', { name: 'Resize the distribution chart' })
+    // Auto-fit height is 700 (table) - 150 (chrome) = 550.
+    expect(Number(chart().getAttribute('height'))).toBe(550)
 
     fireEvent.pointerDown(grip, { button: 0, clientY: 0 })
     fireEvent.pointerMove(grip, { clientY: -200 })
     fireEvent.pointerUp(grip)
-    expect(Number(chart().getAttribute('height'))).toBe(300)
+    expect(Number(chart().getAttribute('height'))).toBe(350)
 
     fireEvent.doubleClick(grip)
-    expect(Number(chart().getAttribute('height'))).toBe(500)
+    expect(Number(chart().getAttribute('height'))).toBe(550)
   })
 })
