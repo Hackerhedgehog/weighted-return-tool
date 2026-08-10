@@ -1,0 +1,67 @@
+import type { Plugin } from 'vite'
+import type { IncomingMessage, ServerResponse } from 'node:http'
+import { bridgeConfigFromEnv } from './config.ts'
+import { sessionResult, saveResult, type JsonResult } from './handlers.ts'
+
+function send(res: ServerResponse, result: JsonResult): void {
+  res.statusCode = result.status
+  res.setHeader('content-type', 'application/json')
+  res.end(JSON.stringify(result.body))
+}
+
+function readBody(req: IncomingMessage): Promise<string> {
+  return new Promise((resolvePromise, rejectPromise) => {
+    let raw = ''
+    req.on('data', (chunk) => {
+      raw += chunk
+    })
+    req.on('end', () => resolvePromise(raw))
+    req.on('error', rejectPromise)
+  })
+}
+
+/**
+ * Serves the CLI's set-values file to the app and writes its export back.
+ *
+ * With no bridge environment this registers nothing at all — `/__bridge/*`
+ * then falls through to Vite's SPA fallback, the client's probe sees HTML
+ * instead of JSON, and the tool runs exactly as it always has. `apply: 'serve'`
+ * keeps it out of production builds entirely.
+ */
+export function bridgePlugin(env: Record<string, string | undefined> = process.env): Plugin {
+  const cfg = bridgeConfigFromEnv(env)
+
+  return {
+    name: 'wrt-bridge',
+    apply: 'serve',
+    configureServer(server) {
+      if (cfg === null) return
+
+      console.log(`[bridge] ${cfg.game || 'session'} — reading ${cfg.file}`)
+      console.log(`[bridge] saves land in ${cfg.dir}`)
+
+      server.middlewares.use('/__bridge/session', (_req, res) => {
+        send(res, sessionResult(cfg))
+      })
+
+      server.middlewares.use('/__bridge/save', (req, res) => {
+        if (req.method !== 'POST') {
+          send(res, { status: 405, body: { error: 'Use POST.' } })
+          return
+        }
+        readBody(req)
+          .then((raw) => {
+            let parsed: unknown
+            try {
+              parsed = JSON.parse(raw)
+            } catch {
+              send(res, { status: 400, body: { error: 'Body must be JSON.' } })
+              return
+            }
+            send(res, saveResult(cfg, parsed))
+          })
+          .catch((err: Error) => send(res, { status: 500, body: { error: err.message } }))
+      })
+    },
+  }
+}
