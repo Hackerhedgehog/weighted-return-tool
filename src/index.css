@@ -1528,3 +1528,28 @@ input.gcell.editing {
 .handle-lock.partial {
   opacity: 0.65;
 }
+
+/* ---------- bankroll chart ---------- */
+
+.bankroll-path {
+  fill: none;
+  stroke: var(--accent);
+  stroke-width: 1.6;
+  stroke-linejoin: round;
+}
+
+.bankroll-start-line {
+  stroke: var(--line-strong);
+  stroke-width: 1;
+  stroke-dasharray: 4 3;
+}
+
+.bankroll-bust line {
+  stroke: var(--danger);
+  stroke-width: 1;
+  stroke-dasharray: 2 2;
+}
+
+.bankroll-bust circle {
+  fill: var(--danger);
+}
