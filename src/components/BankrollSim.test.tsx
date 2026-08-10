@@ -120,9 +120,17 @@ describe('BankrollSim guards', () => {
   })
 
   it('warns at an effective RTP of 1 but still allows the run', () => {
-    renderSim(new FakeWorker(), { ...DEFAULT_BANKROLL, rtpMultiplier: 1 / 0.95 }, 0.95)
+    // 0.5 * 2 is exactly 1 in floating point — unlike 0.95 * (1 / 0.95),
+    // which lands one ULP under 1 and never actually reaches the boundary
+    // this test claims to pin.
+    renderSim(new FakeWorker(), { ...DEFAULT_BANKROLL, rtpMultiplier: 2 }, 0.5)
     expect(screen.getByRole('status', { name: 'Bankroll warning' })).toBeDefined()
     expect((screen.getByRole('button', { name: 'Run' }) as HTMLButtonElement).disabled).toBe(false)
+  })
+
+  it('does not warn just below an effective RTP of 1', () => {
+    renderSim(new FakeWorker(), { ...DEFAULT_BANKROLL, rtpMultiplier: 0.999 }, 1)
+    expect(screen.queryByRole('status', { name: 'Bankroll warning' })).toBeNull()
   })
 
   it('does not warn below an effective RTP of 1', () => {
