@@ -795,20 +795,21 @@ describe('simulation modes', () => {
 })
 
 describe('distribution chart height', () => {
-  // jsdom lays nothing out, so offsetHeight is always 0 and the observer has
-  // nothing to read. Stub it for the table panel and the chart panel, and put
-  // it back after — ChartReadout and the targets panel measure themselves
-  // through it too. The chart panel's own SVG needs a separate stub: SVG
-  // elements don't inherit HTMLElement's offsetHeight, in jsdom or in the DOM
-  // spec, even though real browsers give svg roots a working offsetHeight too.
+  // jsdom implements no layout at all: offsetHeight is always 0 (nothing for
+  // the observer to read) and getBoundingClientRect always returns zeros
+  // (real browsers compute both from actual layout). Stub offsetHeight for
+  // the table panel and the chart panel, and getBoundingClientRect for the
+  // chart svg specifically (the app reads the svg's height that way, not via
+  // offsetHeight — SVG elements have no offsetHeight per spec, it's a
+  // Chromium/WebKit-only extension that Gecko doesn't implement). Put both
+  // back after — ChartReadout and the targets panel measure themselves
+  // through offsetHeight too, and other code calls getBoundingClientRect on
+  // other elements (e.g. the value-entry popover's positioning).
   const REAL_OFFSET_HEIGHT = Object.getOwnPropertyDescriptor(
     HTMLElement.prototype,
     'offsetHeight',
   )!
-  const REAL_SVG_OFFSET_HEIGHT = Object.getOwnPropertyDescriptor(
-    SVGElement.prototype,
-    'offsetHeight',
-  )
+  const REAL_GET_BOUNDING_CLIENT_RECT = Element.prototype.getBoundingClientRect
 
   // An arbitrary fixed panel height: only its distance from the svg height
   // below (the `chrome`) is meaningful, since the app derives chrome as
@@ -818,7 +819,7 @@ describe('distribution chart height', () => {
   /**
    * `chrome` stands in for everything the real chart panel has besides its
    * SVG — panel-head, .chart-controls, the group chips row, the fixed
-   * readout band, the grip. Both getters return fixed numbers regardless of
+   * readout band, the grip. Both stubs return fixed numbers regardless of
    * what the app renders, so there is nothing here that could oscillate; the
    * app's own oscillation-safety is what Important 2 is about, not this stub.
    */
@@ -831,21 +832,17 @@ describe('distribution chart height', () => {
         return 0
       },
     })
-    Object.defineProperty(SVGElement.prototype, 'offsetHeight', {
-      configurable: true,
-      get() {
-        return CHART_PANEL_PX - chrome
-      },
-    })
+    Element.prototype.getBoundingClientRect = function (this: Element) {
+      if (this.getAttribute('aria-label') === 'Bucket distribution') {
+        return { height: CHART_PANEL_PX - chrome } as unknown as DOMRect
+      }
+      return REAL_GET_BOUNDING_CLIENT_RECT.call(this)
+    }
   }
 
   afterEach(() => {
     Object.defineProperty(HTMLElement.prototype, 'offsetHeight', REAL_OFFSET_HEIGHT)
-    if (REAL_SVG_OFFSET_HEIGHT === undefined) {
-      delete (SVGElement.prototype as unknown as { offsetHeight?: number }).offsetHeight
-    } else {
-      Object.defineProperty(SVGElement.prototype, 'offsetHeight', REAL_SVG_OFFSET_HEIGHT)
-    }
+    Element.prototype.getBoundingClientRect = REAL_GET_BOUNDING_CLIENT_RECT
   })
 
   const chart = () => screen.getByRole('img', { name: 'Bucket distribution' })

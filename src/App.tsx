@@ -196,9 +196,22 @@ export default function App() {
       // block flow, not a layout that redistributes space by content), so
       // recomputing chrome after the SVG height changes yields the same
       // number — the `>= 1` guard below then skips the no-op update.
-      const svg = chartPanel.querySelector('svg') as unknown as HTMLElement | null
+      //
+      // The selector has to name the chart specifically rather than just
+      // "svg": a positional match would find whatever SVG happens to be
+      // first in the panel today, and if an icon svg is ever added above the
+      // chart, `chrome` would silently start including that icon's height —
+      // which *does* depend on nothing stable, and reintroduces the very
+      // oscillation this measurement exists to avoid.
+      //
+      // getBoundingClientRect().height, not offsetHeight: offsetHeight is an
+      // HTMLElement property that SVG elements don't have per spec (only
+      // Chromium/WebKit expose it as a non-standard extension — Gecko
+      // doesn't), and every other SVG measurement in this codebase already
+      // uses getBoundingClientRect for exactly that reason.
+      const svg = chartPanel.querySelector('svg[aria-label="Bucket distribution"]')
       if (svg !== null) {
-        const chrome = chartPanel.offsetHeight - svg.offsetHeight
+        const chrome = chartPanel.offsetHeight - svg.getBoundingClientRect().height
         setChartChrome((prev) => (Math.abs(prev - chrome) >= 1 ? chrome : prev))
       }
     }
