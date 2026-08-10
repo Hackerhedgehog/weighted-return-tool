@@ -48,13 +48,25 @@ interface Run {
 }
 
 let run: Run | null = null
+/**
+ * True while a `runChunk` chain is actually mid-flight for `run`. This guards
+ * something the identity check below cannot: `continue` calls `runChunk` on
+ * the *same* `run` object, so `run !== r` never trips for a second `continue`
+ * dispatched while the first chunk is still running — a chunk is up to 10M
+ * spins over many 24ms slices, so that overlap is the normal case, not an
+ * edge case. `busy` closes that gap by making a second `continue` a no-op
+ * instead of a second concurrent loop drawing from the same PRNG.
+ */
+let busy = false
 
 function runChunk(r: Run): void {
   let chunkSpins = 0
   let lastEmit = Date.now()
+  busy = true
 
   const step = () => {
     // A newer `start` has replaced this run — abandon the old timeslice chain.
+    // (This says nothing about `continue`; that overlap is `busy`'s job.)
     if (run !== r) return
 
     const start = Date.now()
@@ -72,6 +84,10 @@ function runChunk(r: Run): void {
     }
 
     if (r.state.busted || chunkSpins >= BANKROLL_CHUNK_SPINS) {
+      // Clear before posting: by the time the panel could react to
+      // `chunk-done` with another `continue`, this chain must already read
+      // as free, not as still owning the run.
+      busy = false
       sealPoint(r.buf, r.state)
       scope.postMessage({
         type: 'chunk-done',
@@ -99,6 +115,7 @@ scope.onmessage = (e: MessageEvent<BankrollRequest>) => {
     const table = buildAlias(scalePayouts(msg.payouts, msg.config.rtpMultiplier), msg.weights)
     if (table === null) {
       run = null
+      busy = false
       scope.postMessage({
         type: 'error',
         message: 'Every bucket has zero weight — nothing to play.',
@@ -120,5 +137,8 @@ scope.onmessage = (e: MessageEvent<BankrollRequest>) => {
     scope.postMessage({ type: 'error', message: 'Nothing to continue — start a run first.' })
     return
   }
+  // A chunk is already mid-flight for this run — the caller's request to
+  // continue it is already satisfied, not an error and not a second chain.
+  if (busy) return
   runChunk(run)
 }
