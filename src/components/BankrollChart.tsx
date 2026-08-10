@@ -108,10 +108,10 @@ export function BankrollChart({
     <div className="chart-wrap" ref={containerRef}>
       <div className="sim-legend">
         <span className="legend-item">
-          <span className="legend-line cumulative" /> credit balance
+          <span className="legend-line bankroll-balance" /> credit balance
         </span>
         <span className="legend-item">
-          <span className="legend-line expected" /> started with {fmtCredits(startCredits)}
+          <span className="legend-line bankroll-start" /> started with {fmtCredits(startCredits)}
         </span>
         {state.busted && <span className="legend-note">busted — no credit left to bet</span>}
       </div>

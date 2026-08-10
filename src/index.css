@@ -1237,6 +1237,21 @@ input.gcell.editing {
   border-color: var(--text-dim);
 }
 
+/* The bankroll chart's own legend swatches — deliberately not sharing
+   `.cumulative` / `.expected` with the convergence chart above: those bind to
+   `--series-0` / `--text-dim`, but `.bankroll-path` and `.bankroll-start-line`
+   (further down) stroke `--accent` and `--line-strong`. Reusing the shared
+   classes here would draw a swatch that doesn't match the line it labels. */
+.legend-line.bankroll-balance {
+  border-color: var(--accent);
+}
+
+.legend-line.bankroll-start {
+  border-top-width: 1px;
+  border-top-style: dashed;
+  border-color: var(--line-strong);
+}
+
 .legend-note {
   color: var(--warn);
 }

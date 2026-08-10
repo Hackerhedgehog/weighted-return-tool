@@ -108,4 +108,15 @@ describe('BankrollChart', () => {
     renderChart({ startCredits: 0.75, points: [{ spins: 0, balance: 0.75 }] })
     expect(screen.getByText(/started with 0\.75/)).toBeDefined()
   })
+
+  it('legend swatches are its own classes, not the convergence chart\'s mismatched ones', () => {
+    renderChart()
+    // .cumulative/.expected bind to --series-0/--text-dim for SimChart's own
+    // lines; .bankroll-path and .bankroll-start-line stroke --accent and
+    // --line-strong instead, so this chart needs swatches bound to those.
+    expect(document.querySelector('.legend-line.cumulative')).toBeNull()
+    expect(document.querySelector('.legend-line.expected')).toBeNull()
+    expect(document.querySelector('.legend-line.bankroll-balance')).not.toBeNull()
+    expect(document.querySelector('.legend-line.bankroll-start')).not.toBeNull()
+  })
 })
