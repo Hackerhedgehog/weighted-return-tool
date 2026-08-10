@@ -1,0 +1,115 @@
+import type { AliasTable } from './sim'
+
+/**
+ * Bankroll simulation core: the per-spin money arithmetic and the chart's
+ * point buffer. Pure and synchronous — `bankroll.worker.ts` owns scheduling
+ * and messaging, so everything here is unit-testable in node.
+ *
+ * The existing simulation answers "what does this table converge to". This one
+ * answers "how long does a player last on it", which needs a balance rather
+ * than an average, and a run whose length is decided by a bust rather than
+ * requested up front.
+ *
+ * Numbers stay honest: over a chunk, Σ|Δbalance| ≤ 1e7 · bet · maxPayout,
+ * which for realistic inputs is ~1e10 — far inside double precision.
+ */
+
+/** One chunk. A run past this is resumed by an explicit Continue. */
+export const BANKROLL_CHUNK_SPINS = 10_000_000
+/** Chart points retained before the buffer halves itself. */
+export const BANKROLL_MAX_POINTS = 2_000
+/** Spins per point at the start of a run. */
+export const BANKROLL_MIN_BLOCK = 100
+
+export interface BankrollState {
+  balance: number
+  spins: number
+  /** Highest and lowest balance seen *between* spins. */
+  peak: number
+  low: number
+  /** Σ payout multiplier — realised RTP is `sum / spins`. */
+  sum: number
+  hits: number
+  wins: number
+  /** Largest single payout multiplier, already scaled. */
+  maxWin: number
+  busted: boolean
+}
+
+export const initialBankrollState = (credits: number): BankrollState => ({
+  balance: credits,
+  spins: 0,
+  peak: credits,
+  low: credits,
+  sum: 0,
+  hits: 0,
+  wins: 0,
+  maxWin: 0,
+  busted: false,
+})
+
+/**
+ * Run up to `maxSpins` into `s` (mutated — this is the hot loop) and return the
+ * spins actually run, stopping early on bust.
+ *
+ * Bust is `balance < bet`, tested *before* the spin: a balance of 0.5 at a bet
+ * of 1 cannot buy a spin, so stopping at `<= 0` would let a broke player keep
+ * playing. `peak` and `low` are sampled after the spin resolves, so they report
+ * the balance between spins rather than the momentary dip while the stake is
+ * out — that dip is not a balance the player was ever at.
+ */
+export function runBankrollBlock(
+  t: AliasTable,
+  rand: () => number,
+  maxSpins: number,
+  bet: number,
+  s: BankrollState,
+): number {
+  const { prob, alias, payouts } = t
+  const n = prob.length
+  let { balance, peak, low, sum, hits, wins, maxWin } = s
+  let spun = 0
+
+  while (spun < maxSpins) {
+    if (balance < bet) {
+      s.busted = true
+      break
+    }
+    balance -= bet
+    const i = Math.min(n - 1, Math.floor(rand() * n))
+    const x = payouts[rand() < prob[i] ? i : alias[i]]
+    balance += bet * x
+
+    sum += x
+    if (x > 0) hits += 1
+    if (x > 1) wins += 1
+    if (x > maxWin) maxWin = x
+    if (balance > peak) peak = balance
+    if (balance < low) low = balance
+    spun += 1
+  }
+
+  s.balance = balance
+  s.spins += spun
+  s.peak = peak
+  s.low = low
+  s.sum = sum
+  s.hits = hits
+  s.wins = wins
+  s.maxWin = maxWin
+  return spun
+}
+
+/** Mean payout so far — NaN before the first spin. */
+export const realisedRtp = (s: BankrollState): number => (s.spins > 0 ? s.sum / s.spins : NaN)
+
+/** The RTP the run actually plays against. */
+export const effectiveRtp = (tableRtp: number, mult: number): number => tableRtp * mult
+
+/**
+ * Payouts as the run sees them. Applied once, when the alias table is built,
+ * so the multiplier costs nothing per spin and the table on screen is never
+ * touched — it is a property of the run, not an edit.
+ */
+export const scalePayouts = (payouts: number[], mult: number): number[] =>
+  payouts.map((p) => p * mult)
