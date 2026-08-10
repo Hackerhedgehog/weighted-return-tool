@@ -2,6 +2,7 @@ import { describe, it, expect } from 'vitest'
 import { buildAlias, mulberry32 } from './sim'
 import {
   BANKROLL_MAX_POINTS,
+  clampBankrollConfig,
   effectiveRtp,
   emptyPointBuffer,
   initialBankrollState,
@@ -11,6 +12,7 @@ import {
   scalePayouts,
   sealPoint,
 } from './bankroll'
+import { DEFAULT_BANKROLL } from './types'
 
 /** Always pays exactly `payout` — removes the PRNG from balance arithmetic. */
 const fixed = (payout: number) => buildAlias([payout], [1])!
@@ -223,5 +225,43 @@ describe('the point buffer', () => {
     samplePoint(buf, at(100, 980))
     sealPoint(buf, at(100, 980))
     expect(buf.points).toHaveLength(1)
+  })
+})
+
+describe('clampBankrollConfig — sanitizing a hand-edited workspace', () => {
+  it('passes a config already inside every range through unchanged', () => {
+    expect(clampBankrollConfig({ credits: 5000, bet: 2.5, rtpMultiplier: 1.1 })).toEqual({
+      credits: 5000,
+      bet: 2.5,
+      rtpMultiplier: 1.1,
+    })
+  })
+
+  it('clamps a zero or negative bet up to the minimum, instead of a bet that never busts', () => {
+    expect(clampBankrollConfig({ ...DEFAULT_BANKROLL, bet: 0 }).bet).toBe(1e-6)
+    expect(clampBankrollConfig({ ...DEFAULT_BANKROLL, bet: -5 }).bet).toBe(1e-6)
+  })
+
+  it('clamps a negative multiplier up to zero, instead of paying out negative credits', () => {
+    expect(clampBankrollConfig({ ...DEFAULT_BANKROLL, rtpMultiplier: -1 }).rtpMultiplier).toBe(0)
+  })
+
+  it('clamps credits below 1 up to 1, and rounds them to a whole number', () => {
+    expect(clampBankrollConfig({ ...DEFAULT_BANKROLL, credits: 0 }).credits).toBe(1)
+    expect(clampBankrollConfig({ ...DEFAULT_BANKROLL, credits: 4.6 }).credits).toBe(5)
+  })
+
+  it('clamps every field above its own ceiling', () => {
+    expect(clampBankrollConfig({ credits: 1e20, bet: 1e20, rtpMultiplier: 1e6 })).toEqual({
+      credits: 1e12,
+      bet: 1e12,
+      rtpMultiplier: 1000,
+    })
+  })
+
+  it('falls back to the default for a non-finite field, rather than propagating NaN', () => {
+    expect(clampBankrollConfig({ credits: NaN, bet: Infinity, rtpMultiplier: -Infinity })).toEqual(
+      DEFAULT_BANKROLL,
+    )
   })
 })

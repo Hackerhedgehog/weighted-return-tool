@@ -1,5 +1,5 @@
-import type { AliasTable } from './sim'
-import type { BankrollConfig } from './types'
+import type { AliasTable, AmountOptions } from './sim'
+import { DEFAULT_BANKROLL, type BankrollConfig } from './types'
 
 /**
  * Bankroll simulation core: the per-spin money arithmetic and the chart's
@@ -21,6 +21,38 @@ export const BANKROLL_CHUNK_SPINS = 10_000_000
 export const BANKROLL_MAX_POINTS = 2_000
 /** Spins per point at the start of a run. */
 export const BANKROLL_MIN_BLOCK = 100
+
+/**
+ * The single source of truth for what a bankroll config field may hold —
+ * shared by the panel's input fields (via `AmountOptions`) and by
+ * `clampBankrollConfig` below, so the two can never drift apart. A workspace
+ * loaded from localStorage is user-editable text, same as any other stored
+ * field: `bet: 0` never busts and burns a full 10M-spin chunk per Continue,
+ * and a negative `rtpMultiplier` pays out negative credits.
+ */
+export const CREDITS_RANGE: AmountOptions = { min: 1, max: 1e12, integer: true }
+export const BET_RANGE: AmountOptions = { min: 1e-6, max: 1e12, integer: false }
+export const RTP_MULTIPLIER_RANGE: AmountOptions = { min: 0, max: 1000, integer: false }
+
+const clampAmount = (n: number, r: AmountOptions, fallback: number): number => {
+  if (!Number.isFinite(n)) return fallback
+  const clamped = Math.min(Math.max(n, r.min), r.max)
+  return r.integer ? Math.round(clamped) : clamped
+}
+
+/**
+ * Clamp a bankroll config to the ranges the panel enforces on entry — the
+ * same discipline `clampHeight` applies to a stored chart height, for the
+ * same reason: a hand-edited workspace is unvalidated input, not a value the
+ * app ever produced itself.
+ */
+export function clampBankrollConfig(c: BankrollConfig): BankrollConfig {
+  return {
+    credits: clampAmount(c.credits, CREDITS_RANGE, DEFAULT_BANKROLL.credits),
+    bet: clampAmount(c.bet, BET_RANGE, DEFAULT_BANKROLL.bet),
+    rtpMultiplier: clampAmount(c.rtpMultiplier, RTP_MULTIPLIER_RANGE, DEFAULT_BANKROLL.rtpMultiplier),
+  }
+}
 
 export interface BankrollState {
   balance: number

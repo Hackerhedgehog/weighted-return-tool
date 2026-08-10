@@ -2,6 +2,9 @@ import { useEffect, useRef, useState } from 'react'
 import type { BankrollConfig, BucketRow } from '../lib/types'
 import {
   BANKROLL_CHUNK_SPINS,
+  BET_RANGE,
+  CREDITS_RANGE,
+  RTP_MULTIPLIER_RANGE,
   effectiveRtp,
   initialBankrollState,
   realisedRtp,
@@ -62,10 +65,6 @@ interface Run {
   state: BankrollState
   error?: string
 }
-
-const CREDITS = { min: 1, max: 1e12, integer: true }
-const BET = { min: 1e-6, max: 1e12, integer: false }
-const MULT = { min: 0, max: 1000, integer: false }
 
 const defaultFactory = (): BankrollWorkerLike =>
   new Worker(new URL('../lib/bankroll.worker.ts', import.meta.url), {
@@ -223,7 +222,7 @@ export function BankrollSim({
           aria="Starting credits"
           value={config.credits}
           format={fmtWeight}
-          opts={CREDITS}
+          opts={CREDITS_RANGE}
           onCommit={(credits) => onConfig({ ...config, credits })}
           title="Plain number or shorthand: 1m, 250k"
         />
@@ -232,7 +231,7 @@ export function BankrollSim({
           aria="Bet"
           value={config.bet}
           format={(n) => fmtDecimal(n, 6)}
-          opts={BET}
+          opts={BET_RANGE}
           onCommit={(bet) => onConfig({ ...config, bet })}
           title="Credits staked per spin"
         />
@@ -241,7 +240,7 @@ export function BankrollSim({
           aria="RTP multiplier"
           value={config.rtpMultiplier}
           format={(n) => fmtDecimal(n, 6)}
-          opts={MULT}
+          opts={RTP_MULTIPLIER_RANGE}
           onCommit={(rtpMultiplier) => onConfig({ ...config, rtpMultiplier })}
           title="Scales every payout — the table itself is not changed"
         />

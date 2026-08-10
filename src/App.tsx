@@ -22,6 +22,7 @@ import {
   DEFAULT_WEIGHT_STEP,
   volatilityForCurve,
 } from './lib/types'
+import { clampBankrollConfig } from './lib/bankroll'
 import { DEFAULT_WIDTHS, sortRows } from './lib/columns'
 import { parseTsv, SAMPLE_TSV } from './lib/parse'
 import { rescaleToTotal, retargetRtp, solveWeights, statsOf, stepBlockWarning } from './lib/distribute'
@@ -145,8 +146,13 @@ export default function App() {
   )
   const [simSpins, setSimSpins] = useState(saved?.simSpins ?? DEFAULT_SPINS)
   const [simMode, setSimMode] = useState<SimMode>(saved?.simMode ?? DEFAULT_SIM_MODE)
-  const [bankroll, setBankroll] = useState<BankrollConfig>(
-    saved?.bankroll === undefined ? DEFAULT_BANKROLL : { ...DEFAULT_BANKROLL, ...saved.bankroll },
+  // Clamped on the way in, like chartHeight above: a hand-edited bet of 0
+  // never busts and burns a full 10M-spin chunk per Continue, and a negative
+  // multiplier pays out negative credits.
+  const [bankroll, setBankroll] = useState<BankrollConfig>(() =>
+    clampBankrollConfig(
+      saved?.bankroll === undefined ? DEFAULT_BANKROLL : { ...DEFAULT_BANKROLL, ...saved.bankroll },
+    ),
   )
   const [targetsCollapsed, setTargetsCollapsed] = useState(saved?.targetsCollapsed ?? false)
   const [groupsOpen, setGroupsOpen] = useState(false)

@@ -768,6 +768,30 @@ describe('simulation modes', () => {
       }, 400)
     })
   })
+
+  it('clamps a hand-edited out-of-range bankroll config instead of trusting it', () => {
+    saveWorkspace({
+      version: 1,
+      rows: [
+        { uid: 'b1', bucketId: 0, payout: 2, label: 'x', weight: 500, locked: false, groupId: 'other', weightId: '' },
+      ],
+      targets: DEFAULT_TARGETS,
+      volatility: 'medium',
+      curve: 0.09,
+      columnWidths: {},
+      chart: DEFAULT_CHART,
+      exportFilename: 'f.tsv',
+      // A bet of 0 never busts and burns a full 10M-spin chunk on Continue; a
+      // negative multiplier would pay out negative credits.
+      bankroll: { credits: 5000, bet: 0, rtpMultiplier: -1 },
+    })
+    render(<App />)
+    fireEvent.click(screen.getByRole('button', { name: 'Bankroll' }))
+
+    expect((screen.getByLabelText('Bet') as HTMLInputElement).value).toBe('0.000001')
+    expect((screen.getByLabelText('RTP multiplier') as HTMLInputElement).value).toBe('0')
+    expect((screen.getByLabelText('Starting credits') as HTMLInputElement).value).toBe('5,000')
+  })
 })
 
 describe('distribution chart height', () => {
