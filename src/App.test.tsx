@@ -271,8 +271,97 @@ describe('App', () => {
       await waitFor(() => {
         expect(screen.getByRole('button', { name: 'Auto save data' })).toBeDefined()
       })
+      expect(screen.getByText(`${session.game} → ${session.dir}`)).toBeDefined()
+    } finally {
+      vi.unstubAllGlobals()
+    }
+  })
+
+  it('omits the game separator when the bridge session carries no game name', async () => {
+    const session = {
+      dir: '/game/scenarios',
+      sourceFile: 'set-values-regular.tsv',
+      filename: 'ref-weights-regular.tsv',
+      game: '',
+      tsv: '0\t1000.00\tjoker5-maxwin\n',
+    }
+    vi.stubGlobal(
+      'fetch',
+      vi.fn().mockResolvedValue({
+        ok: true,
+        status: 200,
+        headers: new Headers({ 'content-type': 'application/json' }),
+        json: async () => session,
+      }),
+    )
+    try {
+      render(<App />)
+      await waitFor(() => {
+        expect(screen.getByRole('button', { name: 'Auto save data' })).toBeDefined()
+      })
       expect(screen.getByText(`→ ${session.dir}`)).toBeDefined()
     } finally {
+      vi.unstubAllGlobals()
+    }
+  })
+
+  it('normalises a bare export filename before auto-saving, same as Download', async () => {
+    const session = {
+      dir: '/game/scenarios',
+      sourceFile: 'set-values-regular.tsv',
+      filename: 'ref-weights-regular.tsv',
+      game: 'joker-stacks-magic',
+      tsv: '0\t1000.00\tjoker5-maxwin\n',
+    }
+    const fetchMock = vi.fn((url: string, _init?: RequestInit) => {
+      if (url === '/__bridge/session') {
+        return Promise.resolve({
+          ok: true,
+          status: 200,
+          headers: new Headers({ 'content-type': 'application/json' }),
+          json: async () => session,
+        })
+      }
+      return Promise.resolve({
+        ok: true,
+        status: 200,
+        json: async () => ({ path: '/game/scenarios/myweights.tsv' }),
+      })
+    })
+    vi.stubGlobal('fetch', fetchMock)
+    try {
+      render(<App />)
+      await waitFor(() => screen.getByRole('button', { name: 'Auto save data' }))
+
+      fireEvent.change(screen.getByLabelText('Export filename'), {
+        target: { value: 'myweights' },
+      })
+      fireEvent.click(screen.getByRole('button', { name: 'Auto save data' }))
+
+      await waitFor(() => {
+        expect(fetchMock.mock.calls.some(([url]) => url === '/__bridge/save')).toBe(true)
+      })
+      const saveCall = fetchMock.mock.calls.find(([url]) => url === '/__bridge/save')!
+      const body = JSON.parse((saveCall[1] as RequestInit).body as string) as { filename: string }
+      expect(body.filename).toBe('myweights.tsv')
+    } finally {
+      vi.unstubAllGlobals()
+    }
+  })
+
+  it('never probes the bridge outside a dev server', async () => {
+    const fetchMock = vi.fn()
+    vi.stubGlobal('fetch', fetchMock)
+    const wasDev = import.meta.env.DEV
+    import.meta.env.DEV = false
+    try {
+      render(<App />)
+      await act(async () => {
+        await new Promise((resolve) => setTimeout(resolve, 0))
+      })
+      expect(fetchMock).not.toHaveBeenCalled()
+    } finally {
+      import.meta.env.DEV = wasDev
       vi.unstubAllGlobals()
     }
   })

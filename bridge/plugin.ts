@@ -11,11 +11,14 @@ function send(res: ServerResponse, result: JsonResult): void {
 
 function readBody(req: IncomingMessage): Promise<string> {
   return new Promise((resolvePromise, rejectPromise) => {
-    let raw = ''
-    req.on('data', (chunk) => {
-      raw += chunk
+    const chunks: Buffer[] = []
+    req.on('data', (chunk: Buffer) => {
+      chunks.push(chunk)
     })
-    req.on('end', () => resolvePromise(raw))
+    // Concatenated as bytes and decoded once at the end — decoding each chunk
+    // on its own (`raw += chunk`) mangles a multi-byte UTF-8 sequence that
+    // straddles a chunk boundary into replacement characters on both sides.
+    req.on('end', () => resolvePromise(Buffer.concat(chunks).toString('utf8')))
     req.on('error', rejectPromise)
   })
 }

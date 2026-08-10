@@ -21,7 +21,7 @@ import {
 import { DEFAULT_WIDTHS, sortRows } from './lib/columns'
 import { parseTsv, SAMPLE_TSV } from './lib/parse'
 import { rescaleToTotal, retargetRtp, solveWeights, statsOf, stepBlockWarning } from './lib/distribute'
-import { buildTsv, copyTsv, downloadTsv } from './lib/exportTsv'
+import { buildTsv, copyTsv, downloadTsv, withTsvExtension } from './lib/exportTsv'
 import { buildGrouping, nextGroupColor, nextGroupId, seedGroups } from './lib/groups'
 import { emptyHistory, pushHistory, redo, undo, type HistoryState } from './lib/history'
 import { DEFAULT_SPINS } from './lib/sim'
@@ -326,6 +326,11 @@ export default function App() {
    * it had been pasted. `loadData` is stable, so this runs exactly once.
    */
   useEffect(() => {
+    // The bridge is a dev-server-only feature (the plugin itself is
+    // `apply: 'serve'` and registers nothing in a production build) — gating
+    // the probe here too means a production bundle never issues the
+    // `GET /__bridge/session` request in the first place.
+    if (!import.meta.env.DEV) return
     let cancelled = false
     void fetchSession().then((s) => {
       if (cancelled || s === null) return
@@ -480,7 +485,11 @@ export default function App() {
   const doSave = useCallback(
     async (filename: string, overwrite: boolean) => {
       setSaveState('saving')
-      const outcome = await saveTsv(filename, exportText(), overwrite)
+      // Normalised the same way Download names its file, so the two adjacent
+      // buttons (and the conflict row's Save as / Overwrite, which share this
+      // function) agree on what a bare `myweights` turns into instead of one
+      // succeeding as `myweights.tsv` and the other 400ing on the server.
+      const outcome = await saveTsv(withTsvExtension(filename), exportText(), overwrite)
 
       if (outcome.kind === 'exists') {
         setConflictName(outcome.filename)
@@ -492,7 +501,6 @@ export default function App() {
         setSaveState('error')
         return
       }
-      setSaveMessage(outcome.path)
       setSaveState('saved')
       window.setTimeout(() => setSaveState('idle'), 1800)
     },
@@ -596,7 +604,9 @@ export default function App() {
                 <span className="bridge-hint bridge-error">{saveMessage}</span>
               )}
               {session !== null && saveState !== 'conflict' && saveState !== 'error' && (
-                <span className="bridge-hint">→ {session.dir}</span>
+                <span className="bridge-hint">
+                  {session.game === '' ? `→ ${session.dir}` : `${session.game} → ${session.dir}`}
+                </span>
               )}
               <span className="topbar-sep" aria-hidden="true" />
               <button type="button" className="btn danger" onClick={handleClear}>
