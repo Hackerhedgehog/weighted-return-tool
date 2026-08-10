@@ -128,6 +128,13 @@ export default function App() {
   const [chartHeight, setChartHeight] = useState(() =>
     clampHeight(saved?.chartHeight ?? DIST_HEIGHT.fallback, DIST_HEIGHT),
   )
+  /**
+   * Auto-fit defaults on, even for a workspace that already has a chartHeight:
+   * that field is written on every save, not only on a manual resize, so its
+   * presence says nothing about whether the user ever chose it.
+   */
+  const [chartHeightAuto, setChartHeightAuto] = useState(saved?.chartHeightAuto ?? true)
+  const [tableHeight, setTableHeight] = useState<number | null>(null)
   const [simChartHeight, setSimChartHeight] = useState(() =>
     clampHeight(saved?.simChartHeight ?? SIM_HEIGHT.fallback, SIM_HEIGHT),
   )
@@ -163,6 +170,13 @@ export default function App() {
       if (table === undefined || chart === undefined) return
       const stacked = table.offsetTop !== chart.offsetTop
       if (el.classList.contains('stacked') !== stacked) el.classList.toggle('stacked', stacked)
+
+      // The chart defaults to the table's height. Safe against a feedback loop:
+      // the two panels are independent flex items under align-items: flex-start,
+      // so the table's height never depends on the chart's — a chart resize
+      // re-fires this, reads an unchanged table, and the update no-ops.
+      const h = table.offsetHeight
+      setTableHeight((prev) => (prev === null || Math.abs(prev - h) >= 1 ? h : prev))
     }
     check()
     const obs = new ResizeObserver(check)
@@ -170,6 +184,11 @@ export default function App() {
     for (const child of el.children) obs.observe(child)
     return () => obs.disconnect()
   }, [])
+
+  const effectiveChartHeight =
+    chartHeightAuto && tableHeight !== null
+      ? clampHeight(tableHeight, DIST_HEIGHT)
+      : chartHeight
 
   const targetsRef = useCallback((el: HTMLElement | null) => {
     const root = document.documentElement
@@ -241,6 +260,7 @@ export default function App() {
         bankroll,
         weightStep: doc.weightStep,
         chartHeight,
+        chartHeightAuto,
         simChartHeight,
         targetsCollapsed,
       })
@@ -255,6 +275,7 @@ export default function App() {
     simMode,
     bankroll,
     chartHeight,
+    chartHeightAuto,
     simChartHeight,
     targetsCollapsed,
   ])
@@ -646,9 +667,13 @@ export default function App() {
               chart={chart}
               grouping={grouping}
               weightStep={doc.weightStep}
-              height={chartHeight}
+              height={effectiveChartHeight}
               onChart={setChart}
-              onHeight={setChartHeight}
+              onHeight={(h) => {
+                setChartHeight(h)
+                setChartHeightAuto(false)
+              }}
+              onHeightReset={() => setChartHeightAuto(true)}
               onPreview={setPreview}
               onCommit={handleDragCommit}
               onBlocked={handleBlocked}

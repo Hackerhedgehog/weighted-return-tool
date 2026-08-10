@@ -46,6 +46,8 @@ interface DistributionChartProps {
   height: number
   onChart: (c: ChartSettings) => void
   onHeight: (h: number) => void
+  /** Reset gesture on the grip — restores auto-fit rather than a fixed height. */
+  onHeightReset?: () => void
   onPreview: (rows: BucketRow[] | null) => void
   onCommit: (rows: BucketRow[]) => void
   /** 'off-step' when the table can't be partitioned on the step, 'pinned' when locks leave nothing free to move. */
@@ -134,6 +136,7 @@ export function DistributionChart({
   height,
   onChart,
   onHeight,
+  onHeightReset,
   onPreview,
   onCommit,
   onBlocked,
@@ -732,6 +735,7 @@ export function DistributionChart({
               range={DIST_HEIGHT}
               label="Resize the distribution chart"
               onHeight={onHeight}
+              onReset={onHeightReset}
             />
           </>
         )}

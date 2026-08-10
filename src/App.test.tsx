@@ -769,3 +769,60 @@ describe('simulation modes', () => {
     })
   })
 })
+
+describe('distribution chart height', () => {
+  // jsdom lays nothing out, so offsetHeight is always 0 and the observer has
+  // nothing to read. Stub it for the table panel only, and put it back after —
+  // ChartReadout and the targets panel measure themselves through it too.
+  const REAL_OFFSET_HEIGHT = Object.getOwnPropertyDescriptor(
+    HTMLElement.prototype,
+    'offsetHeight',
+  )!
+
+  const withTableHeight = (px: number) => {
+    Object.defineProperty(HTMLElement.prototype, 'offsetHeight', {
+      configurable: true,
+      get(this: HTMLElement) {
+        return this.classList.contains('buckets') ? px : 0
+      },
+    })
+  }
+
+  afterEach(() => {
+    Object.defineProperty(HTMLElement.prototype, 'offsetHeight', REAL_OFFSET_HEIGHT)
+  })
+
+  const chart = () => screen.getByRole('img', { name: 'Bucket distribution' })
+
+  it('fits the table, clamped to the chart range', () => {
+    withTableHeight(500)
+    loadRealData()
+    expect(Number(chart().getAttribute('height'))).toBe(500)
+  })
+
+  it('clamps a table taller than the chart ceiling', () => {
+    withTableHeight(5000)
+    loadRealData()
+    expect(Number(chart().getAttribute('height'))).toBe(900)
+  })
+
+  it('clamps a table shorter than the chart floor', () => {
+    withTableHeight(80)
+    loadRealData()
+    expect(Number(chart().getAttribute('height'))).toBe(220)
+  })
+
+  it('stops fitting once the grip has been dragged, and fits again after a reset', () => {
+    withTableHeight(500)
+    loadRealData()
+    const grip = screen.getByRole('separator', { name: 'Resize the distribution chart' })
+
+    fireEvent.pointerDown(grip, { button: 0, clientY: 0 })
+    fireEvent.pointerMove(grip, { clientY: -200 })
+    fireEvent.pointerUp(grip)
+    expect(Number(chart().getAttribute('height'))).toBe(300)
+
+    fireEvent.doubleClick(grip)
+    expect(Number(chart().getAttribute('height'))).toBe(500)
+  })
+})

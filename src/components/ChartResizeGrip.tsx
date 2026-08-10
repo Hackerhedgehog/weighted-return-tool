@@ -16,13 +16,21 @@ interface ChartResizeGripProps {
   range: HeightRange
   label: string
   onHeight: (h: number) => void
+  /**
+   * What the reset gesture means. Without one, reset restores `range.fallback`;
+   * with one, the caller decides — the distribution chart uses it to go back to
+   * fitting the table rather than to a fixed number.
+   */
+  onReset?: () => void
 }
 
 const STEP = 16
 const PAGE = 64
 
-export function ChartResizeGrip({ height, range, label, onHeight }: ChartResizeGripProps) {
+export function ChartResizeGrip({ height, range, label, onHeight, onReset }: ChartResizeGripProps) {
   const drag = useRef<{ startY: number; startHeight: number } | null>(null)
+
+  const reset = () => (onReset === undefined ? onHeight(range.fallback) : onReset())
 
   const keyDelta = (key: string): number => {
     if (key === 'ArrowDown') return STEP
@@ -58,7 +66,7 @@ export function ChartResizeGrip({ height, range, label, onHeight }: ChartResizeG
       onPointerCancel={() => {
         drag.current = null
       }}
-      onDoubleClick={() => onHeight(range.fallback)}
+      onDoubleClick={reset}
       onKeyDown={(e) => {
         const delta = keyDelta(e.key)
         if (delta !== 0) {
@@ -66,7 +74,7 @@ export function ChartResizeGrip({ height, range, label, onHeight }: ChartResizeG
           onHeight(clampHeight(height + delta, range))
         } else if (e.key === 'Home') {
           e.preventDefault()
-          onHeight(range.fallback)
+          reset()
         }
       }}
     >
