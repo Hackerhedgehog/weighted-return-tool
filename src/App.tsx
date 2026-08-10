@@ -26,6 +26,7 @@ import { buildGrouping, nextGroupColor, nextGroupId, seedGroups } from './lib/gr
 import { emptyHistory, pushHistory, redo, undo, type HistoryState } from './lib/history'
 import { DEFAULT_SPINS } from './lib/sim'
 import { clearWorkspace, loadWorkspace, saveWorkspace } from './lib/storage'
+import { fetchSession, saveTsv, type BridgeSession } from './lib/bridge'
 import { BucketTable } from './components/BucketTable'
 import { clampHeight, DIST_HEIGHT, SIM_HEIGHT } from './components/chartUtils'
 import { DistributionChart } from './components/DistributionChart'
@@ -185,6 +186,12 @@ export default function App() {
   const [pasteError, setPasteError] = useState<string | null>(null)
   const [notices, setNotices] = useState<string[]>([])
   const [copyState, setCopyState] = useState<'idle' | 'ok' | 'fail'>('idle')
+  const [session, setSession] = useState<BridgeSession | null>(null)
+  const [saveState, setSaveState] = useState<'idle' | 'saving' | 'saved' | 'conflict' | 'error'>(
+    'idle',
+  )
+  const [saveMessage, setSaveMessage] = useState('')
+  const [conflictName, setConflictName] = useState('')
 
   /** Every document mutation goes through here, so undo can never miss one. */
   const commit = useCallback(
@@ -313,6 +320,24 @@ export default function App() {
     },
     [commit],
   )
+
+  /**
+   * When the CLI launched us it nominated a set-values file; load it as though
+   * it had been pasted. `loadData` is stable, so this runs exactly once.
+   */
+  useEffect(() => {
+    let cancelled = false
+    void fetchSession().then((s) => {
+      if (cancelled || s === null) return
+      setSession(s)
+      setExportFilename(s.filename)
+      setConflictName(s.filename)
+      loadData(s.tsv)
+    })
+    return () => {
+      cancelled = true
+    }
+  }, [loadData])
 
   const autoDistribute = useCallback(() => {
     const d = docRef.current
@@ -452,6 +477,28 @@ export default function App() {
     window.setTimeout(() => setCopyState('idle'), 1800)
   }, [exportText])
 
+  const doSave = useCallback(
+    async (filename: string, overwrite: boolean) => {
+      setSaveState('saving')
+      const outcome = await saveTsv(filename, exportText(), overwrite)
+
+      if (outcome.kind === 'exists') {
+        setConflictName(outcome.filename)
+        setSaveState('conflict')
+        return
+      }
+      if (outcome.kind === 'error') {
+        setSaveMessage(outcome.message)
+        setSaveState('error')
+        return
+      }
+      setSaveMessage(outcome.path)
+      setSaveState('saved')
+      window.setTimeout(() => setSaveState('idle'), 1800)
+    },
+    [exportText],
+  )
+
   const handleClear = useCallback(() => {
     if (!window.confirm('Clear the workspace? The table and its settings are deleted permanently.')) {
       return
@@ -507,6 +554,50 @@ export default function App() {
               >
                 Download .tsv
               </button>
+              {session !== null && saveState !== 'conflict' && (
+                <button
+                  type="button"
+                  className="btn primary"
+                  disabled={saveState === 'saving'}
+                  title={`Saves to ${session.dir}`}
+                  onClick={() => void doSave(exportFilename, false)}
+                >
+                  {saveState === 'saving'
+                    ? 'Saving…'
+                    : saveState === 'saved'
+                      ? 'Saved ✓'
+                      : saveState === 'error'
+                        ? 'Save failed'
+                        : 'Auto save data'}
+                </button>
+              )}
+              {session !== null && saveState === 'conflict' && (
+                <span className="bridge-conflict">
+                  <span className="bridge-conflict-msg">already exists —</span>
+                  <input
+                    className="filename-input"
+                    value={conflictName}
+                    aria-label="Save as filename"
+                    spellCheck={false}
+                    onChange={(e) => setConflictName(e.target.value)}
+                  />
+                  <button type="button" className="btn danger" onClick={() => void doSave(conflictName, true)}>
+                    Overwrite
+                  </button>
+                  <button type="button" className="btn" onClick={() => void doSave(conflictName, false)}>
+                    Save as
+                  </button>
+                  <button type="button" className="btn" onClick={() => setSaveState('idle')}>
+                    Cancel
+                  </button>
+                </span>
+              )}
+              {session !== null && saveState === 'error' && (
+                <span className="bridge-hint bridge-error">{saveMessage}</span>
+              )}
+              {session !== null && saveState !== 'conflict' && saveState !== 'error' && (
+                <span className="bridge-hint">→ {session.dir}</span>
+              )}
               <span className="topbar-sep" aria-hidden="true" />
               <button type="button" className="btn danger" onClick={handleClear}>
                 Clear workspace

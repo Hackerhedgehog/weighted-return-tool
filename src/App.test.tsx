@@ -1,6 +1,6 @@
 // @vitest-environment jsdom
-import { describe, it, expect, beforeEach, afterEach } from 'vitest'
-import { cleanup, fireEvent, render, screen, within } from '@testing-library/react'
+import { describe, it, expect, beforeEach, afterEach, vi } from 'vitest'
+import { act, cleanup, fireEvent, render, screen, waitFor, within } from '@testing-library/react'
 import App from './App'
 import { readFileSync } from 'node:fs'
 import { saveWorkspace } from './lib/storage'
@@ -225,6 +225,56 @@ describe('App', () => {
         resolve()
       }, 400)
     })
+  })
+
+  it('shows no auto-save button when there is no bridge', async () => {
+    const fetchMock = vi.fn().mockRejectedValue(new Error('no bridge'))
+    vi.stubGlobal('fetch', fetchMock)
+    try {
+      loadRealData()
+      // The negative case has no observable DOM change to wait on — session
+      // stays null and no button ever appears, with or without a bug. So
+      // instead of asserting immediately (which would pass even if the
+      // feature were entirely missing), wait for the mocked fetch to have
+      // been invoked and then flush the microtask queue past fetchSession's
+      // own try/catch and the effect's `.then`, so the session probe has
+      // definitively settled before the assertion runs.
+      await waitFor(() => expect(fetchMock).toHaveBeenCalled())
+      await act(async () => {
+        await new Promise((resolve) => setTimeout(resolve, 0))
+      })
+      expect(screen.queryByRole('button', { name: 'Auto save data' })).toBeNull()
+    } finally {
+      vi.unstubAllGlobals()
+    }
+  })
+
+  it('shows the auto-save button and destination when a bridge session exists', async () => {
+    const session = {
+      dir: '/game/scenarios',
+      sourceFile: 'set-values-regular.tsv',
+      filename: 'ref-weights-regular.tsv',
+      game: 'joker-stacks-magic',
+      tsv: '0\t1000.00\tjoker5-maxwin\n',
+    }
+    vi.stubGlobal(
+      'fetch',
+      vi.fn().mockResolvedValue({
+        ok: true,
+        status: 200,
+        headers: new Headers({ 'content-type': 'application/json' }),
+        json: async () => session,
+      }),
+    )
+    try {
+      render(<App />)
+      await waitFor(() => {
+        expect(screen.getByRole('button', { name: 'Auto save data' })).toBeDefined()
+      })
+      expect(screen.getByText(`→ ${session.dir}`)).toBeDefined()
+    } finally {
+      vi.unstubAllGlobals()
+    }
   })
 })
 
