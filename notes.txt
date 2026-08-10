@@ -1,9 +1,0 @@
-1. In distribution graph - right click to set a specific weight / chance to a group, it can be difficult to get an exact value with just mouse.
-2. Dragging bars or group averages in the graph should not place the weight/chance where the cursor is but increase / decrease based on the mouse movement
-3. Option to lock entire group not just a single bucket row in the table
-4. Option to aggregate a group - in the distributon graph add a button to aggregate buckets in their groups and to see the graph with just bars as groups of buckets. There needs to be an option to aggretage specific buckets or all of them.  
-5. Play simulation. Add an option to simulation to where Y axis is the "money" the player has: start with X amount of credits (default = 1Mil) and Y amount of bet (default = 1) Draws a graph of the credit balance. Plays until money is run out or 10Mil spins. If after 10Mil spin there is still credit to play allow the user to click "Continue". Then would play another 10Mil. If RTP is 1 or above = Warn user but still allow to play. Also add a RTP multiplier field (default 1) - can be used to adjust the RTP which the table produces   
-
-
-
-1. Import and Export options - better visual separation
