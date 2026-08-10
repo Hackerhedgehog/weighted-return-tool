@@ -113,3 +113,59 @@ export const effectiveRtp = (tableRtp: number, mult: number): number => tableRtp
  */
 export const scalePayouts = (payouts: number[], mult: number): number[] =>
   payouts.map((p) => p * mult)
+
+export interface BankrollPoint {
+  spins: number
+  balance: number
+}
+
+export interface PointBuffer {
+  points: BankrollPoint[]
+  /** Spins between samples. Doubles each time the buffer decimates. */
+  blockSpins: number
+  /** Spin count of the next sample. */
+  nextAt: number
+}
+
+export const emptyPointBuffer = (): PointBuffer => ({
+  points: [],
+  blockSpins: BANKROLL_MIN_BLOCK,
+  nextAt: BANKROLL_MIN_BLOCK,
+})
+
+/**
+ * Sample the balance if the run has reached the next block boundary, and halve
+ * the buffer when it fills.
+ *
+ * Every second point is *dropped*, never averaged: a balance curve is a random
+ * walk, and averaging would smooth away exactly the drawdowns the chart exists
+ * to show. Every retained point is a true balance at a true spin count, so the
+ * line stays one continuous curve at any scale — and because the stat tiles
+ * read `BankrollState` rather than this buffer, decimation can only ever cost
+ * chart resolution, never a headline number.
+ *
+ * Dropping the odd indices keeps the newest point and leaves the survivors
+ * uniformly spaced at the doubled block.
+ */
+export function samplePoint(buf: PointBuffer, s: BankrollState): void {
+  if (s.spins < buf.nextAt) return
+  buf.points.push({ spins: s.spins, balance: s.balance })
+  buf.nextAt += buf.blockSpins
+
+  if (buf.points.length >= BANKROLL_MAX_POINTS) {
+    buf.points = buf.points.filter((_, i) => i % 2 === 1)
+    buf.blockSpins *= 2
+    buf.nextAt = buf.points[buf.points.length - 1].spins + buf.blockSpins
+  }
+}
+
+/**
+ * Record where the run actually ended. A bust lands mid-block far more often
+ * than on a boundary, and a run that busts at spin 37 still has to draw.
+ */
+export function sealPoint(buf: PointBuffer, s: BankrollState): void {
+  const last = buf.points[buf.points.length - 1]
+  if (last === undefined || last.spins !== s.spins) {
+    buf.points.push({ spins: s.spins, balance: s.balance })
+  }
+}

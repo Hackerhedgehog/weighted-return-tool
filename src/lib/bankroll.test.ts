@@ -1,11 +1,15 @@
 import { describe, it, expect } from 'vitest'
 import { buildAlias, mulberry32 } from './sim'
 import {
+  BANKROLL_MAX_POINTS,
   effectiveRtp,
+  emptyPointBuffer,
   initialBankrollState,
   realisedRtp,
   runBankrollBlock,
+  samplePoint,
   scalePayouts,
+  sealPoint,
 } from './bankroll'
 
 /** Always pays exactly `payout` — removes the PRNG from balance arithmetic. */
@@ -143,5 +147,81 @@ describe('the RTP multiplier', () => {
   it('multiplies the table RTP', () => {
     expect(effectiveRtp(0.95, 1)).toBeCloseTo(0.95, 12)
     expect(effectiveRtp(0.95, 0.9)).toBeCloseTo(0.855, 12)
+  })
+})
+
+/** Drive the buffer directly with a scripted balance, no spinning involved. */
+const at = (spins: number, balance: number) =>
+  ({ ...initialBankrollState(0), spins, balance })
+
+describe('the point buffer', () => {
+  it('samples once per block and not between blocks', () => {
+    const buf = emptyPointBuffer()
+    samplePoint(buf, at(50, 990))
+    expect(buf.points).toHaveLength(0)
+
+    samplePoint(buf, at(100, 980))
+    expect(buf.points).toEqual([{ spins: 100, balance: 980 }])
+
+    samplePoint(buf, at(150, 975))
+    expect(buf.points).toHaveLength(1)
+
+    samplePoint(buf, at(200, 970))
+    expect(buf.points).toHaveLength(2)
+  })
+
+  it('halves the buffer and doubles the block when it fills', () => {
+    const buf = emptyPointBuffer()
+    for (let i = 1; i <= BANKROLL_MAX_POINTS; i++) samplePoint(buf, at(i * 100, i))
+
+    expect(buf.points).toHaveLength(BANKROLL_MAX_POINTS / 2)
+    expect(buf.blockSpins).toBe(200)
+    // the points kept are the even multiples — the newest survives
+    expect(buf.points[0]).toEqual({ spins: 200, balance: 2 })
+    expect(buf.points[buf.points.length - 1]).toEqual({
+      spins: BANKROLL_MAX_POINTS * 100,
+      balance: BANKROLL_MAX_POINTS,
+    })
+  })
+
+  it('stays uniformly spaced after decimating', () => {
+    const buf = emptyPointBuffer()
+    for (let i = 1; i <= BANKROLL_MAX_POINTS + 2; i++) samplePoint(buf, at(i * 100, i))
+    const gaps = buf.points.slice(1).map((p, i) => p.spins - buf.points[i].spins)
+    expect(new Set(gaps)).toEqual(new Set([200]))
+  })
+
+  it('never exceeds the cap however long the run gets', () => {
+    const buf = emptyPointBuffer()
+    for (let i = 1; i <= 20_000; i++) samplePoint(buf, at(i * 100, i))
+    expect(buf.points.length).toBeLessThanOrEqual(BANKROLL_MAX_POINTS)
+  })
+
+  it('drops points rather than averaging them, so every point is a real balance', () => {
+    const buf = emptyPointBuffer()
+    for (let i = 1; i <= BANKROLL_MAX_POINTS; i++) samplePoint(buf, at(i * 100, i * 7))
+    // balance was exactly spins/100 * 7 at every sample; survivors must match
+    for (const p of buf.points) expect(p.balance).toBe((p.spins / 100) * 7)
+  })
+
+  it('seals a run that ended mid-block', () => {
+    const buf = emptyPointBuffer()
+    samplePoint(buf, at(100, 980))
+    sealPoint(buf, at(137, 0))
+    expect(buf.points).toHaveLength(2)
+    expect(buf.points[1]).toEqual({ spins: 137, balance: 0 })
+  })
+
+  it('seals a run that busted before the first block', () => {
+    const buf = emptyPointBuffer()
+    sealPoint(buf, at(37, 0))
+    expect(buf.points).toEqual([{ spins: 37, balance: 0 }])
+  })
+
+  it('does not duplicate a final point that landed on a block boundary', () => {
+    const buf = emptyPointBuffer()
+    samplePoint(buf, at(100, 980))
+    sealPoint(buf, at(100, 980))
+    expect(buf.points).toHaveLength(1)
   })
 })
