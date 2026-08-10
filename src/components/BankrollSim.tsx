@@ -11,7 +11,7 @@ import {
   type BankrollState,
 } from '../lib/bankroll'
 import { parseAmount } from '../lib/sim'
-import { fmtDecimal, fmtRtp, fmtWeight } from '../lib/format'
+import { fmtCredits, fmtDecimal, fmtRtp, fmtWeight } from '../lib/format'
 import { BankrollChart } from './BankrollChart'
 import { ChartResizeGrip } from './ChartResizeGrip'
 import { SIM_HEIGHT } from './chartUtils'
@@ -161,7 +161,12 @@ export function BankrollSim({
       status: 'running',
       startCredits: config.credits,
       bet: config.bet,
-      effective,
+      // Recomputed from the same inputs rather than reusing the render-scoped
+      // `effective` above — same value (both are just effectiveRtp(tableRtp,
+      // config.rtpMultiplier)), but closing over that particular const here
+      // trips react-hooks/purity's "impure call during render" check on the
+      // unrelated `seed` line above, for reasons that didn't repay chasing.
+      effective: effectiveRtp(tableRtp, config.rtpMultiplier),
       points: [],
       state: initialBankrollState(config.credits),
     })
@@ -191,11 +196,11 @@ export function BankrollSim({
   const outcome = (): string => {
     if (run === null) return ''
     const spins = fmtWeight(run.state.spins)
-    if (run.status === 'running') return `${spins} spins · ${fmtWeight(run.state.balance)} credits`
+    if (run.status === 'running') return `${spins} spins · ${fmtCredits(run.state.balance)} credits`
     if (run.status === 'busted') return `busted after ${spins} spins`
     if (run.status === 'cancelled') return `cancelled · ${spins} spins`
     if (run.status === 'error') return 'stopped'
-    return `${spins} spins · ${fmtWeight(run.state.balance)} credits left`
+    return `${spins} spins · ${fmtCredits(run.state.balance)} credits left`
   }
 
   // Float slop: `0.95 * (1 / 0.95)` lands one ULP under 1, not exactly at it —
@@ -287,7 +292,7 @@ export function BankrollSim({
       {stats !== null && (
         <div className="sim-stats">
           <div className="sim-tile">
-            <span className="sim-tile-value">{fmtWeight(stats.balance)}</span>
+            <span className="sim-tile-value">{fmtCredits(stats.balance)}</span>
             <span className="sim-tile-label">Balance</span>
           </div>
           <div className="sim-tile">
@@ -295,11 +300,11 @@ export function BankrollSim({
             <span className="sim-tile-label">Spins Survived</span>
           </div>
           <div className="sim-tile">
-            <span className="sim-tile-value">{fmtWeight(stats.peak)}</span>
+            <span className="sim-tile-value">{fmtCredits(stats.peak)}</span>
             <span className="sim-tile-label">Peak</span>
           </div>
           <div className="sim-tile">
-            <span className="sim-tile-value">{fmtWeight(stats.low)}</span>
+            <span className="sim-tile-value">{fmtCredits(stats.low)}</span>
             <span className="sim-tile-label">Lowest</span>
           </div>
           <div className="sim-tile">
@@ -307,7 +312,7 @@ export function BankrollSim({
             <span className="sim-tile-label">RTP · effective {fmtRtp(run!.effective)}</span>
           </div>
           <div className="sim-tile">
-            <span className="sim-tile-value">{fmtWeight(stats.maxWin * run!.bet)}</span>
+            <span className="sim-tile-value">{fmtCredits(stats.maxWin * run!.bet)}</span>
             <span className="sim-tile-label">Biggest Win</span>
           </div>
         </div>
@@ -324,7 +329,7 @@ export function BankrollSim({
       ) : (
         <div className="chart-wrap">
           <div className="chart-empty" style={{ height: chartHeight }}>
-            Run a bankroll to see how long {fmtWeight(config.credits)} credits last at a bet of{' '}
+            Run a bankroll to see how long {fmtCredits(config.credits)} credits last at a bet of{' '}
             {fmtDecimal(config.bet, 6)}.
           </div>
           <ChartResizeGrip

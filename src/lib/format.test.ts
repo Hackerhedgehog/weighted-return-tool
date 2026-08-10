@@ -1,5 +1,6 @@
 import { describe, it, expect } from 'vitest'
 import {
+  fmtCredits,
   fmtDecimal,
   fmtFixed3,
   fmtPayout,
@@ -109,5 +110,35 @@ describe('display helpers', () => {
     expect(fmtPct(0.5)).toBe('50%')
     expect(fmtPct(0.12345, 2)).toBe('12.35%')
     expect(fmtPct(NaN)).toBe('—')
+  })
+})
+
+describe('fmtCredits', () => {
+  it('groups integers at 1000 and above, like fmtWeight', () => {
+    expect(fmtCredits(1200350)).toBe('1,200,350')
+    expect(fmtCredits(1000)).toBe('1,000')
+  })
+
+  it('keeps two decimal places below 1000, unlike fmtWeight', () => {
+    expect(fmtCredits(0.5)).toBe('0.5')
+    expect(fmtCredits(999.999)).toBe('1000')
+    expect(fmtCredits(12.3456)).toBe('12.35')
+  })
+
+  it('never rounds a fractional balance up to a whole credit', () => {
+    // The scenario the bug report was about: busted holding half a credit.
+    expect(fmtCredits(0.5)).not.toBe('1')
+    expect(fmtCredits(0.5)).toBe('0.5')
+  })
+
+  it('handles zero and non-finite values', () => {
+    expect(fmtCredits(0)).toBe('0')
+    expect(fmtCredits(NaN)).toBe('—')
+    expect(fmtCredits(Infinity)).toBe('—')
+  })
+
+  it('applies the same 1000 threshold to negative values by magnitude', () => {
+    expect(fmtCredits(-0.5)).toBe('-0.5')
+    expect(fmtCredits(-1200)).toBe('-1,200')
   })
 })

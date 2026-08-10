@@ -30,11 +30,13 @@ const state = (over: Partial<BankrollState> = {}): BankrollState => ({
   ...over,
 })
 
-function renderChart(over: { points?: BankrollPoint[]; state?: BankrollState } = {}) {
+function renderChart(
+  over: { points?: BankrollPoint[]; state?: BankrollState; startCredits?: number } = {},
+) {
   render(
     <BankrollChart
       points={over.points ?? points}
-      startCredits={1000}
+      startCredits={over.startCredits ?? 1000}
       state={over.state ?? state()}
       height={260}
       onHeight={vi.fn()}
@@ -87,5 +89,23 @@ describe('BankrollChart', () => {
     renderChart({ points: [], state: state({ spins: 0, balance: 1000 }) })
     expect(document.querySelector('.bankroll-path')).toBeNull()
     expect(screen.getByRole('img', { name: 'Bankroll results' })).toBeDefined()
+  })
+
+  it('shows a fractional busted balance as a fraction, not rounded up to a whole credit', () => {
+    // Bets can be fractional, so a run can bust holding, say, half a credit —
+    // fmtWeight would round that to "1", reading as a lie next to "no credit
+    // left to bet".
+    renderChart({
+      points: [{ spins: 100, balance: 0.5 }],
+      state: state({ spins: 100, balance: 0.5, busted: true }),
+    })
+    expect(screen.queryByText('1')).toBeNull()
+    fireEvent.mouseMove(document.querySelector('.sim-hit') as Element, { clientX: 0 })
+    expect(screen.getByText('0.5')).toBeDefined()
+  })
+
+  it('shows a fractional starting balance in the legend, not rounded up', () => {
+    renderChart({ startCredits: 0.75, points: [{ spins: 0, balance: 0.75 }] })
+    expect(screen.getByText(/started with 0\.75/)).toBeDefined()
   })
 })

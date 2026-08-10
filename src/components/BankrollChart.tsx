@@ -2,7 +2,7 @@ import { useMemo, useState } from 'react'
 import { ChartReadout, type ReadoutStat } from './ChartReadout'
 import { ChartResizeGrip } from './ChartResizeGrip'
 import { fmtCompact, niceCeil, SIM_HEIGHT, useContainerWidth } from './chartUtils'
-import { fmtWeight } from '../lib/format'
+import { fmtCredits, fmtWeight } from '../lib/format'
 import type { BankrollPoint, BankrollState } from '../lib/bankroll'
 
 /**
@@ -94,11 +94,11 @@ export function BankrollChart({
     h === null
       ? []
       : [
-          { label: 'balance', value: fmtWeight(points[h].balance) },
-          { label: 'started', value: fmtWeight(startCredits) },
+          { label: 'balance', value: fmtCredits(points[h].balance) },
+          { label: 'started', value: fmtCredits(startCredits) },
           {
             label: 'change',
-            value: `${points[h].balance >= startCredits ? '+' : '−'}${fmtWeight(
+            value: `${points[h].balance >= startCredits ? '+' : '−'}${fmtCredits(
               Math.abs(points[h].balance - startCredits),
             )}`,
           },
@@ -111,7 +111,7 @@ export function BankrollChart({
           <span className="legend-line cumulative" /> credit balance
         </span>
         <span className="legend-item">
-          <span className="legend-line expected" /> started with {fmtWeight(startCredits)}
+          <span className="legend-line expected" /> started with {fmtCredits(startCredits)}
         </span>
         {state.busted && <span className="legend-note">busted — no credit left to bet</span>}
       </div>

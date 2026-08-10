@@ -307,4 +307,28 @@ describe('BankrollSim stat tiles snapshot the run', () => {
     expect(tiles().getByText('12')).toBeDefined()
     expect(tiles().queryByText('120')).toBeNull()
   })
+
+  it('shows a fractional busted balance as a fraction, not rounded up to a whole credit', () => {
+    // Bets can be fractional (BET.integer is false), so a run can bust
+    // holding half a credit — fmtWeight would round that to "1", reading as
+    // a lie right next to a legend that says there is no credit left to bet.
+    const w = new FakeWorker()
+    renderSim(w)
+    fireEvent.click(screen.getByRole('button', { name: 'Run' }))
+
+    reply(w, {
+      type: 'chunk-done',
+      points: [{ spins: 10, balance: 0.5 }],
+      state: state({ spins: 10, balance: 0.5, low: 0.5, busted: true }),
+      capped: false,
+    })
+
+    const tiles = within(document.querySelector('.sim-stats') as HTMLElement)
+    // Balance and Lowest both land on 0.5 — the run busted right there.
+    expect(tiles.getAllByText('0.5')).toHaveLength(2)
+    expect(tiles.queryByText('1')).toBeNull()
+    expect(document.querySelector('.sim-progress-text')?.textContent).toBe(
+      'busted after 10 spins',
+    )
+  })
 })
