@@ -32,7 +32,7 @@ function renderChart(
   const onChart = vi.fn()
   const onPreview = vi.fn()
   const onCommit = vi.fn()
-  const onDragBlocked = vi.fn()
+  const onBlocked = vi.fn()
   const onHeight = vi.fn()
   const onGroupLock = vi.fn()
   const total = rows.reduce((a, r) => a + r.weight, 0)
@@ -47,13 +47,13 @@ function renderChart(
       onChart={onChart}
       onPreview={onPreview}
       onCommit={onCommit}
-      onDragBlocked={onDragBlocked}
+      onBlocked={onBlocked}
       onHeight={onHeight}
       onGroupLock={onGroupLock}
       {...extra}
     />,
   )
-  return { onChart, onPreview, onCommit, onDragBlocked, onHeight, onGroupLock, rows, total }
+  return { onChart, onPreview, onCommit, onBlocked, onHeight, onGroupLock, rows, total }
 }
 
 const lastRows = (fn: ReturnType<typeof vi.fn>): BucketRow[] =>
@@ -434,18 +434,43 @@ describe('DistributionChart value entry', () => {
   it('reports a step-blocked entry and keeps the weights', () => {
     // 1,000,005 free weight cannot be partitioned on a step of 10.
     const rows = baseRows().map((r) => (r.uid === 'a' ? { ...r, weight: 500_005 } : r))
-    const { onCommit, onDragBlocked } = renderChart({ metric: 'weights', relative: true }, rows, 340, 10)
+    const { onCommit, onBlocked } = renderChart({ metric: 'weights', relative: true }, rows, 340, 10)
     fireEvent.contextMenu(document.querySelectorAll('.bar-hit')[1], { clientX: 200, clientY: 150 })
     fireEvent.change(screen.getByLabelText('Weight'), { target: { value: '250000' } })
     fireEvent.keyDown(screen.getByLabelText('Weight'), { key: 'Enter' })
-    expect(onDragBlocked).toHaveBeenCalled()
+    expect(onBlocked).toHaveBeenCalledWith('off-step')
     expect(onCommit).not.toHaveBeenCalled()
+  })
+
+  it('reports a pinned entry, rather than silently no-opping, when every other unlocked bucket is locked', () => {
+    // Locking c and d leaves b (the dragged subset) as the only unlocked row
+    // outside the target — scaleSubset has nowhere to put the complementary
+    // change and hands back the weights unchanged.
+    const rows = baseRows().map((r) => (r.uid === 'b' ? r : { ...r, locked: true }))
+    const { onCommit, onBlocked } = renderChart({ metric: 'weights', relative: true }, rows)
+    fireEvent.contextMenu(document.querySelectorAll('.bar-hit')[1], { clientX: 200, clientY: 150 })
+    fireEvent.change(screen.getByLabelText('Weight'), { target: { value: '250000' } })
+    fireEvent.keyDown(screen.getByLabelText('Weight'), { key: 'Enter' })
+
+    expect(onCommit).not.toHaveBeenCalled()
+    expect(onBlocked).toHaveBeenCalledWith('pinned')
+    expect(screen.getByRole('dialog')).toBeDefined()
   })
 
   it('does not open on a locked bar', () => {
     const rows = baseRows().map((r) => (r.uid === 'a' ? { ...r, locked: true } : r))
     renderChart({ metric: 'weights' }, rows)
     fireEvent.contextMenu(document.querySelectorAll('.bar-hit')[0], { clientX: 100, clientY: 150 })
+    expect(screen.queryByRole('dialog')).toBeNull()
+  })
+
+  it('does not open from a fully locked group handle', () => {
+    const rows = baseRows().map((r) => (r.payout >= 8 ? { ...r, locked: true } : r))
+    renderChart({ metric: 'weights' }, rows)
+    fireEvent.contextMenu(screen.getByRole('slider', { name: 'bonus group' }), {
+      clientX: 800,
+      clientY: 100,
+    })
     expect(screen.queryByRole('dialog')).toBeNull()
   })
 })
@@ -471,6 +496,13 @@ describe('DistributionChart group locks', () => {
     const rows = baseRows().map((r) => (r.uid === 'c' ? { ...r, locked: true } : r))
     renderChart({ metric: 'weights' }, rows, 340, 1, { onGroupLock })
     fireEvent.click(screen.getByRole('button', { name: 'Lock the bonus group' }))
+    expect(onGroupLock).toHaveBeenCalledWith('bonus', true)
+  })
+
+  it('locks a group when Enter is pressed on its focused padlock', () => {
+    const onGroupLock = vi.fn()
+    renderChart({ metric: 'weights' }, baseRows(), 340, 1, { onGroupLock })
+    fireEvent.keyDown(screen.getByRole('button', { name: 'Lock the bonus group' }), { key: 'Enter' })
     expect(onGroupLock).toHaveBeenCalledWith('bonus', true)
   })
 

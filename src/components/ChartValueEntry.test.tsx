@@ -14,6 +14,7 @@ const renderEntry = (over: Partial<React.ComponentProps<typeof ChartValueEntry>>
       x={200}
       y={80}
       width={900}
+      containerHeight={600}
       weightStep={1}
       onCommit={onCommit}
       onClose={onClose}
@@ -105,5 +106,13 @@ describe('ChartValueEntry', () => {
     renderEntry({ x: 890, width: 900 })
     const box = document.querySelector('.chart-entry') as HTMLElement
     expect(parseFloat(box.style.left)).toBeLessThanOrEqual(900 - 200 - 6)
+  })
+
+  it('clamps to the container height near the bottom edge', () => {
+    renderEntry({ y: 700, containerHeight: 600 })
+    const box = document.querySelector('.chart-entry') as HTMLElement
+    // jsdom never lays anything out, so the popover measures 0 tall — the
+    // clamp still has to land exactly on containerHeight - PAD.
+    expect(parseFloat(box.style.top)).toBe(600 - 6)
   })
 })

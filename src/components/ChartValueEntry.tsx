@@ -1,4 +1,4 @@
-import { useEffect, useRef, useState } from 'react'
+import { useEffect, useLayoutEffect, useRef, useState } from 'react'
 import { evaluateExpression } from '../lib/expr'
 import { fmtWeight } from '../lib/format'
 import { remapNumpadComma } from './numpadDecimal'
@@ -30,6 +30,8 @@ interface ChartValueEntryProps {
   y: number
   /** Container width, for the horizontal clamp. */
   width: number
+  /** Container height, for the vertical clamp. */
+  containerHeight: number
   weightStep: number
   /** Returns false when the commit was refused, which keeps the popover open. */
   onCommit: (value: number) => boolean
@@ -47,12 +49,29 @@ export function ChartValueEntry({
   x,
   y,
   width,
+  containerHeight,
   weightStep,
   onCommit,
   onClose,
 }: ChartValueEntryProps) {
   const ref = useRef<HTMLDivElement>(null)
   const [text, setText] = useState(() => String(target.current))
+  const [top, setTop] = useState(() => Math.max(PAD, y))
+
+  /**
+   * `.panel`'s `overflow: hidden` ends flush with the chart container's own
+   * bottom edge, so that edge is the real vertical budget — measuring the
+   * popover's actual rendered height beats guessing at it, since the height
+   * shifts slightly with its content (title length, step hint) and any of
+   * the numbers that used to make this fit by coincidence (`MARGIN.bottom`,
+   * the readout band's height) can change independently of this file.
+   */
+  useLayoutEffect(() => {
+    const el = ref.current
+    if (el === null) return
+    const maxTop = containerHeight - el.offsetHeight - PAD
+    setTop(maxTop < PAD ? PAD : clamp(y, PAD, maxTop))
+  }, [y, containerHeight])
 
   /**
    * A pointer press anywhere else dismisses. The contextmenu event that opened
@@ -87,7 +106,7 @@ export function ChartValueEntry({
       className="chart-entry"
       role="dialog"
       aria-label={`Set ${label.toLowerCase()} for ${target.title}`}
-      style={{ left, top: Math.max(PAD, y) }}
+      style={{ left, top }}
     >
       <div className="chart-entry-title">{target.title}</div>
       <label className="chart-entry-field">

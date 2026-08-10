@@ -15,19 +15,26 @@ import { DIST_HEIGHT, linearBarWidth, logBarWidth, niceCeil, useContainerWidth }
  *
  *  - bars are colored by bucket group (stacked segments when an aggregated
  *    bar spans groups) and can be dragged vertically to change a bucket's
- *    weight or chance;
+ *    weight or chance. The chip row above the plot (`GroupBarChips`) doubles
+ *    as a legend and lets any group collapse into one solid bar instead of
+ *    its buckets;
  *  - each group gets a handle on the right edge at the height of its total
- *    (in the current metric and axis mode), draggable to rescale the whole
- *    group while in-group proportions are preserved;
+ *    (in the current metric and axis mode), draggable like a bar, and
+ *    carrying a padlock that locks or unlocks every bucket in the group at
+ *    once;
  *  - drags are relative by default — other unlocked buckets absorb the
  *    change so the grand total (and Σchance == 1) holds. Weights mode can
- *    switch that off; chance mode cannot.
+ *    switch that off; chance mode cannot;
+ *  - right-clicking a bar or a handle opens `ChartValueEntry`, a popover for
+ *    typing an exact weight or chance. It commits through the same
+ *    `scaleSubset` / `setSubsetTotal` path a drag commits through, so the two
+ *    ways of setting a value can never disagree.
  *
  * During a drag the pointer math and the rendered axis both use the scale
  * captured at pointer-down: recomputing the scale per move would rescale the
  * axis under the pointer and feed back into the drag. Previews stream
- * through onPreview; one onCommit fires at pointer-up so undo sees a single
- * step. Escape cancels a live drag.
+ * through onPreview; one onCommit fires at pointer-up (or from the popover's
+ * Set) so undo sees a single step. Escape cancels a live drag.
  */
 
 interface DistributionChartProps {
@@ -41,7 +48,8 @@ interface DistributionChartProps {
   onHeight: (h: number) => void
   onPreview: (rows: BucketRow[] | null) => void
   onCommit: (rows: BucketRow[]) => void
-  onDragBlocked: () => void
+  /** 'off-step' when the table can't be partitioned on the step, 'pinned' when locks leave nothing free to move. */
+  onBlocked: (reason: 'off-step' | 'pinned') => void
   onGroupLock: (id: string, locked: boolean) => void
 }
 
@@ -64,7 +72,7 @@ interface DragState {
   blockedNotified: boolean
 }
 
-const MARGIN = { top: 18, right: 128, bottom: 46, left: 64 }
+const MARGIN = { top: 18, right: 150, bottom: 46, left: 64 }
 const HANDLE_GAP = 30
 const SEGMENT_GAP = 2
 
@@ -128,7 +136,7 @@ export function DistributionChart({
   onHeight,
   onPreview,
   onCommit,
-  onDragBlocked,
+  onBlocked,
   onGroupLock,
 }: DistributionChartProps) {
   const [containerRef, width] = useContainerWidth()
@@ -142,7 +150,9 @@ export function DistributionChart({
    */
   const [dragScale, setDragScale] = useState<Scale | null>(null)
   /** Non-null while the exact-value popover is open. */
-  const [entry, setEntry] = useState<{ target: ValueEntryTarget; x: number; y: number } | null>(null)
+  const [entry, setEntry] = useState<
+    { target: ValueEntryTarget; x: number; y: number; containerHeight: number } | null
+  >(null)
 
   const { metric, logY, logX, aggregate, relative, groupBars } = chart
   const set = (patch: Partial<ChartSettings>) => onChart({ ...chart, ...patch })
@@ -300,7 +310,7 @@ export function DistributionChart({
       // Off-step table: the drag has nowhere legal to move. Say so once.
       if (!d.blockedNotified) {
         d.blockedNotified = true
-        onDragBlocked()
+        onBlocked('off-step')
       }
       return
     }
@@ -330,7 +340,17 @@ export function DistributionChart({
     const target = metric === 'chance' ? value / 100 : value
     const weights = weightsForValue(rows, uids, baseTotal, target)
     if (weights === null) {
-      onDragBlocked()
+      onBlocked('off-step')
+      return false
+    }
+    // scaleSubset has a second refusal mode that isn't `null`: with no unlocked
+    // row on one side of the subset, the grand-total invariant pins the total
+    // exactly where it is and it hands back the weights unchanged. Compare with
+    // the same normalisation interact.ts applies on the way in, so a fractional
+    // stored weight can't read as a spurious change and mask a real refusal.
+    const unchanged = rows.every((r, i) => Math.max(0, Math.round(r.weight)) === weights[i])
+    if (unchanged) {
+      onBlocked('pinned')
       return false
     }
     onCommit(rows.map((r, i) => (r.weight === weights[i] ? r : { ...r, weight: weights[i] })))
@@ -356,6 +376,7 @@ export function DistributionChart({
       },
       x: e.clientX - (rect?.left ?? 0),
       y: e.clientY - (rect?.top ?? 0),
+      containerHeight: rect?.height ?? 0,
     })
   }
 
@@ -629,12 +650,22 @@ export function DistributionChart({
                     />
                     <g
                       role="button"
+                      tabIndex={0}
                       className={`handle-lock ${s.allLocked ? 'on' : ''} ${!s.allLocked && s.anyLocked ? 'partial' : ''}`}
                       aria-label={`${s.allLocked ? 'Unlock' : 'Lock'} the ${s.group.name} group`}
                       // The padlock sits inside the handle's drag target, so
-                      // its press must not also start a drag.
+                      // its press must not also start a drag, and its own
+                      // context menu must not also open the handle's popover.
                       onPointerDown={(e) => e.stopPropagation()}
+                      onContextMenu={(e) => e.stopPropagation()}
                       onClick={() => onGroupLock(s.group.id, !s.allLocked)}
+                      onKeyDown={(e) => {
+                        if (e.key === 'Enter') onGroupLock(s.group.id, !s.allLocked)
+                        else if (e.key === ' ') {
+                          e.preventDefault()
+                          onGroupLock(s.group.id, !s.allLocked)
+                        }
+                      }}
                     >
                       <rect
                         x={plotRight + MARGIN.right - 26}
@@ -689,6 +720,7 @@ export function DistributionChart({
                 x={entry.x}
                 y={entry.y}
                 width={width}
+                containerHeight={entry.containerHeight}
                 weightStep={weightStep}
                 onCommit={(v) => commitValue(entry.target.uids, v)}
                 onClose={() => setEntry(null)}

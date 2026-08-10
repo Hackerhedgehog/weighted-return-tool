@@ -126,6 +126,30 @@ describe('buildBars — collapsed groups', () => {
     expect(build(some, { groupBars: ['bonus'] }).bars.find((b) => b.kind === 'group')!.allLocked).toBe(false)
   })
 
+  it('collapses two groups at once, leaving the rest untouched', () => {
+    const { bars } = build(rows(), { groupBars: ['bonus', 'zero'] })
+    // the wins bucket stays loose; bonus and zero each become one bar
+    expect(bars).toHaveLength(3)
+    expect(bars.filter((b) => b.kind === 'group')).toHaveLength(2)
+    const loose = bars.find((b) => b.kind === 'buckets')!
+    expect(loose.payout).toBe(0.6)
+    expect(loose.uids).toEqual(['b'])
+  })
+
+  it('keeps a group bar ahead of a loose bar tied on payout, by push order', () => {
+    // Group bars are pushed before the loose pass runs, and the final sort is
+    // stable — so a tie is decided by that order, not by an explicit tiebreak.
+    const rs: BucketRow[] = [
+      { uid: 'x', bucketId: 0, payout: 5, label: 'other-item', weight: 100, locked: false, groupId: 'other', weightId: '' },
+      { uid: 'y', bucketId: 1, payout: 5, label: 'bonus9', weight: 100, locked: false, groupId: 'bonus', weightId: '' },
+      { uid: 'z', bucketId: 2, payout: 5, label: 'bonus10', weight: 300, locked: false, groupId: 'bonus', weightId: '' },
+    ]
+    const { bars } = build(rs, { groupBars: ['bonus'] })
+    expect(bars.map((b) => b.payout)).toEqual([5, 5])
+    expect(bars.map((b) => b.kind)).toEqual(['group', 'buckets'])
+    expect(bars[1].uids).toEqual(['x'])
+  })
+
   it('ignores a group id that no longer exists', () => {
     const { bars } = build(rows(), { groupBars: ['gone'] })
     expect(bars).toHaveLength(4)

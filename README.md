@@ -507,7 +507,7 @@ src/
     SimulationPanel.tsx  spins, run control, live stats
     SimChart.tsx         realtime simulation chart
     ChartReadout.tsx     the hover tooltip anchored under both charts
-    GroupSettings.tsx    add, rename, recolor and delete bucket groups
+    GroupSettings.tsx    add, rename, recolor, lock and delete bucket groups
     ChartResizeGrip.tsx  drag or key a chart taller
     chartUtils.ts        shared axis, width, bar-geometry and height helpers
     RtpGauge.tsx

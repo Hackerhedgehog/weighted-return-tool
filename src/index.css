@@ -1519,6 +1519,12 @@ input.gcell.editing {
   opacity: 1;
 }
 
+.handle-lock:focus-visible {
+  opacity: 1;
+  outline: 2px solid var(--accent-soft);
+  outline-offset: 1px;
+}
+
 .handle-lock.partial {
   opacity: 0.65;
 }

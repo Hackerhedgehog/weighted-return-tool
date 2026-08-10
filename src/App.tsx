@@ -40,6 +40,9 @@ const SAVE_DEBOUNCE_MS = 300
 const offStepNotice = (step: number) =>
   `The current weights are not multiples of ${step} — run Auto-Distribute first, or set the weight step to free.`
 
+const pinnedNotice =
+  'Every other unlocked bucket is locked — the grand total pins this weight where it is. Unlock something to move it.'
+
 /** Everything undo covers. View state deliberately lives outside. */
 interface Doc {
   rows: BucketRow[]
@@ -391,8 +394,8 @@ export default function App() {
     [commit],
   )
 
-  const handleDragBlocked = useCallback(() => {
-    setNotices([offStepNotice(docRef.current.weightStep)])
+  const handleBlocked = useCallback((reason: 'off-step' | 'pinned') => {
+    setNotices([reason === 'off-step' ? offStepNotice(docRef.current.weightStep) : pinnedNotice])
   }, [])
 
   // ---- groups ----
@@ -440,6 +443,9 @@ export default function App() {
           rows: d.rows.map((r) => (r.groupId === id ? { ...r, groupId: fallback } : r)),
         }
       })
+      // A deleted id must not linger in view state — nextGroupId can reissue
+      // it, and a brand-new group must never start out pre-collapsed.
+      setChart((c) => ({ ...c, groupBars: c.groupBars.filter((g) => g !== id) }))
     },
     [commit],
   )
@@ -633,7 +639,7 @@ export default function App() {
               onHeight={setChartHeight}
               onPreview={setPreview}
               onCommit={handleDragCommit}
-              onDragBlocked={handleDragBlocked}
+              onBlocked={handleBlocked}
               onGroupLock={setGroupLocked}
             />
           </section>
