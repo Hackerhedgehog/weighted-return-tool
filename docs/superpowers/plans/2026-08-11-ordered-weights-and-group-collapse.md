@@ -509,11 +509,11 @@ git commit -m "feat: keep every unlocked bucket above zero when rescaling the to
 
 **Interfaces:**
 - Consumes: `Ctx` from Task 1.
-- Produces: `Ctx` gains `ordered: boolean`. Tasks 5 and 6 read it, and construct `{ ...ctx, ordered: false }` for the unordered fallback. The `chooseBand(c: Ctx): Candidate` helper inside `solveWeights` — Task 5 keeps calling it. The `ladderOf` test helper (added in Step 1) is reused by Tasks 5 and 6.
+- Produces: `Ctx` gains `ordered: boolean`. Tasks 5 and 6 read it, and construct `{ ...ctx, ordered: false }` for the unordered fallback. `SolveResult` gains `curveUsed: number`. The `chooseBand(c: Ctx): Candidate` helper inside `solveWeights` — Task 5 keeps calling it. No test helpers: this task's tests index the ladder directly, and Tasks 5 and 6 define the helpers they need.
 
 **Background:** `solveGamma` bisects over `[-40, 40]`. Reaching the RTP target under heavy curvature drives `gamma` negative and `exp(-gamma*u - c*u^2)` then rises with payout — `0.33x:73,864` against `0.6x:142,199` at `very low` volatility.
 
-The fix is **not** a blanket `gamma >= 0`. Ordering is a condition between consecutive buckets, and for `u_i < u_j` it rearranges to `gamma >= -c * (u_i + u_j)`. Band 2 starts at `u = 1.695` (1.8x against a 0.33x floor) rather than 0, so its floor is far looser than band 1's. Measured on the reference table: a blanket floor of 0 puts RTP 0.95 out of reach at both `low` and `very low`, whereas the per-band floor keeps every preset intact with the tail graded 878 / 764 / 581 / 328 / 109.
+The fix is **not** a blanket `gamma >= 0`. Ordering is a condition between consecutive buckets, and for `u_i < u_j` it rearranges to `gamma >= -c * (u_i + u_j)`. Every consecutive pair must hold, so the binding bound is the largest of them — which, because `-c * (u_i + u_j)` is least negative where the pair sits lowest, is the band's **bottom** rung. Band 2's lowest pair is 1.8x and 2x (`u` 1.695 and 1.802) rather than band 1's `u = 0`, so its floor is far looser. Measured on the reference table: a blanket floor of 0 puts RTP 0.95 out of reach at both `low` and `very low`, whereas the per-band floor keeps four of the five presets untouched and needs to flatten only `very low`, leaving the tail graded 878 / 764 / 581 / 328 / 172.
 
 - [ ] **Step 1: Write the failing tests**
 
@@ -797,12 +797,25 @@ git commit -m "feat: floor the weight curve's slope per band so it never rises"
 - Test: `src/lib/distribute.test.ts`
 
 **Interfaces:**
-- Consumes: `Ctx.residual` (Task 1), `Ctx.ordered` and the `chooseBand` helper (Task 4), the `ladderOf` test helper (Task 4).
-- Produces: nothing new for later tasks.
+- Consumes: `Ctx.residual` (Task 1), `Ctx.ordered` and the `chooseBand` helper (Task 4).
+- Produces: the `ladderOf` test helper, added in Step 1 below. Task 6 builds `inversions` on top of it.
 
 **Background:** the two positive bands are normalized to independent budgets, so the boundary at 1x can jump *upward* — `0.6x:0` against `1.8x:21,452` when hit chance equals win chance. Separately the residual can fall below the top of the ladder when hit chance is set very high. Both are fixed by moving group mass, which is exactly what the chance targets are, and both rank below ordering.
 
 - [ ] **Step 1: Write the failing tests**
+
+Add this helper near the top of `src/lib/distribute.test.ts`, below `const sum = ...`. Task 6 builds `inversions` on top of it.
+
+```ts
+/** The payout ladder, lowest payout first. */
+const ladderOf = (rs: BucketRow[], w: number[]) =>
+  rs
+    .map((r, i) => ({ p: r.payout, label: r.label, w: w[i] }))
+    .filter((e) => e.p > 0)
+    .sort((a, b) => a.p - b.p)
+```
+
+Then add the suite:
 
 ```ts
 describe('ordering against the chance targets', () => {
@@ -996,7 +1009,7 @@ git commit -m "feat: shift group mass so payout ordering outranks the chance tar
 - Test: `src/lib/distribute.test.ts`
 
 **Interfaces:**
-- Consumes: `Ctx.ordered` (Task 4), the loop from Task 5, the `ladderOf` test helper (Task 4).
+- Consumes: `Ctx.ordered` (Task 4), the loop and the `ladderOf` test helper (Task 5).
 - Produces: the `inversions` test helper, added in Step 1 below. This task closes the ordering invariant.
 
 **Background:** `largestRemainder`'s fractional tiebreak and `repairRtp`'s pairwise transfers are both blind to the ladder, so buckets a hair apart in payout come out inverted by a unit or two — `50.11x:2,055` against `50.16x:2,056` at step 1, and `50.11x:300` against `50.16x:400` at step 100.
