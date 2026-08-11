@@ -583,6 +583,73 @@ function payoutPairs(ctx: Ctx, idx: number[]): [number, number][] {
   return pairs.map((p) => p.pair)
 }
 
+/** Unlocked positive-payout rows, lowest payout first. */
+function ladderIdx(ctx: Ctx): number[] {
+  return [...ctx.freeIdx[1], ...ctx.freeIdx[2]].sort(
+    (a, b) => ctx.payouts[a] - ctx.payouts[b] || a - b,
+  )
+}
+
+/** True when no higher payout carries more weight than a lower one. */
+function inOrder(ctx: Ctx, w: number[], ladder: number[]): boolean {
+  for (let k = 1; k < ladder.length; k++) {
+    const lo = ladder[k - 1]
+    const hi = ladder[k]
+    if (ctx.payouts[hi] > ctx.payouts[lo] && w[hi] > w[lo]) return false
+  }
+  return true
+}
+
+/**
+ * Integer sweep that puts the ladder back in order.
+ *
+ * Every fix is a transfer, so the total never moves, and weight only ever
+ * travels *down* the ladder — the pairs being repaired are adjacent in payout,
+ * so RTP falls by at most step × the payout gap over the total (4e-6 at step
+ * 100 on the reference table). Lifting a bucket can break the pair below it,
+ * hence the repeated passes; a single pair settles in one transfer, so the
+ * bound is far looser than it needs to be.
+ */
+function enforceOrder(ctx: Ctx, w: number[], step: number, ladder: number[]): void {
+  for (let pass = 0; pass < ladder.length; pass++) {
+    let moved = false
+    for (let k = 1; k < ladder.length; k++) {
+      const lo = ladder[k - 1]
+      const hi = ladder[k]
+      if (ctx.payouts[hi] <= ctx.payouts[lo]) continue
+      const excess = w[hi] - w[lo]
+      if (excess <= 0) continue
+      const give = Math.min(Math.ceil(excess / 2 / step) * step, Math.max(0, w[hi] - step))
+      if (give <= 0) continue
+      w[hi] -= give
+      w[lo] += give
+      moved = true
+    }
+    if (!moved) return
+  }
+}
+
+/**
+ * Locks are rank 1 and sit wherever the user put them, so a locked weight that
+ * breaks the ladder is reported rather than moved.
+ */
+function lockedOrderNote(ctx: Ctx, rows: BucketRow[], w: number[]): string | null {
+  const all = rows
+    .map((_, i) => i)
+    .filter((i) => ctx.payouts[i] > 0)
+    .sort((a, b) => ctx.payouts[a] - ctx.payouts[b] || a - b)
+  for (let k = 1; k < all.length; k++) {
+    const lo = all[k - 1]
+    const hi = all[k]
+    if (ctx.payouts[hi] <= ctx.payouts[lo] || w[hi] <= w[lo]) continue
+    const culprit = ctx.locked[hi] ? hi : ctx.locked[lo] ? lo : -1
+    if (culprit === -1) continue
+    const other = culprit === hi ? lo : hi
+    return `"${rows[culprit].label}" is locked at ${w[culprit].toLocaleString('en-US')}, out of payout order with "${rows[other].label}" — locked weights are never reordered.`
+  }
+  return null
+}
+
 /** Move weight between one pair until RTP stops improving. */
 function transfer(
   ctx: Ctx,
@@ -590,31 +657,34 @@ function transfer(
   target: number,
   pair: [number, number] | null,
   step: number,
+  ladder: number[],
 ): void {
   if (pair === null) return
   const [lo, hi] = pair
   const span = ctx.payouts[hi] - ctx.payouts[lo]
   if (!(span > 0)) return
 
-  const minLo = w[lo] >= step ? step : 0
-  const minHi = w[hi] >= step ? step : 0
   const err = () => (target - rtpOf(ctx, w)) * ctx.total
 
-  const d = clamp(Math.round(err() / span / step) * step, -(w[hi] - minHi), w[lo] - minLo)
+  const d = clamp(Math.round(err() / span / step) * step, -(w[hi] - step), w[lo] - step)
   if (d !== 0) {
     w[lo] -= d
     w[hi] += d
+    if (!inOrder(ctx, w, ladder)) {
+      w[lo] += d
+      w[hi] -= d
+    }
   }
 
   for (let k = 0; k < 200; k++) {
     const before = Math.abs(err())
     if (before === 0) return
     const dir = err() > 0 ? 1 : -1
-    if (dir === 1 && w[lo] - step < minLo) return
-    if (dir === -1 && w[hi] - step < minHi) return
+    if (dir === 1 && w[lo] - step < step) return
+    if (dir === -1 && w[hi] - step < step) return
     w[lo] -= dir * step
     w[hi] += dir * step
-    if (Math.abs(err()) >= before) {
+    if (Math.abs(err()) >= before || !inOrder(ctx, w, ladder)) {
       w[lo] += dir * step
       w[hi] -= dir * step
       return
@@ -627,15 +697,18 @@ function transfer(
  * buckets, which leaves every group sum — and therefore hit and win chance —
  * untouched. Accuracy bottoms out at step × half the finest payout gap divided
  * by the total: about 2e-8 on the reference ladder (or step × 2e-8 when step > 1).
+ * The ladder guard can leave a residue when every RTP-improving move is blocked
+ * by ordering — a transfer that would close the gap but invert the ladder is
+ * refused rather than taken.
  */
-function repairRtp(ctx: Ctx, w: number[], target: number, step: number): void {
+function repairRtp(ctx: Ctx, w: number[], target: number, step: number, ladder: number[]): void {
   const idx = ctx.freeIdx[2]
   if (idx.length < 2) return
 
   const err = () => Math.abs(target - rtpOf(ctx, w)) * ctx.total
   for (const pair of payoutPairs(ctx, idx)) {
     if (err() < 1e-9) return
-    transfer(ctx, w, target, pair, step)
+    transfer(ctx, w, target, pair, step, ladder)
   }
 }
 
@@ -915,14 +988,29 @@ export function solveWeights(
     break
   }
 
+  // Empty when order has yielded to RTP: the ladder is then left with
+  // deliberate inversions (Task 5's GAMMA_UNORDERED path), and `transfer`'s
+  // ladder guard checks the *whole* ladder, so handing it a non-empty list
+  // here would see those pre-existing inversions and revert every
+  // RTP-improving move, silently disabling repairRtp for exactly the case
+  // where the ladder is expected to be out of order.
+  const ladder = solveCtx.ordered ? ladderIdx(solveCtx) : []
   const weights = allocate(solveCtx, cont, step)
+  if (solveCtx.ordered) enforceOrder(solveCtx, weights, step, ladder)
+  // Residual dominance is itself an ordering rule, so it keeps the same gate
+  // as `enforceOrder`: once order has yielded to RTP, forcing the residual
+  // back above the ladder would only pile the mass `raiseResidual` gave away
+  // straight back onto it, fighting the very target that made order yield.
   if (solveCtx.ordered) restoreResidual(solveCtx, weights, step)
-  repairRtp(solveCtx, weights, targets.rtp, step)
+  repairRtp(solveCtx, weights, targets.rtp, step, ladder)
 
   const achieved = statsOf(
     rows.map((r, i) => ({ ...r, weight: weights[i] })),
     totalWeight,
   )
+
+  const lockNote = lockedOrderNote(solveCtx, rows, weights)
+  if (lockNote !== null) warnings.push(lockNote)
 
   if (chosen.conflict && targets.useChances) {
     const over = [0, 1, 2].filter(
@@ -1134,6 +1222,12 @@ export function retargetRtp(
     })
   })
 
-  repairRtp(ctx, result, targetRtp, step)
+  // Each band on its own: the tilt above preserves every group's unlocked sum,
+  // and a cross-band transfer here would undo that.
+  const ladder = ladderIdx(ctx)
+  for (const g of [1, 2] as const) {
+    enforceOrder(ctx, result, step, ladder.filter((i) => groupOf(ctx.payouts[i]) === g))
+  }
+  repairRtp(ctx, result, targetRtp, step, ladder)
   return result
 }

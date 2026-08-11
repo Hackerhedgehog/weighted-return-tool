@@ -26,6 +26,18 @@ const ladderOf = (rs: BucketRow[], w: number[]) =>
     .filter((e) => e.p > 0)
     .sort((a, b) => a.p - b.p)
 
+/** Every place a higher payout carries more weight than a lower one. */
+const inversions = (rs: BucketRow[], w: number[]): string[] => {
+  const l = ladderOf(rs, w)
+  const bad: string[] = []
+  for (let k = 1; k < l.length; k++) {
+    if (l[k].p > l[k - 1].p && l[k].w > l[k - 1].w) {
+      bad.push(`${l[k - 1].p}x=${l[k - 1].w} < ${l[k].p}x=${l[k].w}`)
+    }
+  }
+  return bad
+}
+
 describe('groupOf', () => {
   it('splits on 0 and 1', () => {
     expect(groupOf(0)).toBe(0)
@@ -681,5 +693,51 @@ describe('ordering against the chance targets', () => {
   it('shifts nothing, and warns about nothing, on a table that needs neither', () => {
     const r = solveWeights(rows, T, DEFAULT_TARGETS, CURVE_PRESETS.medium)
     expect(r.warnings).toHaveLength(0)
+  })
+})
+
+describe('the ladder stays in order', () => {
+  it('has no inversions anywhere in the settings matrix', () => {
+    for (const v of VOLATILITY_STEPS) {
+      for (const rtp of [0.5, 0.95, 1.2, 2]) {
+        for (const [total, step] of [
+          [T, 1],
+          [T, 10],
+          [1_200_300, 100],
+        ] as const) {
+          const r = solveWeights(rows, total, { ...DEFAULT_TARGETS, rtp }, CURVE_PRESETS[v], step)
+          const bad = inversions(rows, r.weights)
+          expect({ v, rtp, step, bad }).toEqual({ v, rtp, step, bad: [] })
+        }
+      }
+    }
+  })
+
+  it('still hits RTP exactly while doing it', () => {
+    const r = solveWeights(rows, T, DEFAULT_TARGETS, CURVE_PRESETS.medium)
+    expect(statsOf(withWeights(r.weights), T).rtp).toBeCloseTo(0.95, 6)
+    expect(sum(r.weights)).toBe(T)
+  })
+
+  it('keeps the ladder ordered through an RTP-cell retarget', () => {
+    const start = solveWeights(rows, T, DEFAULT_TARGETS, CURVE_PRESETS.medium).weights
+    const before = statsOf(withWeights(start), T)
+    for (const rtp of [0.8, 1.05, 1.4]) {
+      const out = retargetRtp(withWeights(start), T, rtp)!
+      const after = statsOf(withWeights(out), T)
+      expect({ rtp, bad: inversions(rows, out) }).toEqual({ rtp, bad: [] })
+      expect(sum(out)).toBe(T)
+      // the whole point of the RTP cell: the chances do not budge
+      expect(after.hitChance).toBeCloseTo(before.hitChance, 5)
+      expect(after.winChance).toBeCloseTo(before.winChance, 5)
+    }
+  })
+
+  it('reports a lock that sits out of payout order instead of moving it', () => {
+    const top = rows.findIndex((r) => r.payout === 1000)
+    const locked = rows.map((r, i) => (i === top ? { ...r, weight: 400_000, locked: true } : r))
+    const r = solveWeights(locked, T, DEFAULT_TARGETS, CURVE_PRESETS.medium)
+    expect(r.weights[top]).toBe(400_000)
+    expect(r.warnings.some((w) => w.includes('locked weights are never reordered'))).toBe(true)
   })
 })
