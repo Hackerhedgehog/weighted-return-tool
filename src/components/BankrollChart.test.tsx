@@ -31,7 +31,13 @@ const state = (over: Partial<BankrollState> = {}): BankrollState => ({
 })
 
 function renderChart(
-  over: { points?: BankrollPoint[]; state?: BankrollState; startCredits?: number } = {},
+  over: {
+    points?: BankrollPoint[]
+    state?: BankrollState
+    startCredits?: number
+    yZoom?: number
+    onYZoom?: (z: number) => void
+  } = {},
 ) {
   render(
     <BankrollChart
@@ -40,6 +46,8 @@ function renderChart(
       state={over.state ?? state()}
       height={260}
       onHeight={vi.fn()}
+      yZoom={over.yZoom ?? 1}
+      onYZoom={over.onYZoom ?? vi.fn()}
     />,
   )
 }
@@ -118,5 +126,21 @@ describe('BankrollChart', () => {
     expect(document.querySelector('.legend-line.expected')).toBeNull()
     expect(document.querySelector('.legend-line.bankroll-balance')).not.toBeNull()
     expect(document.querySelector('.legend-line.bankroll-start')).not.toBeNull()
+  })
+
+  it('renders a y-axis zoom handle', () => {
+    renderChart()
+    expect(screen.getByRole('slider', { name: "Zoom the bankroll chart's y-axis" })).toBeDefined()
+  })
+
+  it('scales the tick labels when zoomed', () => {
+    // peak 1200 → autoYMax = niceCeil(1260) = 2000, so the top tick reads "2k".
+    renderChart()
+    expect([...document.querySelectorAll('.axis-label')].map((n) => n.textContent)).toContain('2k')
+
+    cleanup()
+    // zoomed to 0.5 → effective yMax 1000, so the same top tick now reads "1k".
+    renderChart({ yZoom: 0.5 })
+    expect([...document.querySelectorAll('.axis-label')].map((n) => n.textContent)).toContain('1k')
   })
 })
