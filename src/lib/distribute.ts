@@ -639,6 +639,69 @@ function repairRtp(ctx: Ctx, w: number[], target: number, step: number): void {
   }
 }
 
+/** How many mass shifts a solve will attempt before giving up and saying so. */
+const ORDER_ROUNDS = 12
+
+/** How far the residual falls short of being the table's largest weight. */
+function dominanceGap(ctx: Ctx, w: number[]): number {
+  const r = ctx.residual
+  if (r === -1 || ctx.locked[r]) return 0
+  const ladder = [...ctx.freeIdx[1], ...ctx.freeIdx[2]]
+  if (ladder.length === 0) return 0
+  return Math.max(...ladder.map((i) => w[i])) - w[r]
+}
+
+/**
+ * Move the smallest mass from the win band to the small-win band that turns an
+ * upward step at 1x into a downward one.
+ *
+ * A downward step there is legitimate — it is what lets the win band be rare
+ * without crushing the tail — so only a rising boundary is repaired. Solved
+ * against the current shapes and overshot by one step, so the integer stage
+ * cannot round the fix back out; the caller re-solves γ and comes back, which
+ * is what makes the approximation converge.
+ */
+function levelBoundary(ctx: Ctx, budgets: number[], w: number[], step: number): number {
+  const a = ctx.freeIdx[1]
+  const b = ctx.freeIdx[2]
+  if (a.length === 0 || b.length === 0 || !(budgets[1] > 0) || !(budgets[2] > 0)) return 0
+  const lowest = Math.min(...a.map((i) => w[i]))
+  const highest = Math.max(...b.map((i) => w[i]))
+  if (highest <= lowest) return 0
+
+  const room = Math.max(0, budgets[2] - b.length * step)
+  const rate = highest / budgets[2] + lowest / budgets[1]
+  const d = Math.min((highest - lowest + step) / Math.max(rate, 1e-9), room)
+  if (!(d > 0)) return 0
+  budgets[1] += d
+  budgets[2] -= d
+  return d
+}
+
+/**
+ * Move the smallest mass from the paying bands to the zero band that makes the
+ * residual the table's largest weight. The zero band's mass is hit chance, so
+ * this is hit chance yielding to ordering.
+ */
+function raiseResidual(ctx: Ctx, budgets: number[], w: number[], step: number): number {
+  const gap = dominanceGap(ctx, w)
+  if (gap <= 0) return 0
+  const paying = budgets[1] + budgets[2]
+  if (!(paying > 0) || !(budgets[0] > 0)) return 0
+
+  const share = w[ctx.residual] / budgets[0]
+  const top = w[ctx.residual] + gap
+  const members = ctx.freeIdx[1].length + ctx.freeIdx[2].length
+  const room = Math.max(0, paying - members * step)
+  const d = Math.min((gap + step) / Math.max(share + top / paying, 1e-9), room)
+  if (!(d > 0)) return 0
+
+  budgets[0] += d
+  budgets[1] -= (d * budgets[1]) / paying
+  budgets[2] -= (d * budgets[2]) / paying
+  return d
+}
+
 export function solveWeights(
   rows: BucketRow[],
   totalWeight: number,
@@ -767,18 +830,47 @@ export function solveWeights(
       chosen = flattened
       curveUsed = flat
     } else {
-      solveCtx = { ...ctx, ordered: false }
-      chosen = chooseBand(solveCtx)
-      orderYielded = true
+      const unordered = { ...ctx, ordered: false }
+      const relaxed = chooseBand(unordered)
+      // Ordering only gives way when giving way actually brings the target
+      // into reach. When it is out of reach either way, the ladder is the one
+      // constraint still worth honouring — and the RTP warning below reports
+      // the miss regardless.
+      if (relaxed.reachable) {
+        solveCtx = unordered
+        chosen = relaxed
+        orderYielded = true
+      }
     }
   }
 
-  const gamma = solveGamma(solveCtx, chosen.budgets, targets.rtp, pooled)
-  const weights = allocate(
-    solveCtx,
-    continuousWeights(solveCtx, chosen.budgets, gamma, pooled),
-    step,
-  )
+  const budgets = chosen.budgets.slice()
+  let gamma = 0
+  let cont: number[] = []
+  let yieldedWin = false
+  let yieldedHit = false
+  let settled = false
+
+  for (let round = 0; round < ORDER_ROUNDS; round++) {
+    gamma = solveGamma(solveCtx, budgets, targets.rtp, pooled)
+    cont = continuousWeights(solveCtx, budgets, gamma, pooled)
+    if (!solveCtx.ordered) {
+      settled = true
+      break
+    }
+    if (raiseResidual(solveCtx, budgets, cont, step) > 0) {
+      yieldedHit = true
+      continue
+    }
+    if (levelBoundary(solveCtx, budgets, cont, step) > 0) {
+      yieldedWin = true
+      continue
+    }
+    settled = true
+    break
+  }
+
+  const weights = allocate(solveCtx, cont, step)
   repairRtp(solveCtx, weights, targets.rtp, step)
 
   const achieved = statsOf(
@@ -827,10 +919,24 @@ export function solveWeights(
       )
     }
   }
+  if (yieldedHit) {
+    warnings.push(
+      `Hit chance yielded to payout ordering — achieved ${achieved.hitChance.toFixed(3)} against a target of ${targets.hitChance}.`,
+    )
+  }
+  if (yieldedWin) {
+    warnings.push(
+      `Win chance yielded to payout ordering — achieved ${achieved.winChance.toFixed(3)} against a target of ${targets.winChance}.`,
+    )
+  }
+  if (!settled) {
+    warnings.push('Weights could not be brought into payout order within the solver’s iteration limit.')
+  }
+
   // Nothing to report against when the chances are not being steered.
   if (targets.useChances) {
-    outOfBand('hit chance', achieved.hitChance, targets.hitChance)
-    outOfBand('win chance', achieved.winChance, targets.winChance)
+    if (!yieldedHit) outOfBand('hit chance', achieved.hitChance, targets.hitChance)
+    if (!yieldedWin) outOfBand('win chance', achieved.winChance, targets.winChance)
   }
 
   return { weights, achieved, bandUsed: chosen.s, gamma, curveUsed, warnings }

@@ -19,6 +19,12 @@ const rows = parseTsv(readFileSync('example-input-data.tsv', 'utf8')).rows
 const T = 1200350
 const withWeights = (w: number[]): BucketRow[] => rows.map((r, i) => ({ ...r, weight: w[i] }))
 const sum = (w: number[]) => w.reduce((a, b) => a + b, 0)
+/** The payout ladder, lowest payout first. */
+const ladderOf = (rs: BucketRow[], w: number[]) =>
+  rs
+    .map((r, i) => ({ p: r.payout, label: r.label, w: w[i] }))
+    .filter((e) => e.p > 0)
+    .sort((a, b) => a.p - b.p)
 
 describe('groupOf', () => {
   it('splits on 0 and 1', () => {
@@ -601,5 +607,40 @@ describe('the per-band slope floor', () => {
     expect(r.warnings.some((w) => w.includes('ordering yielded'))).toBe(true)
     // flattening bought nothing there, so the user's curvature comes back
     expect(r.curveUsed).toBe(CURVE_PRESETS.medium)
+  })
+})
+
+describe('ordering against the chance targets', () => {
+  const flat = { ...DEFAULT_TARGETS, hitChance: 0.12, winChance: 0.12 }
+
+  it('does not let the win band tower over the small-win band', () => {
+    const r = solveWeights(rows, T, flat, CURVE_PRESETS.medium)
+    const l = ladderOf(rows, r.weights)
+    // The step at 1x specifically — the rest of the ladder is Task 6's job.
+    const lastSmall = l.filter((e) => e.p <= 1).at(-1)!
+    const firstWin = l.find((e) => e.p > 1)!
+    expect(lastSmall.w).toBeGreaterThanOrEqual(firstWin.w)
+    expect(sum(r.weights)).toBe(T)
+  })
+
+  it('names win chance as the thing that gave way', () => {
+    const r = solveWeights(rows, T, flat, CURVE_PRESETS.medium)
+    expect(r.warnings.some((w) => w.includes('Win chance yielded'))).toBe(true)
+    // the generic band warning would only repeat it
+    expect(r.warnings.filter((w) => w.includes('Achieved win chance'))).toHaveLength(0)
+  })
+
+  it('keeps the residual the largest weight at a high hit chance', () => {
+    const greedy = { ...DEFAULT_TARGETS, hitChance: 0.9, winChance: 0.85 }
+    const r = solveWeights(rows, T, greedy, CURVE_PRESETS.medium)
+    const res = residualIndex(rows)
+    expect(r.weights[res]).toBeGreaterThan(Math.max(...r.weights.filter((_, i) => i !== res)))
+    expect(r.warnings.some((w) => w.includes('Hit chance yielded'))).toBe(true)
+    expect(sum(r.weights)).toBe(T)
+  })
+
+  it('shifts nothing, and warns about nothing, on a table that needs neither', () => {
+    const r = solveWeights(rows, T, DEFAULT_TARGETS, CURVE_PRESETS.medium)
+    expect(r.warnings).toHaveLength(0)
   })
 })
