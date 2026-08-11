@@ -25,9 +25,11 @@ function readBody(req: IncomingMessage): Promise<string> {
 
 /**
  * A cross-origin form POST is a CORS "simple request" — the browser never
- * preflights it, so it reaches this middleware regardless of Vite's
- * server.cors allowlist (which, for this project, deliberately includes
- * ngrok hosts). Demanding an explicit `application/json` Content-Type turns
+ * preflights it, so it reaches this middleware on its own. Nothing in this
+ * project's Vite config stops it either: `server.allowedHosts` is widened for
+ * ngrok, but that is a Host-header check on where the request was addressed,
+ * not a check on which origin sent it, so it neither blocks nor blesses a
+ * cross-site POST. Demanding an explicit `application/json` Content-Type turns
  * a cross-origin caller into one that *does* need a preflight, which Vite's
  * default CORS then refuses — a form post, or any simple cross-site request,
  * can never set this header itself. Both real callers (the app's `saveTsv`,

@@ -77,9 +77,18 @@ variables (`WRT_BRIDGE_DIR`, `WRT_BRIDGE_FILE`, `WRT_BRIDGE_EXPORT_NAME`,
   another game's directory entirely — and pushes a full page reload
 
 Without those variables the plugin registers nothing, and the tool behaves
-exactly as it does when started with a plain `npm run dev`. Saves and
-switches can only ever name a single `.tsv` directly inside the nominated
-directory — separators, traversal and non-`.tsv` names are all refused.
+exactly as it does when started with a plain `npm run dev`.
+
+The two routes are guarded differently, because they do different things. A
+**save** writes, so its filename can only ever name a single `.tsv` directly
+inside the nominated directory — separators, traversal, colons, control
+characters and non-`.tsv` names are all refused. A **switch** only re-points
+the session at something that already exists: its `dir` must be an existing
+directory and its `file` an existing `.tsv`, but that file may be any `.tsv`
+on disk, anywhere — it is read, never written. What a switch cannot do is
+widen what a later save may write: its `exportName` goes through the same
+save-path check, so the new session's export stays a single `.tsv` inside the
+new `dir`.
 
 ## Data formats
 
