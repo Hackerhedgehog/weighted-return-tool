@@ -20,13 +20,6 @@ const T = 1200350
 const withWeights = (w: number[]): BucketRow[] => rows.map((r, i) => ({ ...r, weight: w[i] }))
 const sum = (w: number[]) => w.reduce((a, b) => a + b, 0)
 
-/** The payout ladder, lowest payout first. */
-const ladderOf = (rs: BucketRow[], w: number[]) =>
-  rs
-    .map((r, i) => ({ p: r.payout, label: r.label, w: w[i] }))
-    .filter((e) => e.p > 0)
-    .sort((a, b) => a.p - b.p)
-
 describe('groupOf', () => {
   it('splits on 0 and 1', () => {
     expect(groupOf(0)).toBe(0)
@@ -571,17 +564,34 @@ describe('the zero-payout residual', () => {
 describe('the per-band slope floor', () => {
   it('stops the curve rising at very low volatility', () => {
     const r = solveWeights(rows, T, DEFAULT_TARGETS, CURVE_PRESETS['very low'])
-    const l = ladderOf(rows, r.weights)
-    // 0.33x used to come out well below 0.6x
-    expect(l[0].w).toBeGreaterThanOrEqual(l[1].w)
+    const at = (payout: number) => r.weights[rows.findIndex((row) => row.payout === payout)]
+    // every pair the unclamped curve used to invert, in ladder order. Checking
+    // one pair would pass on a solve that still rises three rungs higher up.
+    expect(at(0.33)).toBeGreaterThanOrEqual(at(0.6))
+    expect(at(1.8)).toBeGreaterThanOrEqual(at(2))
+    expect(at(2)).toBeGreaterThanOrEqual(at(2.12))
+    expect(at(2.12)).toBeGreaterThanOrEqual(at(2.61))
     expect(statsOf(withWeights(r.weights), T).rtp).toBeCloseTo(0.95, 6)
   })
 
-  it('keeps every volatility preset usable at RTP 0.95', () => {
+  it('keeps every volatility preset hitting RTP 0.95', () => {
     for (const v of VOLATILITY_STEPS) {
       const r = solveWeights(rows, T, DEFAULT_TARGETS, CURVE_PRESETS[v])
-      expect(statsOf(withWeights(r.weights), T).rtp).toBeCloseTo(0.95, 6)
-      expect({ v, warnings: r.warnings }).toEqual({ v, warnings: [] })
+      expect({ v, rtp: statsOf(withWeights(r.weights), T).rtp.toFixed(6) }).toEqual({
+        v,
+        rtp: '0.950000',
+      })
+    }
+  })
+
+  it('flattens only the preset whose ordered ceiling falls short', () => {
+    for (const v of VOLATILITY_STEPS) {
+      const r = solveWeights(rows, T, DEFAULT_TARGETS, CURVE_PRESETS[v])
+      expect({
+        v,
+        flattened: r.curveUsed < CURVE_PRESETS[v] - 1e-9,
+        warned: r.warnings.some((w) => w.includes('Volatility flattened')),
+      }).toEqual({ v, flattened: v === 'very low', warned: v === 'very low' })
     }
   })
 
@@ -589,5 +599,7 @@ describe('the per-band slope floor', () => {
     const r = solveWeights(rows, T, { ...DEFAULT_TARGETS, rtp: 50 }, CURVE_PRESETS.medium)
     expect(statsOf(withWeights(r.weights), T).rtp).toBeCloseTo(50, 4)
     expect(r.warnings.some((w) => w.includes('ordering yielded'))).toBe(true)
+    // flattening bought nothing there, so the user's curvature comes back
+    expect(r.curveUsed).toBe(CURVE_PRESETS.medium)
   })
 })

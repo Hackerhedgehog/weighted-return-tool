@@ -26,6 +26,8 @@ export interface SolveResult {
   /** Band position actually used, in [-1, 1]. 0 means chances landed on target. */
   bandUsed: number
   gamma: number
+  /** Curvature actually solved with — below the input `curve` when volatility flattened to keep the ladder in order. */
+  curveUsed: number
   warnings: string[]
 }
 
@@ -363,21 +365,53 @@ function curveBands(ctx: Ctx, budgets: number[], pooled: boolean): [number[], nu
  *
  *   -γ·u_i - c·u_i²  ≥  -γ·u_j - c·u_j²   ⟺   γ ≥ -c·(u_i + u_j)
  *
+ * Every consecutive pair has to hold, so the binding bound is the largest of
+ * them — and `-c·(u_i + u_j)` is least negative where the pair sits lowest.
+ * The bottom rung of a band constrains it; the rest follow.
+ *
  * A band that starts well up the ladder therefore tolerates a far flatter
- * slope than one starting at u = 0. That gap is the whole reason every
- * volatility preset survives: a blanket floor of 0 puts RTP 0.95 out of reach
- * at the two lowest presets, and flattening the curve to compensate collapses
- * them onto the same shape.
+ * slope than one starting at u = 0: band 2's lowest pair is 1.8x and 2x, five
+ * times further up than band 1's. That gap is why a blanket floor of 0 — which
+ * would put RTP 0.95 out of reach at the two lowest presets — is stricter than
+ * ordering actually needs.
  */
 function bandFloor(ctx: Ctx, idx: number[]): number {
   const order = [...idx].sort((a, b) => ctx.u[a] - ctx.u[b])
-  let floor = 0
+  let lowestPair = Infinity
   for (let k = 1; k < order.length; k++) {
     const a = ctx.u[order[k - 1]]
     const b = ctx.u[order[k]]
-    if (b > a) floor = Math.min(floor, -ctx.curve * (a + b))
+    if (b > a) lowestPair = Math.min(lowestPair, a + b)
   }
-  return floor
+  return Number.isFinite(lowestPair) ? -ctx.curve * lowestPair : 0
+}
+
+/**
+ * The steepest curvature no greater than the user's that still reaches the RTP
+ * target with the ladder in order, or null when even a straight line cannot.
+ *
+ * The slope floor is proportional to the curvature, so a heavy curve works
+ * against itself twice: it bends the tail down *and* pins the slope further
+ * from flat. Past a point the two together put the target out of ordered
+ * reach. Volatility ranks below ordering, so it is what gives — on the
+ * reference table only `very low` needs it, flattening 0.32 to 0.265.
+ */
+function fitCurve(ctx: Ctx, budgets: number[], target: number, pooled: boolean): number | null {
+  const reaches = (c: number) => {
+    const [min, max] = reachRange({ ...ctx, curve: c }, budgets, pooled)
+    return target >= min - 1e-12 && target <= max + 1e-12
+  }
+  if (reaches(ctx.curve)) return ctx.curve
+  if (!reaches(0)) return null
+
+  let lo = 0
+  let hi = ctx.curve
+  for (let k = 0; k < BISECTION_STEPS; k++) {
+    const mid = (lo + hi) / 2
+    if (reaches(mid)) lo = mid
+    else hi = mid
+  }
+  return lo
 }
 
 /** Continuous (pre-rounding) weights for a given band position and slope. */
@@ -619,6 +653,7 @@ export function solveWeights(
     achieved: statsOf(rows, totalWeight),
     bandUsed: 0,
     gamma: 0,
+    curveUsed: targets.useVolatility ? curve : 0,
     warnings: [],
   }
   if (rows.length === 0 || !(totalWeight > 0)) return empty
@@ -714,18 +749,28 @@ export function solveWeights(
     return { s: 0, budgets, conflict, reachable: reaches(budgets) }
   }
 
-  // Ordering ranks above the chance preferences but below the RTP target, so
-  // when no band position reaches the target with the ladder in order, the
-  // ladder is what gives — and the search runs again without it. Flattening
-  // the curve is not an alternative: a heavier curve lowers band 2's floor and
-  // therefore *raises* the ceiling, so flattening would move the target
-  // further away.
+  // The ranking decides what gives when the target is out of ordered reach:
+  // volatility ranks below ordering, so the curve flattens first; only when
+  // even a straight line cannot reach the target does the ladder itself yield,
+  // and then the user's curvature comes back, since flattening it bought
+  // nothing.
   let solveCtx = ctx
   let chosen = chooseBand(ctx)
-  const orderedReach = chosen.reachable
-  if (!orderedReach) {
-    solveCtx = { ...ctx, ordered: false }
-    chosen = chooseBand(solveCtx)
+  let curveUsed = ctx.curve
+  let orderYielded = false
+
+  if (!chosen.reachable) {
+    const flat = fitCurve(ctx, chosen.budgets, targets.rtp, pooled)
+    const flattened = flat === null ? null : chooseBand({ ...ctx, curve: flat })
+    if (flat !== null && flattened !== null && flattened.reachable) {
+      solveCtx = { ...ctx, curve: flat }
+      chosen = flattened
+      curveUsed = flat
+    } else {
+      solveCtx = { ...ctx, ordered: false }
+      chosen = chooseBand(solveCtx)
+      orderYielded = true
+    }
   }
 
   const gamma = solveGamma(solveCtx, chosen.budgets, targets.rtp, pooled)
@@ -752,7 +797,12 @@ export function solveWeights(
     }
   }
 
-  if (!orderedReach) {
+  if (curveUsed < ctx.curve - 1e-9) {
+    warnings.push(
+      `Volatility flattened (curve ${ctx.curve} → ${curveUsed.toFixed(3)}) to keep weights ordered by payout while hitting RTP ${targets.rtp}.`,
+    )
+  }
+  if (orderYielded) {
     warnings.push(
       `Weights could not be kept in payout order at RTP ${targets.rtp} — ordering yielded to the RTP target.`,
     )
@@ -783,7 +833,7 @@ export function solveWeights(
     outOfBand('win chance', achieved.winChance, targets.winChance)
   }
 
-  return { weights, achieved, bandUsed: chosen.s, gamma, warnings }
+  return { weights, achieved, bandUsed: chosen.s, gamma, curveUsed, warnings }
 }
 
 /**
