@@ -148,8 +148,12 @@ Let `ladder` be the unlocked rows with `payout > 0` sorted by payout ascending.
 
 - **Ordered:** for any two ladder rows with `payout_i < payout_j`,
   `w_i >= w_j`. Equal payouts are unconstrained relative to each other.
-- **Dominant residual:** if a residual bucket exists, its weight is `>=` every
-  ladder weight — i.e. it is the largest weight in the table.
+- **Dominant residual:** if an unlocked residual bucket exists, its weight is
+  `>=` every ladder weight. Note what that does *not* say: the residual's
+  zero-payout siblings are not on the ladder and are not ordered against it, so
+  a table with hand-set tease weights can leave one of them heavier. On a normal
+  table the zero-group split (below) makes the residual the heaviest bucket
+  anyway, but that is the split's doing, not this invariant's.
 
 The **residual** is the zero-payout row whose label, trimmed and lowercased, is
 exactly `0x`; failing that, the zero-payout row whose label contains `0x` as a
@@ -442,7 +446,7 @@ vitest, in the style of the existing suites.
 - **ordering:** across the full matrix (five volatility presets x a range of RTP
   targets x steps 1/10/100), the unlocked positive ladder is non-increasing —
   the direct regression test for all three break classes above
-- the residual is the largest weight in the table whenever one exists
+- an unlocked residual outweighs every unlocked positive-payout bucket
 - every volatility preset hits RTP 0.95 exactly with no band's curve rising —
   the existing `monotonically thins the big-payout tail` test keeps its strict
   inequality, at 878 / 764 / 581 / 328 / 172

@@ -13,7 +13,7 @@
 - Spec: `docs/superpowers/specs/2026-08-11-ordered-weights-and-group-collapse-design.md`. Read it before starting.
 - Target ranking, most important to maintain first: **locks → target RTP → payout ordering → volatility → hit chance → win chance**. Every time a target yields, push a named warning onto `SolveResult.warnings`.
 - Ordering invariant, over **unlocked rows with `payout > 0`** sorted by payout ascending: weight never rises. Equal payouts are unconstrained against each other. Locked rows are never moved or reordered.
-- Residual invariant: if a residual bucket exists it holds the largest weight in the table. Zero-payout buckets other than the residual are exempt from ordering.
+- Residual invariant: if an unlocked residual bucket exists, it weighs at least as much as every unlocked bucket with a positive payout. Its zero-payout siblings are *not* ordered against it — their share comes from the zero-group split — so on a table with hand-set tease weights one of them may legitimately be heavier.
 - The weight floor applies to **unlocked** rows only. A locked 0 stays 0.
 - Run `npm run test:run` and `npm run lint` before every commit. Both must be clean.
 - Comments explain *why*, never *what* — match the existing density in `distribute.ts`. No comment restates the line below it.
@@ -1514,14 +1514,18 @@ Replace the existing block comment at the top of the file (the one beginning `We
  * The targets are over-constrained, so they are resolved by rank — most
  * important to maintain first:
  *
- *  1. Locked weights are absolute — never touched, never reordered, and a lock
- *     that breaks the payout ladder is reported rather than moved.
+ *  1. Locked weights are absolute — never touched and never reordered. A lock
+ *     that breaks the payout ladder is reported rather than moved, though only
+ *     while the ladder is being kept at all (see 3).
  *  2. RTP is hit exactly (to integer-weight granularity) by solving the slope
  *     of the weight curve.
- *  3. Ordering: every unlocked bucket holds at least one weight step, weight
- *     never rises as payout rises, and the residual `0x` bucket is the largest
- *     weight in the table. Equal payouts are unconstrained against each other,
- *     which is what keeps the tease buckets free to sit below the ladder.
+ *  3. Ordering: every unlocked bucket holds at least one weight step, and
+ *     weight never rises as payout rises. Equal payouts are unconstrained
+ *     against each other, which is what keeps the tease buckets free to sit
+ *     below the ladder — and is also why the residual `0x` bucket is held above
+ *     every unlocked *paying* bucket rather than above the whole table: its
+ *     zero-payout siblings are not ordered against it. Locks outrank all of
+ *     this, so a lock heavy enough to outweigh the residual stays where it is.
  *  4. Volatility shapes whatever freedom is left, as curvature of that curve.
  *  5. Hit chance, then 6. win chance, are satisfied *structurally*, by deciding
  *     how much total weight each payout group receives. They are preferences
@@ -1574,11 +1578,16 @@ actually helps: an RTP target that is unreachable either way keeps the ladder
 and simply reports the miss.
 
 Zero-payout buckets are exempt from ordering against each other, which is what
-lets a tease bucket sit below the top paying bucket. The one exception is the
-residual — the bucket labelled `0x` — which always holds the table's largest
-weight. On a table with no weights yet it takes 80% of the zero-payout mass and
-the teases split the rest; once those buckets carry weights of their own,
-Auto-Distribute preserves their balance instead.
+lets a tease bucket sit below the top paying bucket. The residual — the bucket
+labelled `0x` — is held above every unlocked *paying* bucket, which on a normal
+table makes it the heaviest thing in it. On a table with no weights yet it takes
+80% of the zero-payout mass and the teases split the rest; once those buckets
+carry weights of their own Auto-Distribute preserves their balance instead, so a
+hand-set tease can legitimately end up heavier than the residual.
+
+Locks outrank all of this, so none of it is promised against them: a lock heavy
+enough to outweigh the residual, or to sit out of order on the ladder, stays
+exactly where you put it. Where the solver can tell, it says so in a notice.
 
 Ordering is Auto-Distribute's guarantee specifically. Typing into the totals
 row's RTP cell reshapes the table too, and it orders each payout group as it
