@@ -91,7 +91,7 @@ also parse, for pastes that came from somewhere other than a TSV.
 ID	Avg Payout 	Label	Weights	Weighted Value	Chance
 0	1000	joker5-maxwin	200	0.1666180697	0.0001666180697
 …
-18	0.00	0x	0	0	0
+18	0	0x	550000	0	0.4581996918
 ```
 
 Header, then one row per bucket in the table's current sort order — no totals
