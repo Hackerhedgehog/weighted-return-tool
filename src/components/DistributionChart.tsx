@@ -7,7 +7,7 @@ import { fmtPayout, fmtPct, fmtRtp, fmtWeight } from '../lib/format'
 import { ChartReadout, type ReadoutStat, type ReadoutTitle } from './ChartReadout'
 import { ChartValueEntry, type ValueEntryTarget } from './ChartValueEntry'
 import { ChartResizeGrip } from './ChartResizeGrip'
-import { GroupBarChips } from './GroupBarChips'
+import { GroupChips } from './GroupChips'
 import { DIST_HEIGHT, linearBarWidth, logBarWidth, niceCeil, useContainerWidth } from './chartUtils'
 
 /**
@@ -15,7 +15,7 @@ import { DIST_HEIGHT, linearBarWidth, logBarWidth, niceCeil, useContainerWidth }
  *
  *  - bars are colored by bucket group (stacked segments when an aggregated
  *    bar spans groups) and can be dragged vertically to change a bucket's
- *    weight or chance. The chip row above the plot (`GroupBarChips`) doubles
+ *    weight or chance. The chip row above the plot (`GroupChips`) doubles
  *    as a legend and lets any group collapse into one solid bar instead of
  *    its buckets;
  *  - each group gets a handle on the right edge at the height of its total
@@ -486,10 +486,13 @@ export function DistributionChart({
         <span className="panel-hint">drag a bar or a group handle to reshape</span>
       </div>
 
-      <GroupBarChips
+      <GroupChips
         groups={grouping.groups}
-        groupBars={groupBars}
-        onGroupBars={(ids) => set({ groupBars: ids })}
+        selected={groupBars}
+        onSelected={(ids) => set({ groupBars: ids })}
+        label="Group bars"
+        titleOn={(n) => `Show ${n}'s buckets`}
+        titleOff={(n) => `Draw ${n} as one bar`}
       />
 
       <div className="chart-wrap" ref={containerRef}>

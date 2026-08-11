@@ -1,7 +1,7 @@
 // @vitest-environment jsdom
 import { describe, it, expect, afterEach, vi } from 'vitest'
 import { cleanup, fireEvent, render, screen } from '@testing-library/react'
-import { GroupBarChips } from './GroupBarChips'
+import { GroupChips } from './GroupChips'
 import { groupRows } from '../lib/groups'
 import type { BucketRow } from '../lib/types'
 
@@ -13,19 +13,22 @@ const rows: BucketRow[] = [
   { uid: 'c', bucketId: 2, payout: 8, label: 'bonus3', weight: 1, locked: false, groupId: 'bonus', weightId: '' },
 ]
 
-const renderChips = (groupBars: string[] = []) => {
-  const onGroupBars = vi.fn()
+const renderChips = (selected: string[] = []) => {
+  const onSelected = vi.fn()
   render(
-    <GroupBarChips
+    <GroupChips
       groups={groupRows(rows).groups}
-      groupBars={groupBars}
-      onGroupBars={onGroupBars}
+      selected={selected}
+      onSelected={onSelected}
+      label="Group bars"
+      titleOn={(n) => `Show ${n}'s buckets`}
+      titleOff={(n) => `Draw ${n} as one bar`}
     />,
   )
-  return { onGroupBars }
+  return { onSelected }
 }
 
-describe('GroupBarChips', () => {
+describe('GroupChips', () => {
   it('offers one chip per group that holds buckets', () => {
     renderChips()
     expect(screen.getAllByRole('button', { pressed: false }).map((b) => b.textContent)).toEqual([
@@ -41,26 +44,40 @@ describe('GroupBarChips', () => {
   })
 
   it('collapses a group when its chip is clicked', () => {
-    const { onGroupBars } = renderChips()
+    const { onSelected } = renderChips()
     fireEvent.click(screen.getByRole('button', { name: 'bonus' }))
-    expect(onGroupBars).toHaveBeenCalledWith(['bonus'])
+    expect(onSelected).toHaveBeenCalledWith(['bonus'])
   })
 
   it('expands a collapsed group when its chip is clicked again', () => {
-    const { onGroupBars } = renderChips(['wins', 'bonus'])
+    const { onSelected } = renderChips(['wins', 'bonus'])
     fireEvent.click(screen.getByRole('button', { name: 'bonus' }))
-    expect(onGroupBars).toHaveBeenCalledWith(['wins'])
+    expect(onSelected).toHaveBeenCalledWith(['wins'])
   })
 
   it('collapses every drawn group from All', () => {
-    const { onGroupBars } = renderChips()
+    const { onSelected } = renderChips()
     fireEvent.click(screen.getByRole('button', { name: 'All' }))
-    expect(onGroupBars).toHaveBeenCalledWith(['wins', 'bonus', 'zero'])
+    expect(onSelected).toHaveBeenCalledWith(['wins', 'bonus', 'zero'])
   })
 
   it('expands everything from None', () => {
-    const { onGroupBars } = renderChips(['wins', 'bonus'])
+    const { onSelected } = renderChips(['wins', 'bonus'])
     fireEvent.click(screen.getByRole('button', { name: 'None' }))
-    expect(onGroupBars).toHaveBeenCalledWith([])
+    expect(onSelected).toHaveBeenCalledWith([])
+  })
+
+  it('labels the row with whatever the caller calls it', () => {
+    render(
+      <GroupChips
+        groups={groupRows(rows).groups}
+        selected={[]}
+        onSelected={vi.fn()}
+        label="Collapse"
+        titleOn={(n) => `Show ${n}'s buckets`}
+        titleOff={(n) => `Collapse ${n} into one row`}
+      />,
+    )
+    expect(screen.getByText('Collapse')).toBeDefined()
   })
 })
