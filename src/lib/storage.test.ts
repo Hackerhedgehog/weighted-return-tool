@@ -188,4 +188,21 @@ describe('storage', () => {
     expect(loaded?.bankroll).toBeUndefined()
     expect(loaded?.chartHeightAuto).toBeUndefined()
   })
+
+  it('round-trips both y-zoom factors and rejects a non-numeric one', () => {
+    saveWorkspace({ ...workspace, simChartYZoom: 0.5, bankrollChartYZoom: 2 })
+    const loaded = loadWorkspace()
+    expect(loaded?.simChartYZoom).toBe(0.5)
+    expect(loaded?.bankrollChartYZoom).toBe(2)
+
+    store.set(STORAGE_KEY, JSON.stringify({ ...workspace, simChartYZoom: 'wide' }))
+    expect(loadWorkspace()).toBeNull()
+  })
+
+  it('accepts a workspace saved before the y-zoom factors existed', () => {
+    saveWorkspace(workspace)
+    const loaded = loadWorkspace()
+    expect(loaded?.simChartYZoom).toBeUndefined()
+    expect(loaded?.bankrollChartYZoom).toBeUndefined()
+  })
 })
