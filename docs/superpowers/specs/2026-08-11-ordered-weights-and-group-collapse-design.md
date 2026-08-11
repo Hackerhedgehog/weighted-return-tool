@@ -66,13 +66,15 @@ locks > chances (structural) > RTP > volatility. This design replaces it with:
 1. **Locks** — absolute, never touched.
 2. **Target RTP** — hit exactly, to integer-weight granularity.
 3. **Payout ordering** — see the invariants below.
-4. **Volatility** — curvature `c`; flattened when it fights ordering.
+4. **Volatility** — curvature `c`. It turns out never to be in conflict; see
+   Mechanism A.
 5. **Hit chance** — preference, with the existing tolerance band.
 6. **Win chance** — preference, with the existing tolerance band.
 
 When targets collide the solver yields in reverse rank order: win chance first,
-then hit chance, then volatility, and only breaks ordering when the RTP target
-is otherwise unreachable. Every yield emits a named warning.
+then hit chance, and only breaks ordering when the RTP target is otherwise
+unreachable. Every yield emits a named warning. Volatility never has to yield —
+the construction in Mechanism A keeps every setting usable.
 
 ## Design
 
@@ -160,42 +162,62 @@ export contradicts that: its teases hold ~15,000 against `green-two-only` at
 290,000. Zero-payout buckets draw their mass from hit chance and divide it by
 the split rule below; only the residual is held to an ordering constraint.
 
-#### Mechanism A — non-negative slope, with volatility yielding
+#### Mechanism A — a per-band slope floor
 
-`GAMMA_LO` becomes `0`, so `solveGamma` can never return a rising curve and
-each band is non-increasing by construction (`-gamma*u - c*u^2` has derivative
-`-gamma - 2*c*u <= 0` for `gamma >= 0`, `c >= 0`, `u >= 0`).
+A blanket `GAMMA_LO = 0` would keep every band non-increasing, but it is far
+stricter than ordering actually requires and it costs most of the volatility
+range (measured below). The real constraint is discrete, between *consecutive*
+buckets. For `u_i < u_j` the shape needs
 
-Clamping alone would put the RTP target out of reach at low volatility, and RTP
-outranks volatility. So when `reachRange` at `gamma >= 0` does not contain the
-target, the solver bisects the curvature `c` over `[0, curve]` for the largest
-`c` that brings the target back into reach, and reports it:
+```
+-gamma*u_i - c*u_i^2  >=  -gamma*u_j - c*u_j^2   <=>   gamma >= -c * (u_i + u_j)
+```
 
-> Volatility flattened (curve 0.32 → 0.14) to keep weights ordered by payout
-> while hitting RTP 0.95.
+so each band has its own floor, derived from its own ladder and the curvature:
 
-`c = 0, gamma = 0` is uniform-within-band, which on the reference ladder reaches
-RTP ≈ 15.7 — far above any realistic target — so this fallback effectively
-always succeeds. If it does not, `GAMMA_LO` reverts to `-40` for that solve and
-the tool says ordering was spent:
+```ts
+/** Smallest gamma that keeps this band non-increasing. Never positive. */
+function bandFloor(ctx: Ctx, idx: number[]): number
+```
 
-> Weights could not be kept in payout order at RTP 5.0 — ordering yielded to the
+`solveGamma` keeps bisecting one shared `gamma`, and `continuousWeights` clamps
+it per band with `Math.max(gamma, bandFloor(ctx, idx))`. RTP stays monotone in
+`gamma` across the clamped range, so the bisection is unchanged.
+
+The floors differ sharply because band 2 starts well up the ladder (`u` at 1.8x
+is 1.695) while band 1 starts at `u = 0`. Measured on the reference table at
+hit 0.3 / win 0.12:
+
+| preset | curve | band 1 floor | band 2 floor | max RTP at `gamma >= 0` | max RTP at the per-band floor |
+|---|---|---|---|---|---|
+| very low | 0.32 | −0.191 | −4.993 | 0.444 | 56.62 |
+| low | 0.18 | −0.108 | −2.809 | 0.684 | 46.01 |
+| medium | 0.09 | −0.054 | −1.404 | 1.618 | 34.02 |
+| high | 0.035 | −0.021 | −0.546 | 5.648 | 23.30 |
+| very high | 0 | 0 | 0 | 15.70 | 15.70 |
+
+A blanket floor of 0 puts RTP 0.95 out of reach at both `low` and `very low`,
+and the only repair — flattening the curve — collapses **both** presets onto the
+same effective curvature of 0.133, making two of the five settings identical.
+The per-band floor keeps every preset intact at RTP 0.95 with no flattening at
+all, and the tail (payout ≥ 100x) stays strictly graded across them: 878, 764,
+581, 328, 109 from `very high` down to `very low`.
+
+**Volatility is therefore not a lever for RTP reach, and no flattening
+mechanism is built.** The band 2 floor is proportional to `c`, so a heavier
+curve permits a *flatter* band 2 and reaches a *higher* RTP — flattening the
+curve lowers the ceiling rather than raising it. There is nothing for
+volatility to yield, so when a target exceeds the ceiling in the last column,
+ordering yields directly: the floor drops to `-40` for that solve and the tool
+says so.
+
+> Weights could not be kept in payout order at RTP 50 — ordering yielded to the
 > RTP target.
 
-The flattened curve is returned as `SolveResult.curveUsed` and reported in the
-notices. It is **not** written back into `doc.curve`: the volatility control
-keeps showing what the user chose, and the notice explains what was used.
-
-`reachRange` bisects between `GAMMA_HI` and `GAMMA_LO`, so raising the floor to
-0 also narrows the range the *band search* tests for reachability — the search
-and the solve stay consistent for free. The band search keeps its current job
-(spend chance tolerance only when RTP is otherwise out of reach) and runs before
-the ordering loop; curvature flattening is the second lever, tried only when
-spending the band was not enough. This orders the two RTP levers chances-first,
-volatility-second, which is the reverse of their rank — a deliberate
-simplification, since the ±3.5% band moves RTP reach far less than curvature
-does and threading both through one search would double the solve's cost for a
-case that barely arises.
+`reachRange` bisects between `GAMMA_HI` and the floor, so the *band search*
+tests reachability against the same clamped range the solve will use — search
+and solve stay consistent for free, and the band search keeps its current job
+of spending chance tolerance only when RTP is otherwise out of reach.
 
 #### Mechanism B — no upward jump at the band boundary
 
@@ -255,7 +277,7 @@ Two changes downstream of the continuous solve:
 Order of operations inside `solveWeights` becomes:
 
 ```
-band search  ->  [ solveGamma (gamma >= 0, flatten c if needed)
+band search  ->  [ solveGamma (clamped per band by bandFloor)
                    -> continuousWeights
                    -> check boundary jump / residual dominance
                    -> shift budgets and repeat ]  x ORDER_ROUNDS
@@ -386,8 +408,11 @@ vitest, in the style of the existing suites.
   targets x steps 1/10/100), the unlocked positive ladder is non-increasing —
   the direct regression test for all three break classes above
 - the residual is the largest weight in the table whenever one exists
-- low volatility at RTP 0.95 hits RTP exactly, stays ordered, and reports a
-  flattened curve in `curveUsed` plus its warning
+- every volatility preset still hits RTP 0.95 exactly, stays ordered, and warns
+  about nothing — the existing `monotonically thins the big-payout tail` test
+  keeps its strict inequality
+- an RTP target above the ceiling (50 on the reference table) still solves, and
+  reports that ordering yielded
 - hit chance = win chance produces an ordered ladder, a win-chance-yielded
   warning, and no generic band warning for win chance
 - hit chance 0.9 clamps, stays ordered, and reports hit chance yielding
@@ -436,7 +461,8 @@ rule, and the table-collapse control; the ranking comment at the head of
 - Reordering or correcting locked rows.
 - Making `ZERO_RESIDUAL_SHARE` or the ordering rule user-configurable; both are
   constants with the rationale recorded above.
-- Writing the flattened curvature back into `doc.curve`.
+- Any mechanism that changes the user's curvature setting — Mechanism A shows
+  it would not help.
 - Marking the residual bucket explicitly as document data — it is detected from
   the label, like the group seeding heuristics.
 - Sharing collapse state between the table and the chart.
