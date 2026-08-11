@@ -1529,15 +1529,30 @@ Replace the existing block comment at the top of the file (the one beginning `We
  *     otherwise unreachable, and the masses themselves are overridden when
  *     ordering demands it.
  *
- * Steps 2 and 4 do not collide because slope and curvature are different basis
- * functions: `share ∝ exp(−γ·u − c·u²)` with `u = ln(payout) − ln(pMin)`.
- * Solving γ for RTP leaves c — and therefore the volatility setting — intact.
+ * Steps 2 and 4 do not collide: slope and curvature are different basis
+ * functions in `share ∝ exp(−γ·u − c·u²)`, `u = ln(payout) − ln(pMin)`, so
+ * solving γ for RTP leaves c — and therefore the volatility setting — intact.
  *
- * Nor do 3 and 4, which is less obvious. Ordering constrains γ from below, and
- * that floor is `−c·(u_i + u_j)` per band — proportional to the curvature. A
- * heavier curve therefore permits a *flatter* band and reaches a higher RTP, so
- * volatility never has to yield to ordering and there is no mechanism for it
- * to. See `bandFloor`.
+ * Steps 3 and 4 do collide, and the rank decides it. Ordering constrains γ from
+ * below, band by band, at `−c·(u_i + u_j)` over the band's *lowest* consecutive
+ * pair — the one that binds hardest (see `bandFloor`). Past a certain curvature
+ * that floor and the thinned tail together put the RTP target out of ordered
+ * reach, so `fitCurve` flattens the curvature until the target is back inside
+ * it, and the solve says so. Only when even a straight line falls short does
+ * ordering itself yield — and then only if abandoning it actually brings the
+ * target into reach, since giving up the ladder for a target that is missed
+ * either way buys nothing.
+ *
+ * The integer stage carries the same invariants the continuous one does.
+ * `allocate`'s rounding is blind to the ladder, so `enforceOrder` re-sorts it
+ * and `restoreResidual` gives the residual back what the zero group's own
+ * weight floor took off it. `repairRtp` then recovers the RTP that costs, under
+ * a guard that refuses any transfer which would put the ladder back out of
+ * order.
+ *
+ * All three are switched off together once ordering has yielded: the two
+ * repairs would be meaningless, and the guard would read the solve's deliberate
+ * inversions as damage and veto every move that could reach the target.
  */
 ```
 
@@ -1554,8 +1569,9 @@ that works.
 Weights also come out ordered: walking up the payout ladder, weight never
 rises. Ordering outranks both chance targets, so a table whose targets cannot
 be met in order has its chances moved instead, and the notice says which one
-gave way. It does *not* outrank RTP: an RTP target beyond what an ordered
-ladder can reach is still met, with a notice that ordering was spent.
+gave way. It does *not* outrank RTP — but it is only given up when giving it up
+actually helps: an RTP target that is unreachable either way keeps the ladder
+and simply reports the miss.
 
 Zero-payout buckets are exempt from ordering against each other, which is what
 lets a tease bucket sit below the top paying bucket. The one exception is the
@@ -1563,16 +1579,22 @@ residual — the bucket labelled `0x` — which always holds the table's largest
 weight. On a table with no weights yet it takes 80% of the zero-payout mass and
 the teases split the rest; once those buckets carry weights of their own,
 Auto-Distribute preserves their balance instead.
+
+Ordering is Auto-Distribute's guarantee specifically. Typing into the totals
+row's RTP cell reshapes the table too, and it orders each payout group as it
+goes, but reaching the figure you typed wins there when the two disagree.
 ```
 
 Under `### Volatility`, add a closing paragraph:
 
 ```markdown
-Volatility never has to be given up to keep weights ordered. The ordering
-constraint puts a floor under the curve's slope, and that floor is proportional
-to the curvature — so a heavier curve permits a flatter band and reaches a
-*higher* RTP, not a lower one. All five presets remain usable at any reachable
-RTP target.
+Volatility is the first thing spent when it conflicts with keeping weights
+ordered. The ordering constraint puts a floor under the curve's slope, and that
+floor is proportional to the curvature, so a heavy curve works against itself
+twice: it thins the tail *and* pins the slope further from flat. Past a point
+the two together put the RTP target out of reach with the ladder in order. On
+the reference table that happens at `very low` alone, which flattens from 0.32
+to 0.265 and says so in a notice; the other four presets are untouched.
 ```
 
 - [ ] **Step 3: Verify the docs match the code**
