@@ -1228,7 +1228,7 @@ input.gcell.editing {
 }
 
 .legend-line.cumulative {
-  border-color: var(--series-0);
+  border-color: var(--danger);
 }
 
 .legend-line.expected {
@@ -1265,7 +1265,7 @@ input.gcell.editing {
 
 .sim-cum-path {
   fill: none;
-  stroke: var(--series-0);
+  stroke: var(--danger);
   stroke-width: 2;
   stroke-linejoin: round;
   stroke-linecap: round;
