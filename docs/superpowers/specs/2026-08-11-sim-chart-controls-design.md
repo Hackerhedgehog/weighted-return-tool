@@ -1,10 +1,10 @@
-# Simulation chart Y-zoom, RTP-so-far color, and forced chart stacking
+# Simulation chart Y-zoom, RTP-so-far color, forced stacking, and totals-free export
 
 Date: 2026-08-11
 
 ## Problem
 
-Three independent requests:
+Four independent requests:
 
 1. Both simulation charts (`SimChart`'s convergence view, `BankrollChart`'s
    balance view) auto-fit their y-axis to the data. There is no way to zoom in
@@ -18,6 +18,9 @@ Three independent requests:
    side by side (`bb2094b`, `129121e`). There is no way to force that wrap —
    e.g. to get a wider distribution chart — while the window is still wide
    enough to fit both.
+4. `buildTsv` (`src/lib/exportTsv.ts`) always appends a totals row (blank
+   first three fields, then total weight/weighted-value/chance) after the
+   bucket rows. The export should carry buckets only.
 
 ## Design
 
@@ -130,7 +133,33 @@ produces the same differing `offsetTop`s a narrow-viewport wrap would, so
 independent classes doing independent jobs (force the wrap vs. center the
 table once wrapped) and never need to coordinate.
 
-### 4. State and persistence
+### 4. Export: drop the totals row
+
+`buildTsv` stops appending the totals line entirely — it becomes header +
+one line per bucket, nothing else. The `totalValue`/`totalChance` reduces and
+the `totals` array that build that last line are deleted; `totalWeight`
+becomes unused as a *totals-row* input (it stays a parameter — `valueOf`/
+`chanceOf` still divide by it per bucket).
+
+This is an intentional, visible change to the exported file's shape, not a
+side effect: `exportTsv.test.ts`'s acceptance test currently asserts
+`buildTsv(...)` reproduces `example-output-data.tsv` **byte for byte**,
+including that file's own trailing totals line. `example-output-data.tsv` is
+the engine's reference export, not something this change should edit — it
+documents what the engine itself once produced. So the acceptance test
+changes to compare against the reference **minus its last line**, and the
+dedicated totals-row test (`'writes the totals row with three empty leading
+fields'`) is replaced with one asserting the row is simply absent. The
+line-count assertion in `'uses CRLF line endings with no trailing newline'`
+drops from 32 to 31, and the weight-id test's comment/assertion about "the
+totals row" (there is no `lines[3]` once there's no totals row for a
+two-bucket table) is corrected to match.
+
+The on-screen totals row in `BucketTable.tsx` (`.totals-row`, the editable
+"Total weight / RTP" row at the bottom of the grid) is untouched — it is
+interactive UI, not exported data, and this change only touches `buildTsv`.
+
+### 5. State and persistence
 
 Per the earlier discussion: the zoom factors persist (like `chartHeight`),
 the force-stack toggle persists (it already lives in the persisted `chart`
@@ -175,9 +204,12 @@ vitest + jsdom, in the style of the existing chart tests.
 
 - zoom changes the tick labels' `yMax` the same way
 
-`App.test.tsx` already exercises `.content-row` / `.stacked` (see the
-`rowRef` test around line 501 of that file): add a case there that toggling
-`forceStack` adds `.force-stack` and, once the DOM reflows, `.stacked`.
+`App.test.tsx` has a `page layout` suite asserting `.content-row`'s children
+(`git grep -n "page layout" src/App.test.tsx`); add a case there that
+clicking the new toggle adds `.force-stack` to `.content-row` and flips the
+button's `aria-pressed`. jsdom does not compute real layout, so `rowRef`'s
+`offsetTop`-based `.stacked` detection is untestable here and stays
+unexercised by this change, same as today.
 
 `storage`:
 
@@ -186,6 +218,16 @@ vitest + jsdom, in the style of the existing chart tests.
   `forceStack` `false`)
 - a non-numeric zoom or non-boolean `forceStack` is rejected by `isWorkspace`
 
+`exportTsv`:
+
+- the acceptance test compares against `example-output-data.tsv` with its
+  trailing totals line stripped
+- a new test asserts the last line of `buildTsv(...)` is the last bucket's
+  own line, not a totals line, for a small fixed input
+- the CRLF/line-count test expects 31 lines (header + 30 buckets), not 32
+- the weight-id trailing-column test's "totals row" assertion is corrected
+  to check the last *bucket* row instead
+
 ## Out of scope
 
 - Persisting zoom or force-stack per-workspace-*file* rather than per-browser
@@ -193,3 +235,6 @@ vitest + jsdom, in the style of the existing chart tests.
 - Zoom or pan on the x-axis.
 - Changing `BankrollChart`'s lack of a "clipped" note — no note is added for
   it in this pass.
+- Editing `example-output-data.tsv` — it is the engine's own reference file,
+  not this tool's output, and stays as-is.
+- Any change to the on-screen editable totals row in `BucketTable.tsx`.
