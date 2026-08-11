@@ -313,7 +313,7 @@ describe('App', () => {
       game: 'joker-stacks-magic',
       tsv: '0\t1000.00\tjoker5-maxwin\n',
     }
-    const fetchMock = vi.fn((url: string, _init?: RequestInit) => {
+    const fetchMock = vi.fn((url: string) => {
       if (url === '/__bridge/session') {
         return Promise.resolve({
           ok: true,
