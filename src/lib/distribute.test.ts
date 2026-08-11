@@ -4,6 +4,7 @@ import { parseTsv } from './parse'
 import {
   groupOf,
   largestRemainder,
+  minTotalWeight,
   rescaleToTotal,
   residualIndex,
   retargetRtp,
@@ -402,6 +403,49 @@ describe('solveWeights with a weight step', () => {
       if (!row.locked) expect(r.weights[i] % 100).toBe(0)
     })
     expect(r.warnings).toHaveLength(0)
+  })
+})
+
+describe('the minimum weight floor', () => {
+  it('leaves no unlocked bucket on zero when a group has no mass', () => {
+    const flat = { ...DEFAULT_TARGETS, hitChance: 0.12, winChance: 0.12 }
+    const r = solveWeights(rows, T, flat, CURVE_PRESETS.medium)
+    expect(Math.min(...r.weights)).toBeGreaterThanOrEqual(1)
+    expect(sum(r.weights)).toBe(T)
+  })
+
+  it('gives every unlocked bucket a full step when the step is coarse', () => {
+    const r = solveWeights(rows, 10_000, DEFAULT_TARGETS, CURVE_PRESETS.medium, 100)
+    expect(Math.min(...r.weights)).toBeGreaterThanOrEqual(100)
+    expect(sum(r.weights)).toBe(10_000)
+  })
+
+  it('refuses, naming a workable total, when the step cannot go round', () => {
+    const r = solveWeights(rows, 1_000, DEFAULT_TARGETS, CURVE_PRESETS.medium, 100)
+    expect(r.weights).toEqual(rows.map(() => 0))
+    expect(r.warnings).toHaveLength(1)
+    expect(r.warnings[0]).toContain('30 unlocked buckets')
+    expect(r.warnings[0]).toContain('3,000')
+  })
+
+  it('counts locked weight towards the workable total', () => {
+    const locked = rows.map((r, i) => (i === 0 ? { ...r, weight: 5_000, locked: true } : r))
+    expect(minTotalWeight(locked, 100)).toBe(5_000 + 29 * 100)
+    expect(minTotalWeight(rows, 1)).toBe(30)
+  })
+
+  it('leaves a locked zero weight on zero', () => {
+    const locked = rows.map((r, i) => (i === 0 ? { ...r, weight: 0, locked: true } : r))
+    const r = solveWeights(locked, T, DEFAULT_TARGETS, CURVE_PRESETS.medium)
+    expect(r.weights[0]).toBe(0)
+    expect(sum(r.weights)).toBe(T)
+  })
+
+  it('costs the chance targets nothing when every group clears its floor', () => {
+    const r = solveWeights(rows, 1_200_300, DEFAULT_TARGETS, CURVE_PRESETS.medium, 100)
+    const s = statsOf(withWeights(r.weights), 1_200_300)
+    expect(s.hitChance).toBeCloseTo(0.3, 4)
+    expect(s.winChance).toBeCloseTo(0.12, 4)
   })
 })
 

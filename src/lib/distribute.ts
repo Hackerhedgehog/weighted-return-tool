@@ -49,6 +49,24 @@ export function stepBlockWarning(free: number, lockedSum: number, step: number):
   return `Free weight ${fmt(free)} is not divisible by ${step} — set the total weight to ${fmt(lo)} or ${fmt(lo + step)}.`
 }
 
+/** Smallest total that holds the locks and still floors every unlocked row. */
+export function minTotalWeight(rows: BucketRow[], step: WeightStep = 1): number {
+  let locked = 0
+  let free = 0
+  for (const r of rows) {
+    if (r.locked) locked += Math.max(0, Math.round(r.weight))
+    else free += 1
+  }
+  return locked + free * step
+}
+
+/** Refusal naming the total that would fund one step per unlocked bucket. */
+export function floorBlockWarning(rows: BucketRow[], step: WeightStep, total: number): string {
+  const fmt = (n: number) => n.toLocaleString('en-US')
+  const free = rows.filter((r) => !r.locked).length
+  return `Total weight ${fmt(total)} cannot give all ${fmt(free)} unlocked buckets a weight of at least ${fmt(step)} — raise the total to at least ${fmt(minTotalWeight(rows, step))}, or lower the weight step.`
+}
+
 /**
  * Which unlocked bucket absorbs an indivisible remainder.
  *
@@ -265,30 +283,57 @@ function massesFor(targets: Targets, s: number, total: number): number[] {
 
 /**
  * Turn group masses into budgets for the unlocked buckets.
+ *
  * Locked weight is subtracted first; a group whose locks already overrun its
- * mass is clamped to zero and flagged. Whatever survives is rescaled so the
- * budgets always add up to exactly the unlocked total — otherwise the weights
- * would not sum to the grand total.
+ * mass is clamped to zero and flagged. Every unlocked bucket is then owed one
+ * step, so a group the chance targets leave empty still cannot starve its
+ * members — the floor has to be applied *to* the split rather than inside it,
+ * because a group with no mass gets no split to apply it in.
+ *
+ * The floor is a minimum, not a tax. A group already clearing one step per
+ * bucket keeps its mass share untouched, which is the normal case and what
+ * keeps the chance targets landing exactly; only a group that cannot fund its
+ * own floor takes anything, and it comes from the slack of the groups that
+ * can. Reserving a flat `count x step` off the top instead would shift mass
+ * toward whichever group has the most buckets per unit of mass — on the
+ * reference table at step 100 that is the 23-bucket win group, and it drags
+ * hit chance from 0.300 to 0.301 for no reason at all.
  */
-function freeBudgets(ctx: Ctx, masses: number[]): { budgets: number[]; conflict: boolean } {
+function freeBudgets(
+  ctx: Ctx,
+  masses: number[],
+  step: number,
+): { budgets: number[]; conflict: boolean } {
   const free = Math.max(0, ctx.total - ctx.totalLocked)
   const raw = [0, 1, 2].map((g) => masses[g] - ctx.lockedSum[g])
   const conflict = raw.some((v) => v < -0.5)
 
-  const budgets = raw.map((v, g) => (ctx.freeIdx[g].length === 0 ? 0 : Math.max(0, v)))
-  const sum = budgets.reduce((a, b) => a + b, 0)
-
-  if (sum > 0) {
-    const k = free / sum
-    return { budgets: budgets.map((v) => v * k), conflict }
-  }
-
-  // No group can take weight by mass. Spread by unlocked bucket count so the
-  // total still balances.
   const counts = [0, 1, 2].map((g) => ctx.freeIdx[g].length)
   const totalCount = counts.reduce((a, b) => a + b, 0)
   if (totalCount === 0) return { budgets: [0, 0, 0], conflict }
-  return { budgets: counts.map((c) => (free * c) / totalCount), conflict }
+
+  const shares = raw.map((v, g) => (counts[g] === 0 ? 0 : Math.max(0, v)))
+  const sum = shares.reduce((a, b) => a + b, 0)
+  // No group can take weight by mass. Spread by unlocked bucket count so the
+  // total still balances.
+  const base =
+    sum > 0 ? shares.map((v) => (v / sum) * free) : counts.map((c) => (free * c) / totalCount)
+
+  const reserve = counts.map((c) => c * step)
+  const need = base.map((b, g) => Math.max(0, reserve[g] - b))
+  const shortfall = need.reduce((a, b) => a + b, 0)
+  if (shortfall <= 0) return { budgets: base, conflict }
+
+  const slack = base.map((b, g) => Math.max(0, b - reserve[g]))
+  const totalSlack = slack.reduce((a, b) => a + b, 0)
+  // `solveWeights` refuses before reaching here when the free weight cannot
+  // cover every reserve, which is exactly the condition that guarantees
+  // `totalSlack >= shortfall`.
+  if (!(totalSlack > 0)) return { budgets: reserve, conflict }
+  return {
+    budgets: base.map((b, g) => b + need[g] - (slack[g] / totalSlack) * shortfall),
+    conflict,
+  }
 }
 
 /**
@@ -413,6 +458,19 @@ function allocate(ctx: Ctx, cont: number[], step: number): number[] {
 
   const groupSums = active.map((g) => ctx.freeIdx[g].reduce((a, i) => a + cont[i], 0))
   const groupBudgets = largestRemainder(groupSums, free, false, step)
+
+  // Rounding to the step can shave a group below the reserve it was budgeted
+  // for. Top it back up from whichever group still has slack — `freeBudgets`
+  // guarantees the free weight covers every reserve, so one does.
+  const need = active.map((g) => ctx.freeIdx[g].length * step)
+  for (let k = 0; k < active.length; k++) {
+    for (let j = 0; j < active.length && groupBudgets[k] < need[k]; j++) {
+      if (j === k) continue
+      const take = Math.min(need[k] - groupBudgets[k], Math.max(0, groupBudgets[j] - need[j]))
+      groupBudgets[j] -= take
+      groupBudgets[k] += take
+    }
+  }
 
   active.forEach((g, k) => {
     const idx = ctx.freeIdx[g]
@@ -547,6 +605,13 @@ export function solveWeights(
   }
 
   const freeWeight = Math.round(ctx.total - ctx.totalLocked)
+  const freeCount = ctx.freeIdx.reduce((a, g) => a + g.length, 0)
+  // An indivisible remainder is parked on one bucket *on top of* its floor, so
+  // it is the divisible part that has to fund them all.
+  if (freeWeight - (freeWeight % step) < freeCount * step) {
+    return { ...empty, warnings: [floorBlockWarning(rows, step, Math.round(totalWeight))] }
+  }
+
   const remainder = freeWeight % step
   if (remainder !== 0) {
     // Solve the divisible part and park the leftover on one bucket, so the
@@ -590,7 +655,7 @@ export function solveWeights(
 
   if (pooled) {
     // Nothing to search: with no chance targets there is no band to spend.
-    const { budgets, conflict } = freeBudgets(ctx, currentMasses(ctx, targets))
+    const { budgets, conflict } = freeBudgets(ctx, currentMasses(ctx, targets), step)
     const [min, max] = reachRange(ctx, budgets, true)
     chosen = {
       s: 0,
@@ -601,7 +666,7 @@ export function solveWeights(
   }
 
   for (const s of chosen !== null ? [] : bandCandidates()) {
-    const { budgets, conflict } = freeBudgets(ctx, massesFor(targets, s, totalWeight))
+    const { budgets, conflict } = freeBudgets(ctx, massesFor(targets, s, totalWeight), step)
     const [min, max] = reachRange(ctx, budgets)
     const reachable = targets.rtp >= min - 1e-12 && targets.rtp <= max + 1e-12
     const candidate: Candidate = { s, budgets, conflict, reachable }
@@ -618,7 +683,7 @@ export function solveWeights(
     if (fallback !== null) {
       chosen = fallback
     } else {
-      const { budgets, conflict } = freeBudgets(ctx, massesFor(targets, 0, totalWeight))
+      const { budgets, conflict } = freeBudgets(ctx, massesFor(targets, 0, totalWeight), step)
       const [min, max] = reachRange(ctx, budgets)
       chosen = {
         s: 0,
