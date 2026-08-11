@@ -509,7 +509,7 @@ git commit -m "feat: keep every unlocked bucket above zero when rescaling the to
 
 **Interfaces:**
 - Consumes: `Ctx` from Task 1.
-- Produces: `Ctx` gains `ordered: boolean`. Tasks 5 and 6 read it, and construct `{ ...ctx, ordered: false }` for the unordered fallback. Test helpers `ladderOf` and `inversions` (added in Step 1) are reused by Tasks 5 and 6.
+- Produces: `Ctx` gains `ordered: boolean`. Tasks 5 and 6 read it, and construct `{ ...ctx, ordered: false }` for the unordered fallback. The `chooseBand(c: Ctx): Candidate` helper inside `solveWeights` — Task 5 keeps calling it. The `ladderOf` test helper (added in Step 1) is reused by Tasks 5 and 6.
 
 **Background:** `solveGamma` bisects over `[-40, 40]`. Reaching the RTP target under heavy curvature drives `gamma` negative and `exp(-gamma*u - c*u^2)` then rises with payout — `0.33x:73,864` against `0.6x:142,199` at `very low` volatility.
 
@@ -517,27 +517,15 @@ The fix is **not** a blanket `gamma >= 0`. Ordering is a condition between conse
 
 - [ ] **Step 1: Write the failing tests**
 
-Add these helpers near the top of `src/lib/distribute.test.ts`, below `const sum = ...`:
+Add this helper near the top of `src/lib/distribute.test.ts`, below `const sum = ...`. Task 5 uses it too; Task 6 adds a second helper beside it.
 
 ```ts
-/** The unlocked-agnostic payout ladder, lowest payout first. */
+/** The payout ladder, lowest payout first. */
 const ladderOf = (rs: BucketRow[], w: number[]) =>
   rs
     .map((r, i) => ({ p: r.payout, label: r.label, w: w[i] }))
     .filter((e) => e.p > 0)
     .sort((a, b) => a.p - b.p)
-
-/** Every place a higher payout carries more weight than a lower one. */
-const inversions = (rs: BucketRow[], w: number[]): string[] => {
-  const l = ladderOf(rs, w)
-  const bad: string[] = []
-  for (let k = 1; k < l.length; k++) {
-    if (l[k].p > l[k - 1].p && l[k].w > l[k - 1].w) {
-      bad.push(`${l[k - 1].p}x=${l[k - 1].w} < ${l[k].p}x=${l[k].w}`)
-    }
-  }
-  return bad
-}
 ```
 
 Then add the suite:
@@ -632,17 +620,59 @@ In `continuousWeights`, clamp inside the band loop:
 
 Add `ordered: boolean` to the `Ctx` interface and `ordered: true` to `buildCtx`'s return.
 
-In `solveWeights`, after `chosen` is settled and before the gamma solve, pick the context:
+The band-position search must now run **once per ordering regime**, because the two regimes have different ceilings: a position that reaches the target with the ladder in order is rarely the position that reaches it without. Picking a position under the ordered ceiling and then solving unordered at that frozen position leaves the tolerance band unspent when it would have helped.
+
+Replace the whole band-search block in `solveWeights` — the `Candidate` interface stays; the `let chosen` / `let fallback` declarations, the `if (pooled)` block, the `for (const s of ...)` loop and the `if (chosen === null)` block all collapse into one reusable function:
 
 ```ts
+  /**
+   * The band position to solve at: the least tolerance spent that puts the RTP
+   * target in reach, or — when nothing does — the first lock-clean position.
+   *
+   * Ordering outranks the chance preferences, so the ordered pass gets first
+   * refusal on the band; only when no position reaches the target in order
+   * does the caller run this again unordered, which is the pre-ordering search
+   * exactly.
+   */
+  const chooseBand = (c: Ctx): Candidate => {
+    const reaches = (budgets: number[]) => {
+      const [min, max] = reachRange(c, budgets, pooled)
+      return targets.rtp >= min - 1e-12 && targets.rtp <= max + 1e-12
+    }
+
+    if (pooled) {
+      // Nothing to search: with no chance targets there is no band to spend.
+      const { budgets, conflict } = freeBudgets(c, currentMasses(c, targets), step)
+      return { s: 0, budgets, conflict, reachable: reaches(budgets) }
+    }
+
+    let fallback: Candidate | null = null
+    for (const s of bandCandidates()) {
+      const { budgets, conflict } = freeBudgets(c, massesFor(targets, s, totalWeight), step)
+      const candidate: Candidate = { s, budgets, conflict, reachable: reaches(budgets) }
+      if (!conflict && candidate.reachable) return candidate
+      // Locks are hard, so a lock-clean position beats an RTP-reachable one.
+      if (!conflict && fallback === null) fallback = candidate
+    }
+    if (fallback !== null) return fallback
+
+    const { budgets, conflict } = freeBudgets(c, massesFor(targets, 0, totalWeight), step)
+    return { s: 0, budgets, conflict, reachable: reaches(budgets) }
+  }
+
   // Ordering ranks above the chance preferences but below the RTP target, so
-  // when the target sits outside what an ordered ladder can reach, the ladder
-  // is what gives. Flattening the curve is not an alternative: a heavier curve
-  // lowers band 2's floor and therefore *raises* the ceiling, so flattening
-  // would move the target further away.
-  const [orderedMin, orderedMax] = reachRange(ctx, chosen.budgets, pooled)
-  const orderedReach = targets.rtp >= orderedMin - 1e-12 && targets.rtp <= orderedMax + 1e-12
-  const solveCtx: Ctx = orderedReach ? ctx : { ...ctx, ordered: false }
+  // when no band position reaches the target with the ladder in order, the
+  // ladder is what gives — and the search runs again without it. Flattening
+  // the curve is not an alternative: a heavier curve lowers band 2's floor and
+  // therefore *raises* the ceiling, so flattening would move the target
+  // further away.
+  let solveCtx = ctx
+  let chosen = chooseBand(ctx)
+  const orderedReach = chosen.reachable
+  if (!orderedReach) {
+    solveCtx = { ...ctx, ordered: false }
+    chosen = chooseBand(solveCtx)
+  }
 ```
 
 Use `solveCtx` for the `solveGamma`, `continuousWeights`, `allocate` and `repairRtp` calls that follow, and add the warning beside the existing reachability one:
@@ -671,7 +701,10 @@ Recompute the final reachability warning against `solveCtx` rather than `chosen.
 - [ ] **Step 4: Run the tests to verify they pass**
 
 Run: `npm run test:run`
-Expected: PASS. `monotonically thins the big-payout tail as volatility falls` must keep its strict `toBeLessThan` — the measured tails are 878 / 764 / 581 / 328 / 109. If it fails, the clamp is being applied to the wrong band; do not weaken the assertion.
+Expected: PASS. Two existing tests are load-bearing here and neither may be weakened:
+
+- `volatility` → `monotonically thins the big-payout tail as volatility falls` keeps its strict `toBeLessThan` — the measured tails are 878 / 764 / 581 / 328 / 109. If it fails, the clamp is landing on the wrong band.
+- `the tolerance band` → `opens only when the target is otherwise unreachable` is why `chooseBand` runs twice. With `winChance: 0.0005` the ordered ceiling never reaches RTP 0.7–0.82 at any band position, so the ordered pass finds nothing; the unordered re-run is what re-opens the band at `s = 0.86`. A single pass that froze the ordered pass's `s = 0` budgets would fail this test.
 
 - [ ] **Step 5: Lint and commit**
 
@@ -690,7 +723,7 @@ git commit -m "feat: floor the weight curve's slope per band so it never rises"
 - Test: `src/lib/distribute.test.ts`
 
 **Interfaces:**
-- Consumes: `Ctx.residual` (Task 1), `Ctx.ordered` (Task 4), `inversions` test helper (Task 4).
+- Consumes: `Ctx.residual` (Task 1), `Ctx.ordered` and the `chooseBand` helper (Task 4), the `ladderOf` test helper (Task 4).
 - Produces: nothing new for later tasks.
 
 **Background:** the two positive bands are normalized to independent budgets, so the boundary at 1x can jump *upward* — `0.6x:0` against `1.8x:21,452` when hit chance equals win chance. Separately the residual can fall below the top of the ladder when hit chance is set very high. Both are fixed by moving group mass, which is exactly what the chance targets are, and both rank below ordering.
@@ -703,7 +736,11 @@ describe('ordering against the chance targets', () => {
 
   it('does not let the win band tower over the small-win band', () => {
     const r = solveWeights(rows, T, flat, CURVE_PRESETS.medium)
-    expect(inversions(rows, r.weights)).toEqual([])
+    const l = ladderOf(rows, r.weights)
+    // The step at 1x specifically — the rest of the ladder is Task 6's job.
+    const lastSmall = l.filter((e) => e.p <= 1).at(-1)!
+    const firstWin = l.find((e) => e.p > 1)!
+    expect(lastSmall.w).toBeGreaterThanOrEqual(firstWin.w)
     expect(sum(r.weights)).toBe(T)
   })
 
@@ -885,12 +922,30 @@ git commit -m "feat: shift group mass so payout ordering outranks the chance tar
 - Test: `src/lib/distribute.test.ts`
 
 **Interfaces:**
-- Consumes: `Ctx.ordered` (Task 4), the loop from Task 5, `inversions` test helper (Task 4).
-- Produces: nothing new for later tasks. This task closes the ordering invariant.
+- Consumes: `Ctx.ordered` (Task 4), the loop from Task 5, the `ladderOf` test helper (Task 4).
+- Produces: the `inversions` test helper, added in Step 1 below. This task closes the ordering invariant.
 
 **Background:** `largestRemainder`'s fractional tiebreak and `repairRtp`'s pairwise transfers are both blind to the ladder, so buckets a hair apart in payout come out inverted by a unit or two — `50.11x:2,055` against `50.16x:2,056` at step 1, and `50.11x:300` against `50.16x:400` at step 100.
 
 - [ ] **Step 1: Write the failing tests**
+
+Add this helper beside `ladderOf` in `src/lib/distribute.test.ts` — this task is its first use:
+
+```ts
+/** Every place a higher payout carries more weight than a lower one. */
+const inversions = (rs: BucketRow[], w: number[]): string[] => {
+  const l = ladderOf(rs, w)
+  const bad: string[] = []
+  for (let k = 1; k < l.length; k++) {
+    if (l[k].p > l[k - 1].p && l[k].w > l[k - 1].w) {
+      bad.push(`${l[k - 1].p}x=${l[k - 1].w} < ${l[k].p}x=${l[k].w}`)
+    }
+  }
+  return bad
+}
+```
+
+Then add the suite:
 
 ```ts
 describe('the ladder stays in order', () => {
