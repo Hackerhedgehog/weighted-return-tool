@@ -1282,6 +1282,12 @@ input.gcell.editing {
   stroke-width: 1;
 }
 
+.y-zoom-hit {
+  cursor: ns-resize;
+  touch-action: none;
+  outline: none;
+}
+
 /* ---------- paste panel ---------- */
 
 .paste-hero {

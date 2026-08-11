@@ -1,5 +1,5 @@
 import { describe, it, expect } from 'vitest'
-import { clampHeight, DIST_HEIGHT, linearBarWidth, logBarWidth, SIM_HEIGHT } from './chartUtils'
+import { clampHeight, clampZoom, DIST_HEIGHT, linearBarWidth, logBarWidth, SIM_HEIGHT, Y_ZOOM_RANGE } from './chartUtils'
 
 describe('bar widths', () => {
   it('caps a linear bar at 16px however much room there is', () => {
@@ -45,5 +45,22 @@ describe('clampHeight', () => {
   it('has a fallback inside its own range', () => {
     expect(clampHeight(DIST_HEIGHT.fallback, DIST_HEIGHT)).toBe(DIST_HEIGHT.fallback)
     expect(clampHeight(SIM_HEIGHT.fallback, SIM_HEIGHT)).toBe(SIM_HEIGHT.fallback)
+  })
+})
+
+describe('clampZoom', () => {
+  it('keeps a zoom factor inside the range', () => {
+    expect(clampZoom(1)).toBe(1)
+    expect(clampZoom(2)).toBe(2)
+  })
+
+  it('clamps below the floor and above the ceiling', () => {
+    expect(clampZoom(0.01)).toBe(Y_ZOOM_RANGE.min)
+    expect(clampZoom(50)).toBe(Y_ZOOM_RANGE.max)
+  })
+
+  it('falls back to 1 when the stored value is not a number', () => {
+    expect(clampZoom(NaN)).toBe(1)
+    expect(clampZoom(Infinity)).toBe(1)
   })
 })
