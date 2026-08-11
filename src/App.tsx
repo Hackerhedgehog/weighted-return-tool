@@ -773,7 +773,7 @@ export default function App() {
             </section>
           )}
 
-          <div className="content-row" ref={rowRef}>
+          <div className={`content-row${chart.forceStack ? ' force-stack' : ''}`} ref={rowRef}>
           <section className="panel buckets">
             <div className="panel-head">
               <h2>Buckets</h2>
@@ -808,6 +808,15 @@ export default function App() {
           <section className="panel chart">
             <div className="panel-head">
               <h2>Distribution</h2>
+              <button
+                type="button"
+                className={`btn ${chart.forceStack ? 'primary' : ''}`}
+                aria-pressed={chart.forceStack}
+                title="Always show the distribution chart below the table, even if there's room beside it"
+                onClick={() => setChart({ ...chart, forceStack: !chart.forceStack })}
+              >
+                Stack below
+              </button>
             </div>
             <DistributionChart
               rows={viewRows}

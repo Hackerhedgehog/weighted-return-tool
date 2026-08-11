@@ -506,6 +506,15 @@ describe('page layout', () => {
     const row = document.querySelector('.content-row')!
     expect([...row.children].map((el) => el.className)).toEqual(['panel buckets', 'panel chart'])
   })
+
+  it('forces the chart below the table when the toggle is pressed', () => {
+    loadRealData()
+    const toggle = screen.getByRole('button', { name: 'Stack below' })
+    expect(toggle.getAttribute('aria-pressed')).toBe('false')
+    fireEvent.click(toggle)
+    expect(toggle.getAttribute('aria-pressed')).toBe('true')
+    expect(document.querySelector('.content-row')!.className).toContain('force-stack')
+  })
 })
 
 describe('targets panel layout', () => {

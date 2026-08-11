@@ -542,6 +542,13 @@ body {
   min-width: 420px;
 }
 
+/* Forces the chart onto its own line however wide the viewport is: an
+   oversized basis can never fit beside the table. */
+.content-row.force-stack > .panel.chart {
+  flex-basis: 100%;
+  min-width: 100%;
+}
+
 /* Wrapped: the table has the whole width, so centre it rather than pinning it
    to an edge the chart is no longer beside. */
 .content-row.stacked .grid-table {

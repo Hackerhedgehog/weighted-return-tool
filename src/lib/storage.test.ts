@@ -205,4 +205,22 @@ describe('storage', () => {
     expect(loaded?.simChartYZoom).toBeUndefined()
     expect(loaded?.bankrollChartYZoom).toBeUndefined()
   })
+
+  it('round-trips forceStack and rejects a non-boolean', () => {
+    saveWorkspace({ ...workspace, chart: { ...DEFAULT_CHART, forceStack: true } })
+    expect(loadWorkspace()?.chart.forceStack).toBe(true)
+
+    store.set(
+      STORAGE_KEY,
+      JSON.stringify({ ...workspace, chart: { ...DEFAULT_CHART, forceStack: 'yes' } }),
+    )
+    expect(loadWorkspace()).toBeNull()
+  })
+
+  it('accepts a workspace saved before forceStack existed', () => {
+    const chart: Record<string, unknown> = { ...DEFAULT_CHART }
+    delete chart.forceStack
+    store.set(STORAGE_KEY, JSON.stringify({ ...workspace, chart }))
+    expect(loadWorkspace()).not.toBeNull()
+  })
 })

@@ -93,7 +93,9 @@ function isChart(v: unknown): v is ChartSettings {
     typeof v.aggregate === 'boolean' &&
     // Optional: absent in workspaces saved before groups could be collapsed.
     (v.groupBars === undefined ||
-      (Array.isArray(v.groupBars) && v.groupBars.every((s) => typeof s === 'string')))
+      (Array.isArray(v.groupBars) && v.groupBars.every((s) => typeof s === 'string'))) &&
+    // Optional: absent in workspaces saved before the chart could be force-stacked.
+    (v.forceStack === undefined || typeof v.forceStack === 'boolean')
   )
 }
 
