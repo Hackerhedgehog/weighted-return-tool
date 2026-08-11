@@ -2081,6 +2081,7 @@ git commit -m "refactor: generalize the group chip row so the table can reuse it
 - Modify: `src/components/cells.tsx` (export `CellNavProps`, tri-state `LockCell`)
 - Create: `src/components/GroupSummaryRow.tsx`
 - Modify: `src/components/BucketTable.tsx`
+- Modify: `src/components/useGridNavigation.ts` (clamp on a shrinking row count)
 - Modify: `src/index.css`
 - Test: `src/components/BucketTable.test.tsx` (create)
 
@@ -2114,29 +2115,29 @@ const T = rows.reduce((a, r) => a + r.weight, 0)
 const sort: SortState = { key: 'id', dir: 1 }
 const groupIdOf = (name: string) => grouping.groups.find((g) => g.name === name)!.id
 
+const tableProps = (collapsed: string[], onExpand = vi.fn(), onGroupLock = vi.fn()) => ({
+  rows,
+  totalWeight: T,
+  sort,
+  columnWidths: DEFAULT_WIDTHS,
+  grouping,
+  groups: seeded.groups,
+  weightStep: 1 as const,
+  collapsed,
+  onSort: vi.fn(),
+  onPatch: vi.fn(),
+  onWidths: vi.fn(),
+  onTotalWeight: vi.fn(),
+  onTotalRtp: vi.fn(),
+  onExpand,
+  onGroupLock,
+})
+
 const renderTable = (collapsed: string[] = []) => {
   const onExpand = vi.fn()
   const onGroupLock = vi.fn()
-  render(
-    <BucketTable
-      rows={rows}
-      totalWeight={T}
-      sort={sort}
-      columnWidths={DEFAULT_WIDTHS}
-      grouping={grouping}
-      groups={seeded.groups}
-      weightStep={1}
-      collapsed={collapsed}
-      onSort={vi.fn()}
-      onPatch={vi.fn()}
-      onWidths={vi.fn()}
-      onTotalWeight={vi.fn()}
-      onTotalRtp={vi.fn()}
-      onExpand={onExpand}
-      onGroupLock={onGroupLock}
-    />,
-  )
-  return { onExpand, onGroupLock }
+  const view = render(<BucketTable {...tableProps(collapsed, onExpand, onGroupLock)} />)
+  return { onExpand, onGroupLock, rerender: view.rerender }
 }
 
 describe('BucketTable with a collapsed group', () => {
@@ -2179,6 +2180,19 @@ describe('BucketTable with a collapsed group', () => {
     renderTable([id])
     fireEvent.doubleClick(document.querySelector('.group-summary .col-weight .gcell')!)
     expect(document.querySelector('.group-summary input')).toBeNull()
+  })
+
+  it('keeps a keyboard-focusable cell when a collapse shrinks the table', () => {
+    // Only the selected cell carries tabIndex 0. Selecting a row near the
+    // bottom and then collapsing a group above it used to leave `sel` past the
+    // end, with no focusable cell left anywhere in the grid.
+    const id = groupIdOf('bonus')
+    const { rerender } = renderTable()
+    const last = [...document.querySelectorAll('.grid-row')].at(-1)!
+    fireEvent.mouseDown(last.querySelector('.col-weight .gcell')!)
+
+    rerender(<BucketTable {...tableProps([id])} />)
+    expect(document.querySelectorAll('.grid-table [tabindex="0"]').length).toBeGreaterThan(0)
   })
 })
 ```
@@ -2524,6 +2538,31 @@ Rewrite `displayFor`, `toggleLock`, `clearCell` and `isEditable` against the dis
 ```
 
 Change `useGridNavigation`'s `rowCount` to `display.length + 1`, and `autoFit`'s loop to `for (const u of display) widest = Math.max(widest, textWidth(displayFor(u, col.key), font))`.
+
+A shrinking `rowCount` needs a clamp that `useGridNavigation` does not currently have. It clamps inside `select` and `navigate`, both of which fire on user action — nothing reacts to `rowCount` itself changing. Collapsing a group while a row below it is selected therefore leaves `sel.row` past the end, and since only the selected cell carries `tabIndex 0`, the grid loses its keyboard entry point entirely until the user clicks a cell.
+
+Fix it in `src/components/useGridNavigation.ts`, where `rowCount` is owned, so every consumer gets it — and fix it by *deriving* the visible selection rather than correcting a stored one in an effect. Rename the state to `rawSel` and add:
+
+```ts
+  // The row count can shrink under the selection — a group collapsing, or a
+  // smaller table loading. Only the selected cell carries tabIndex 0, so a
+  // `sel` left pointing past the end would cost the grid its keyboard entry
+  // point altogether until something is clicked. Deriving the visible
+  // selection here, rather than storing a raw value and correcting it in an
+  // effect, fixes that on the very render that shrinks the table — there is
+  // no in-between frame where every row index is out of range — and if the
+  // count grows back the original position reappears, since the underlying
+  // state was never overwritten.
+  const sel = useMemo<CellPos>(
+    () => ({
+      row: clamp(rawSel.row, 0, Math.max(0, rowCount - 1)),
+      col: clamp(rawSel.col, 0, Math.max(0, colCount - 1)),
+    }),
+    [rawSel, rowCount, colCount],
+  )
+```
+
+`useGridNavigation` currently imports only `useCallback` and `useState`; add `useMemo`. Note that an effect calling `setSel` here would trip the repo's `react-hooks/set-state-in-effect` rule, which is a hard lint gate — deriving is not merely the tidier option, it is the one that passes.
 
 Give `cellProps` the explicit return type:
 
