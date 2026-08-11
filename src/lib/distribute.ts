@@ -6,14 +6,18 @@ import type { BucketRow, Targets, WeightStep } from './types'
  * The targets are over-constrained, so they are resolved by rank — most
  * important to maintain first:
  *
- *  1. Locked weights are absolute — never touched, never reordered, and a lock
- *     that breaks the payout ladder is reported rather than moved.
+ *  1. Locked weights are absolute — never touched and never reordered. A lock
+ *     that breaks the payout ladder is reported rather than moved, though only
+ *     while the ladder is being kept at all (see 3).
  *  2. RTP is hit exactly (to integer-weight granularity) by solving the slope
  *     of the weight curve.
- *  3. Ordering: every unlocked bucket holds at least one weight step, weight
- *     never rises as payout rises, and the residual `0x` bucket is the largest
- *     weight in the table. Equal payouts are unconstrained against each other,
- *     which is what keeps the tease buckets free to sit below the ladder.
+ *  3. Ordering: every unlocked bucket holds at least one weight step, and
+ *     weight never rises as payout rises. Equal payouts are unconstrained
+ *     against each other, which is what keeps the tease buckets free to sit
+ *     below the ladder — and is also why the residual `0x` bucket is held above
+ *     every unlocked *paying* bucket rather than above the whole table: its
+ *     zero-payout siblings are not ordered against it. Locks outrank all of
+ *     this, so a lock heavy enough to outweigh the residual stays where it is.
  *  4. Volatility shapes whatever freedom is left, as curvature of that curve.
  *  5. Hit chance, then 6. win chance, are satisfied *structurally*, by deciding
  *     how much total weight each payout group receives. They are preferences

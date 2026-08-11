@@ -126,14 +126,18 @@ How the tool turns targets into weights, and the knobs that shape the result.
 over-constrained, so they are resolved by rank — most important to maintain
 first:
 
-1. **Locked rows** are absolute — never touched, never reordered, and a lock
-   that breaks the payout ladder is reported rather than moved.
+1. **Locked rows** are absolute — never touched and never reordered. A lock
+   that breaks the payout ladder is reported rather than moved, though only
+   while the ladder is being kept at all (see 3).
 2. **Target RTP** is hit exactly, to integer-weight granularity, by solving
    the slope of the weight curve.
-3. **Ordering**: every unlocked bucket holds at least one weight step, weight
-   never rises as payout rises, and the residual `0x` bucket is the largest
-   weight in the table. Equal payouts are unconstrained against each other,
-   which is what keeps the tease buckets free to sit below the ladder.
+3. **Ordering**: every unlocked bucket holds at least one weight step, and
+   weight never rises as payout rises. Equal payouts are unconstrained
+   against each other, which is what keeps the tease buckets free to sit
+   below the ladder — and is also why the residual `0x` bucket is held above
+   every unlocked *paying* bucket rather than above the whole table: its
+   zero-payout siblings are not ordered against it. Locks outrank all of
+   this, so a lock heavy enough to outweigh the residual stays where it is.
 4. **Volatility** shapes whatever freedom is left, as curvature of that curve.
 5. **Preferred Hit Chance**, then 6. **Win Chance**, are satisfied
    *structurally*, by deciding how much total weight each payout group
@@ -173,12 +177,16 @@ actually helps: an RTP target that is unreachable either way keeps the ladder
 and simply reports the miss.
 
 Zero-payout buckets are exempt from ordering against each other, which is what
-lets a tease bucket sit below the top paying bucket. The one exception is the
-residual — the bucket labelled `0x` — which always holds the table's largest
-weight. On a table with no weights yet it takes 80% of the zero-payout mass and
-the teases split the rest; once those buckets carry weights of their own,
-Auto-Distribute preserves their balance instead, since they contribute nothing
-to RTP and there is no principled curve for a tease bucket.
+lets a tease bucket sit below the top paying bucket. The residual — the bucket
+labelled `0x` — is held above every unlocked *paying* bucket, which on a normal
+table makes it the heaviest thing in it. On a table with no weights yet it takes
+80% of the zero-payout mass and the teases split the rest; once those buckets
+carry weights of their own Auto-Distribute preserves their balance instead, so a
+hand-set tease can legitimately end up heavier than the residual.
+
+Locks outrank all of this, so none of it is promised against them: a lock heavy
+enough to outweigh the residual, or to sit out of order on the ladder, stays
+exactly where you put it. Where the solver can tell, it says so in a notice.
 
 Ordering is Auto-Distribute's guarantee specifically. Typing into the totals
 row's RTP cell reshapes the table too, and it orders each payout group as it
