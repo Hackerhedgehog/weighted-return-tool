@@ -48,7 +48,6 @@ export function ChartYAxisZoom({ zoom, onZoom, x, y, width, height, label }: Cha
     }
     el.addEventListener('wheel', onWheel, { passive: false })
     return () => el.removeEventListener('wheel', onWheel)
-    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [zoom, onZoom])
 
   return (
