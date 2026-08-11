@@ -33,7 +33,7 @@ import { DEFAULT_SPINS } from './lib/sim'
 import { clearWorkspace, loadWorkspace, saveWorkspace } from './lib/storage'
 import { fetchSession, saveTsv, type BridgeSession } from './lib/bridge'
 import { BucketTable } from './components/BucketTable'
-import { clampHeight, DIST_HEIGHT, SIM_HEIGHT } from './components/chartUtils'
+import { clampHeight, clampZoom, DIST_HEIGHT, SIM_HEIGHT } from './components/chartUtils'
 import { DistributionChart } from './components/DistributionChart'
 import { GroupSettings } from './components/GroupSettings'
 import { SimulationPanel } from './components/SimulationPanel'
@@ -141,6 +141,10 @@ export default function App() {
   const [chartChrome, setChartChrome] = useState(0)
   const [simChartHeight, setSimChartHeight] = useState(() =>
     clampHeight(saved?.simChartHeight ?? SIM_HEIGHT.fallback, SIM_HEIGHT),
+  )
+  const [simChartYZoom, setSimChartYZoom] = useState(() => clampZoom(saved?.simChartYZoom ?? 1))
+  const [bankrollChartYZoom, setBankrollChartYZoom] = useState(() =>
+    clampZoom(saved?.bankrollChartYZoom ?? 1),
   )
   const [exportFilename, setExportFilename] = useState(
     saved?.exportFilename ?? DEFAULT_EXPORT_FILENAME,
@@ -306,6 +310,8 @@ export default function App() {
         chartHeight,
         chartHeightAuto,
         simChartHeight,
+        simChartYZoom,
+        bankrollChartYZoom,
         targetsCollapsed,
       })
     }, SAVE_DEBOUNCE_MS)
@@ -321,6 +327,8 @@ export default function App() {
     chartHeight,
     chartHeightAuto,
     simChartHeight,
+    simChartYZoom,
+    bankrollChartYZoom,
     targetsCollapsed,
   ])
 
@@ -842,6 +850,10 @@ export default function App() {
               onBankroll={setBankroll}
               chartHeight={simChartHeight}
               onChartHeight={setSimChartHeight}
+              simYZoom={simChartYZoom}
+              onSimYZoom={setSimChartYZoom}
+              bankrollYZoom={bankrollChartYZoom}
+              onBankrollYZoom={setBankrollChartYZoom}
             />
           </section>
         </main>

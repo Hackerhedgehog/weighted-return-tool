@@ -34,6 +34,10 @@ function renderPanel(mode: SimMode) {
       onBankroll={vi.fn()}
       chartHeight={260}
       onChartHeight={vi.fn()}
+      simYZoom={1}
+      onSimYZoom={vi.fn()}
+      bankrollYZoom={1}
+      onBankrollYZoom={vi.fn()}
     />,
   )
   return onMode

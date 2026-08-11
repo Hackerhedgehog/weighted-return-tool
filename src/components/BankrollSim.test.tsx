@@ -69,6 +69,8 @@ function renderSim(
       onConfig={onConfig}
       chartHeight={260}
       onChartHeight={vi.fn()}
+      yZoom={1}
+      onYZoom={vi.fn()}
       createWorker={worker === undefined ? undefined : () => worker}
     />,
   )
@@ -205,6 +207,8 @@ describe('BankrollSim runs', () => {
         onConfig={vi.fn()}
         chartHeight={260}
         onChartHeight={vi.fn()}
+        yZoom={1}
+        onYZoom={vi.fn()}
         createWorker={createWorker}
       />,
     )
@@ -264,6 +268,14 @@ describe('BankrollSim runs', () => {
     reply(w, { type: 'error', message: 'Every bucket has zero weight — nothing to play.' })
     expect(screen.getByText(/zero weight/)).toBeDefined()
   })
+
+  it('shows the y-axis zoom handle once a run has produced a chart', () => {
+    const w = new FakeWorker()
+    renderSim(w)
+    fireEvent.click(screen.getByRole('button', { name: 'Run' }))
+    reply(w, { type: 'progress', points: [{ spins: 100, balance: 1200 }], state: state() })
+    expect(screen.getByRole('slider', { name: "Zoom the bankroll chart's y-axis" })).toBeDefined()
+  })
 })
 
 describe('BankrollSim stat tiles snapshot the run', () => {
@@ -289,6 +301,8 @@ describe('BankrollSim stat tiles snapshot the run', () => {
       onConfig,
       chartHeight: 260,
       onChartHeight: vi.fn(),
+      yZoom: 1,
+      onYZoom: vi.fn(),
       createWorker: () => w,
     })
     const { rerender } = render(<BankrollSim {...props(DEFAULT_BANKROLL)} />)
