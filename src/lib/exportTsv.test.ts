@@ -12,17 +12,19 @@ const INPUT = readFileSync('example-input-data.tsv', 'utf8')
 const OUTPUT = readFileSync('example-output-data.tsv', 'utf8')
 
 describe('buildTsv acceptance', () => {
-  it('reproduces example-output-data.tsv exactly', () => {
+  it('reproduces example-output-data.tsv exactly, minus its totals row', () => {
     const input = parseTsv(INPUT)
     const reference = parseTsv(OUTPUT)
 
     // Take the buckets from the input file and the weights from the
-    // reference output — everything else must be computed.
+    // reference output — everything else must be computed. The reference
+    // file's own totals row is not part of what this tool exports.
     const rows = input.rows.map((r, i) => ({ ...r, weight: reference.rows[i].weight }))
     const total = rows.reduce((a, r) => a + r.weight, 0)
 
     expect(total).toBe(1200350)
-    expect(buildTsv(rows, total)).toBe(OUTPUT)
+    const withoutTotalsRow = OUTPUT.split(EOL).slice(0, -1).join(EOL)
+    expect(buildTsv(rows, total)).toBe(withoutTotalsRow)
   })
 
   it('uses CRLF line endings with no trailing newline', () => {
@@ -30,7 +32,7 @@ describe('buildTsv acceptance', () => {
     const text = buildTsv(rows, 1200350)
     expect(text).toContain('\r\n')
     expect(text.endsWith('\n')).toBe(false)
-    expect(text.split('\r\n')).toHaveLength(32) // header + 30 buckets + totals
+    expect(text.split('\r\n')).toHaveLength(31) // header + 30 buckets, no totals row
   })
 
   it('writes the header with its trailing space after Avg Payout', () => {
@@ -38,10 +40,12 @@ describe('buildTsv acceptance', () => {
     expect(buildTsv([], 0).split('\r\n')[0]).toBe(EXPORT_HEADER)
   })
 
-  it('writes the totals row with three empty leading fields', () => {
+  it('carries no totals row', () => {
     const rows = parseTsv(OUTPUT).rows
-    const totals = buildTsv(rows, 1200350).split('\r\n').at(-1)!
-    expect(totals).toBe('\t\t\t1200350\t1.08819261\t1')
+    const lines = buildTsv(rows, 1200350).split('\r\n')
+    expect(lines).toHaveLength(31)
+    // the last line is the last bucket, not a blank-leading totals line
+    expect(lines.at(-1)!.startsWith('\t\t\t')).toBe(false)
   })
 
   it('survives a zero total without emitting NaN', () => {
@@ -144,8 +148,8 @@ describe('weight id column', () => {
     expect(lines[1].split('	')[6]).toBe('W-7')
     // the row without one still carries the field, empty
     expect(lines[2].split('	')[6]).toBe('')
-    // and so does the totals row, so the column count never varies
-    expect(lines[3].split('	')).toHaveLength(7)
+    // no totals row, so there is nothing after the two bucket lines
+    expect(lines).toHaveLength(3)
   })
 
   it('survives a round trip through the parser', () => {
