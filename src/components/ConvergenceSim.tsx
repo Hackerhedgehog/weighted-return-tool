@@ -42,6 +42,9 @@ interface ConvergenceSimProps {
   /** Owned by App and persisted; the panel only passes it through. */
   chartHeight: number
   onChartHeight: (h: number) => void
+  /** Owned by App and persisted, like chartHeight — the panel only passes it through. */
+  yZoom: number
+  onYZoom: (z: number) => void
   createWorker?: () => SimWorkerLike
 }
 
@@ -71,6 +74,8 @@ export function ConvergenceSim({
   onSpins,
   chartHeight,
   onChartHeight,
+  yZoom,
+  onYZoom,
   createWorker,
 }: ConvergenceSimProps) {
   const [run, setRun] = useState<Run | null>(null)
@@ -298,6 +303,8 @@ export function ConvergenceSim({
           expectedRtp={run.expectedRtp}
           height={chartHeight}
           onHeight={onChartHeight}
+          yZoom={yZoom}
+          onYZoom={onYZoom}
         />
       ) : (
         // The placeholder carries the grip too, so the panel can be sized

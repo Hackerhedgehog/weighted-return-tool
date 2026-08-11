@@ -42,6 +42,9 @@ export interface Workspace {
   bankroll?: BankrollConfig
   /** Optional — absent before the chart could fit itself to the table. */
   chartHeightAuto?: boolean
+  /** Optional — absent in workspaces saved before the y-axis could be zoomed. */
+  simChartYZoom?: number
+  bankrollChartYZoom?: number
 }
 
 const isObject = (v: unknown): v is Record<string, unknown> =>
@@ -90,7 +93,9 @@ function isChart(v: unknown): v is ChartSettings {
     typeof v.aggregate === 'boolean' &&
     // Optional: absent in workspaces saved before groups could be collapsed.
     (v.groupBars === undefined ||
-      (Array.isArray(v.groupBars) && v.groupBars.every((s) => typeof s === 'string')))
+      (Array.isArray(v.groupBars) && v.groupBars.every((s) => typeof s === 'string'))) &&
+    // Optional: absent in workspaces saved before the chart could be force-stacked.
+    (v.forceStack === undefined || typeof v.forceStack === 'boolean')
   )
 }
 
@@ -126,7 +131,9 @@ function isWorkspace(v: unknown): v is Workspace {
     (v.targetsCollapsed === undefined || typeof v.targetsCollapsed === 'boolean') &&
     (v.simMode === undefined || v.simMode === 'convergence' || v.simMode === 'bankroll') &&
     (v.bankroll === undefined || isBankroll(v.bankroll)) &&
-    (v.chartHeightAuto === undefined || typeof v.chartHeightAuto === 'boolean')
+    (v.chartHeightAuto === undefined || typeof v.chartHeightAuto === 'boolean') &&
+    (v.simChartYZoom === undefined || isFiniteNumber(v.simChartYZoom)) &&
+    (v.bankrollChartYZoom === undefined || isFiniteNumber(v.bankrollChartYZoom))
   )
 }
 

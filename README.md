@@ -91,11 +91,11 @@ also parse, for pastes that came from somewhere other than a TSV.
 ID	Avg Payout 	Label	Weights	Weighted Value	Chance
 0	1000	joker5-maxwin	200	0.1666180697	0.0001666180697
 …
-			1200350	1.08819261	1
+18	0	0x	550000	0	0.4581996918
 ```
 
-Header, one row per bucket in the table's current sort order, then a totals row
-with three empty leading fields. Computed columns carry 10 significant digits.
+Header, then one row per bucket in the table's current sort order — no totals
+row. Computed columns carry 10 significant digits.
 
 **Weight ID rides as a trailing seventh column, and only when a table uses
 one** — a table that leaves the field empty exports exactly the six columns
@@ -103,8 +103,10 @@ above, byte for byte. Trailing keeps the first six positional, so an export
 with the extra column still pastes back cleanly, Weight IDs included.
 
 **Exports paste straight back in.** The Weights column is picked up, and the
-header and totals rows are ignored — so you can export, adjust in Excel, and
-paste the result back without editing anything out.
+header row is ignored — so you can export, adjust in Excel, and paste the
+result back without editing anything out. A file carrying an older totals
+row (from a table exported before this changed) still pastes back cleanly
+too — the parser skips any row with a blank first field on import.
 
 ## Getting started
 
@@ -427,6 +429,14 @@ before a run too, and Home on it resets to its own fixed default. Both
 heights, and whether the distribution chart is pinned, are remembered with the
 rest of the workspace.
 
+Both charts' y-axes can be zoomed: scroll or drag vertically over the axis
+labels, or focus the axis (it's keyboard-reachable, ↑/↓ to step) and use the
+same gesture from the keyboard. Zoom multiplies the chart's own auto-fit
+ceiling rather than replacing it, so zooming in on a live run still tracks
+the run's growing range instead of freezing it. Double-clicking the axis, or
+pressing Home while it's focused, resets to the auto fit. Each chart's zoom
+is independent and remembered with the rest of the workspace.
+
 ## Simulation
 
 The Simulation panel, at the bottom of the page, runs the current table in a
@@ -522,6 +532,13 @@ a column and the wrap happens sooner; narrow them and the two stay side by
 side for longer. Once wrapped the table centres itself instead, since there is
 no chart beside it to sit against. Below 1200px the chart also stops sticking.
 
+**Stack below**, a toggle in the Distribution panel's header, overrides all
+of that: press it and the chart always renders under the table, however wide
+the window is; press it again to return to the width-based wrap above. The
+setting is remembered with the rest of the workspace. Because the chart still
+defaults to fitting the table's own height, forcing it below a tall table can
+make it tall too — drag its grip to pin a fixed height if that's not wanted.
+
 Widening a column eats the table's own left-hand slack first: the two panels
 split the row by share rather than by content, so the chart only gives up
 width once the table genuinely needs more than its half.
@@ -607,7 +624,8 @@ tested directly too: the balance arithmetic, the bust boundary, `continue`'s
 resumability and the point buffer's decimation. The key one is the export
 acceptance test, which parses `example-input-data.tsv`, applies the weights
 from `example-output-data.tsv`, and asserts the generated text matches the
-reference file byte for byte.
+reference file byte for byte, aside from the reference file's own trailing
+totals row, which this tool no longer writes.
 Component tests drive the chart's drag interactions, the tooltip's contents,
 colors and edge clamping, the resize grip's pointer and keyboard paths, and
 both simulation panels against faked workers; the App smoke test covers

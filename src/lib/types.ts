@@ -144,6 +144,11 @@ export interface ChartSettings {
    * DEFAULT_CHART's empty array is shared by every fresh workspace.
    */
   groupBars: string[]
+  /**
+   * Forces the distribution chart onto its own line below the buckets table,
+   * even when the viewport is wide enough to fit both side by side.
+   */
+  forceStack: boolean
 }
 
 export const DEFAULT_CHART: ChartSettings = {
@@ -153,6 +158,7 @@ export const DEFAULT_CHART: ChartSettings = {
   aggregate: true,
   relative: true,
   groupBars: [],
+  forceStack: false,
 }
 
 export const DEFAULT_EXPORT_FILENAME = 'ref-weights-regular.tsv'

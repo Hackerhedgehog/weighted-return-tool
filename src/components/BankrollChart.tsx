@@ -1,6 +1,7 @@
 import { useMemo, useState } from 'react'
 import { ChartReadout, type ReadoutStat } from './ChartReadout'
 import { ChartResizeGrip } from './ChartResizeGrip'
+import { ChartYAxisZoom } from './ChartYAxisZoom'
 import { fmtCompact, niceCeil, SIM_HEIGHT, useContainerWidth } from './chartUtils'
 import { fmtCredits, fmtWeight } from '../lib/format'
 import type { BankrollPoint, BankrollState } from '../lib/bankroll'
@@ -25,6 +26,9 @@ interface BankrollChartProps {
   state: BankrollState
   height: number
   onHeight: (h: number) => void
+  /** Multiplies the auto-fit ceiling; 1 is auto, <1 zooms in, >1 zooms out. */
+  yZoom: number
+  onYZoom: (z: number) => void
 }
 
 const MARGIN = { top: 14, right: 74, bottom: 40, left: 72 }
@@ -35,6 +39,8 @@ export function BankrollChart({
   state,
   height,
   onHeight,
+  yZoom,
+  onYZoom,
 }: BankrollChartProps) {
   const [containerRef, width] = useContainerWidth()
   const [hover, setHover] = useState<number | null>(null)
@@ -45,10 +51,12 @@ export function BankrollChart({
 
   // Headroom above whichever is higher, so the reference line is never off the
   // top of a run that only ever lost money.
-  const yMax = useMemo(
+  const autoYMax = useMemo(
     () => niceCeil(Math.max(state.peak, startCredits, 1e-9) * 1.05),
     [state.peak, startCredits],
   )
+
+  const yMax = autoYMax * yZoom
 
   const x = (spins: number) => MARGIN.left + (spins / totalSpins) * plotW
   const y = (v: number) => MARGIN.top + plotH * (1 - Math.min(Math.max(v, 0), yMax) / yMax)
@@ -182,6 +190,16 @@ export function BankrollChart({
           fill="transparent"
           onMouseMove={onMove}
           onMouseLeave={() => setHover(null)}
+        />
+
+        <ChartYAxisZoom
+          zoom={yZoom}
+          onZoom={onYZoom}
+          x={0}
+          y={MARGIN.top}
+          width={MARGIN.left}
+          height={plotH}
+          label="Zoom the bankroll chart's y-axis"
         />
       </svg>
 

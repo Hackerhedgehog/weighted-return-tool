@@ -49,6 +49,8 @@ function renderPanel(worker?: FakeWorker, spins = 1000) {
       onSpins={onSpins}
       chartHeight={260}
       onChartHeight={vi.fn()}
+      yZoom={1}
+      onYZoom={vi.fn()}
       createWorker={worker === undefined ? undefined : () => worker}
     />,
   )
@@ -127,5 +129,16 @@ describe('ConvergenceSim', () => {
     expect(w.terminated).toBe(true)
     const tiles = within(document.querySelector('.sim-stats') as HTMLElement)
     expect(tiles.getAllByText('1.0000').length).toBeGreaterThanOrEqual(1)
+  })
+
+  it('shows the y-axis zoom handle once a run has produced a chart', () => {
+    const w = new FakeWorker()
+    renderPanel(w)
+    fireEvent.click(screen.getByRole('button', { name: 'Run' }))
+    reply(w, {
+      type: 'done',
+      agg: { spins: 1000, sum: 950, sumSq: 1805, hits: 250, wins: 250, maxWin: 2 },
+    })
+    expect(screen.getByRole('slider', { name: "Zoom the simulation chart's y-axis" })).toBeDefined()
   })
 })

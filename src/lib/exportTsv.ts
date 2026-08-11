@@ -20,12 +20,13 @@ export const WEIGHT_ID_HEADER = 'Weight ID'
 const EOL = '\r\n'
 
 /**
- * Render the table as TSV: header, one line per bucket, then a totals row
- * whose first three fields are empty.
+ * Render the table as TSV: header, then one line per bucket. No totals row —
+ * the export carries buckets only.
  *
  * Computed columns use 10 significant digits, which reproduces
- * `example-output-data.tsv` byte for byte. There is no trailing newline —
- * also matching the reference.
+ * `example-output-data.tsv` byte for byte (aside from that reference file's
+ * own trailing totals line, which this tool does not write). There is no
+ * trailing newline — also matching the reference.
  */
 export function buildTsv(rows: BucketRow[], totalWeight: number): string {
   const safeTotal = totalWeight > 0 ? totalWeight : 0
@@ -48,16 +49,6 @@ export function buildTsv(rows: BucketRow[], totalWeight: number): string {
     if (withWeightId) fields.push(r.weightId)
     lines.push(fields.join('\t'))
   }
-
-  // Sum at full precision, then round once. (Summing the already-rounded
-  // column gives the same string for the reference data, but this is the
-  // more defensible of the two.)
-  const totalValue = rows.reduce((a, r) => a + valueOf(r), 0)
-  const totalChance = rows.reduce((a, r) => a + chanceOf(r), 0)
-
-  const totals = ['', '', '', String(Math.round(safeTotal)), fmtSig(totalValue), fmtSig(totalChance)]
-  if (withWeightId) totals.push('')
-  lines.push(totals.join('\t'))
 
   return lines.join(EOL)
 }

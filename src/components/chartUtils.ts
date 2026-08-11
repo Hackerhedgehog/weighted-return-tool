@@ -67,6 +67,24 @@ export function clampHeight(h: number, r: HeightRange): number {
   return Math.min(Math.max(Math.round(h), r.min), r.max)
 }
 
+/**
+ * Y-axis zoom is multiplicative and layered on top of each chart's own
+ * auto-fit ceiling (see SimChart/BankrollChart): `effectiveYMax = autoYMax *
+ * zoom`. Bounding the *factor* rather than the resulting pixel value keeps
+ * the bounds meaningful however wide or narrow the auto range currently is.
+ */
+export interface YZoomRange {
+  min: number
+  max: number
+}
+
+export const Y_ZOOM_RANGE: YZoomRange = { min: 0.15, max: 6 }
+
+export function clampZoom(z: number, range: YZoomRange = Y_ZOOM_RANGE): number {
+  if (!Number.isFinite(z)) return 1
+  return Math.min(Math.max(z, range.min), range.max)
+}
+
 /** 1500 → "1.5k", 100000000 → "100M" — x-axis ticks for spin counts. */
 export function fmtCompact(n: number): string {
   if (!Number.isFinite(n)) return '—'

@@ -1,6 +1,7 @@
 import { useMemo, useState } from 'react'
 import { ChartReadout, type ReadoutStat } from './ChartReadout'
 import { ChartResizeGrip } from './ChartResizeGrip'
+import { ChartYAxisZoom } from './ChartYAxisZoom'
 import { fmtCompact, niceCeil, SIM_HEIGHT, useContainerWidth } from './chartUtils'
 import { fmtRtp, fmtWeight } from '../lib/format'
 
@@ -25,6 +26,9 @@ interface SimChartProps {
   expectedRtp: number
   height: number
   onHeight: (h: number) => void
+  /** Multiplies the auto-fit ceiling; 1 is auto, <1 zooms in, >1 zooms out. */
+  yZoom: number
+  onYZoom: (z: number) => void
 }
 
 const MARGIN = { top: 14, right: 74, bottom: 40, left: 64 }
@@ -36,6 +40,8 @@ export function SimChart({
   expectedRtp,
   height,
   onHeight,
+  yZoom,
+  onYZoom,
 }: SimChartProps) {
   const [containerRef, width] = useContainerWidth()
   const [hover, setHover] = useState<number | null>(null)
@@ -62,14 +68,26 @@ export function SimChart({
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [points, blockSize, requestedSpins])
 
-  const { yMax, clipped } = useMemo(() => {
-    if (points.length === 0) return { yMax: niceCeil(expectedRtp * 1.5), clipped: 0 }
+  /**
+   * The ceiling before zoom: p95 of block means, cumulative max and expected
+   * RTP, whichever is highest. Zoom (ChartYAxisZoom, below) multiplies this
+   * rather than replacing it, so a live run's growing cumulative max keeps
+   * the auto baseline moving under a zoomed-in view instead of leaving it
+   * stale.
+   */
+  const autoYMax = useMemo(() => {
+    if (points.length === 0) return niceCeil(expectedRtp * 1.5)
     const sorted = [...points].sort((a, b) => a - b)
     const p95 = sorted[Math.min(sorted.length - 1, Math.floor(sorted.length * 0.95))]
     const cumMax = cumulative.length > 0 ? Math.max(...cumulative) : 0
-    const ceil = niceCeil(Math.max(p95 * 1.15, cumMax * 1.15, expectedRtp * 1.3, 1e-9))
-    return { yMax: ceil, clipped: points.filter((v) => v > ceil).length }
+    return niceCeil(Math.max(p95 * 1.15, cumMax * 1.15, expectedRtp * 1.3, 1e-9))
   }, [points, cumulative, expectedRtp])
+
+  const yMax = autoYMax * yZoom
+
+  // Recomputed against the *effective* (zoomed) ceiling: a block that only
+  // clips once the user zooms in should count.
+  const clipped = useMemo(() => points.filter((v) => v > yMax).length, [points, yMax])
 
   const x = (spins: number) => MARGIN.left + (requestedSpins > 0 ? spins / requestedSpins : 0) * plotW
   const y = (v: number) => MARGIN.top + plotH * (1 - Math.min(v, yMax) / yMax)
@@ -207,6 +225,16 @@ export function SimChart({
           fill="transparent"
           onMouseMove={onMove}
           onMouseLeave={() => setHover(null)}
+        />
+
+        <ChartYAxisZoom
+          zoom={yZoom}
+          onZoom={onYZoom}
+          x={0}
+          y={MARGIN.top}
+          width={MARGIN.left}
+          height={plotH}
+          label="Zoom the simulation chart's y-axis"
         />
       </svg>
 

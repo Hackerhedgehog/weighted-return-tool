@@ -14,8 +14,9 @@ beforeEach(() => {
 afterEach(cleanup)
 
 /** 1000 spins in blocks of 400 → the third block runs short at 200. */
-function renderSim(height = 260) {
+function renderSim(height = 260, yZoom = 1) {
   const onHeight = vi.fn()
+  const onYZoom = vi.fn()
   render(
     <SimChart
       points={[1.5, 0.5, 1.0]}
@@ -23,10 +24,12 @@ function renderSim(height = 260) {
       requestedSpins={1000}
       expectedRtp={0.95}
       height={height}
+      yZoom={yZoom}
+      onYZoom={onYZoom}
       onHeight={onHeight}
     />,
   )
-  return onHeight
+  return { onHeight, onYZoom }
 }
 
 const readoutStats = (): Record<string, string> =>
@@ -83,10 +86,38 @@ describe('SimChart height', () => {
   })
 
   it('reports a new height when the grip is dragged', () => {
-    const onHeight = renderSim(260)
+    const { onHeight } = renderSim(260)
     const grip = screen.getByRole('separator', { name: 'Resize the simulation chart' })
     fireEvent.pointerDown(grip, { pointerId: 1, clientY: 0 })
     fireEvent.pointerMove(grip, { pointerId: 1, clientY: 40 })
     expect(onHeight).toHaveBeenLastCalledWith(300)
+  })
+})
+
+describe('SimChart y-zoom', () => {
+  it('shows no spike note at the default zoom', () => {
+    renderSim()
+    expect(screen.queryByText(/pinned to the top edge/)).toBeNull()
+  })
+
+  it('recomputes the clipped-spike count against the zoomed range', () => {
+    // autoYMax is niceCeil(1.725) = 2; zoomed to 0.5 the effective ceiling is
+    // 1, and only the 1.5 block mean sits above it.
+    renderSim(260, 0.5)
+    expect(screen.getByText(/1 spike block pinned to the top edge/)).toBeDefined()
+  })
+
+  it('renders a y-axis zoom handle', () => {
+    renderSim()
+    expect(screen.getByRole('slider', { name: "Zoom the simulation chart's y-axis" })).toBeDefined()
+  })
+
+  it('reports a new zoom factor when the handle is dragged', () => {
+    const { onYZoom } = renderSim()
+    const handle = screen.getByRole('slider', { name: "Zoom the simulation chart's y-axis" })
+    fireEvent.pointerDown(handle, { pointerId: 1, clientY: 100 })
+    fireEvent.pointerMove(handle, { pointerId: 1, clientY: 0 })
+    expect(onYZoom).toHaveBeenCalled()
+    expect(onYZoom.mock.calls.at(-1)![0]).toBeLessThan(1)
   })
 })

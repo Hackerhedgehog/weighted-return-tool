@@ -542,6 +542,13 @@ body {
   min-width: 420px;
 }
 
+/* Forces the chart onto its own line however wide the viewport is: an
+   oversized basis can never fit beside the table. */
+.content-row.force-stack > .panel.chart {
+  flex-basis: 100%;
+  min-width: 100%;
+}
+
 /* Wrapped: the table has the whole width, so centre it rather than pinning it
    to an edge the chart is no longer beside. */
 .content-row.stacked .grid-table {
@@ -1228,7 +1235,7 @@ input.gcell.editing {
 }
 
 .legend-line.cumulative {
-  border-color: var(--series-0);
+  border-color: var(--danger);
 }
 
 .legend-line.expected {
@@ -1265,7 +1272,7 @@ input.gcell.editing {
 
 .sim-cum-path {
   fill: none;
-  stroke: var(--series-0);
+  stroke: var(--danger);
   stroke-width: 2;
   stroke-linejoin: round;
   stroke-linecap: round;
@@ -1280,6 +1287,17 @@ input.gcell.editing {
 .sim-crosshair {
   stroke: var(--line-strong);
   stroke-width: 1;
+}
+
+.y-zoom-hit {
+  cursor: ns-resize;
+  touch-action: none;
+  outline: none;
+}
+
+.y-zoom-hit:focus-visible {
+  outline: 2px solid var(--accent-soft);
+  outline-offset: -2px;
 }
 
 /* ---------- paste panel ---------- */
