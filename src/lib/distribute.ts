@@ -100,6 +100,45 @@ export function groupOf(payout: number): 0 | 1 | 2 {
   return payout <= 1 ? 1 : 2
 }
 
+/**
+ * The residual loss bucket: the zero-payout row a table uses as its catch-all.
+ *
+ * Matched by label rather than by weight, because the whole point is to seed a
+ * table that has no weights yet. An exact `0x` wins outright; failing that a
+ * label carrying `0x` as a whole token — so `100x` and `1000x`, which contain
+ * the characters but name a payout, never match.
+ *
+ * Returns -1 when no zero-payout row names itself, in which case the group has
+ * no residual and splits evenly, exactly as it always has.
+ */
+const RESIDUAL_TOKEN_RE = /(^|[^0-9a-z])0x([^0-9a-z]|$)/i
+
+export function residualIndex(rows: BucketRow[]): number {
+  let token = -1
+  for (let i = 0; i < rows.length; i++) {
+    if (rows[i].payout > 0) continue
+    if (rows[i].label.trim().toLowerCase() === '0x') return i
+    if (token === -1 && RESIDUAL_TOKEN_RE.test(rows[i].label)) token = i
+  }
+  return token
+}
+
+/**
+ * How a zero-payout group with no weights of its own divides its mass.
+ *
+ * An even split leaves the residual tied with the teases — the table's most
+ * common outcome indistinguishable from its rarest. The residual takes the
+ * bulk instead; a locked residual is not in `idx` at all, so its weight stands.
+ */
+const ZERO_RESIDUAL_SHARE = 0.8
+
+function zeroShares(idx: number[], residual: number): number[] {
+  const at = idx.indexOf(residual)
+  if (at === -1 || idx.length === 1) return idx.map(() => 1 / idx.length)
+  const rest = (1 - ZERO_RESIDUAL_SHARE) / (idx.length - 1)
+  return idx.map((_, k) => (k === at ? ZERO_RESIDUAL_SHARE : rest))
+}
+
 export function statsOf(rows: BucketRow[], totalWeight: number): Stats {
   if (!(totalWeight > 0)) return { rtp: NaN, hitChance: NaN, winChance: NaN }
   let rtp = 0
@@ -183,6 +222,7 @@ interface Ctx {
   totalLocked: number
   total: number
   curve: number
+  residual: number
 }
 
 function buildCtx(rows: BucketRow[], total: number, curve: number): Ctx {
@@ -209,7 +249,10 @@ function buildCtx(rows: BucketRow[], total: number, curve: number): Ctx {
     }
   })
 
-  return { n, payouts, locked, current, u, freeIdx, lockedSum, totalLocked, total, curve }
+  return {
+    n, payouts, locked, current, u, freeIdx, lockedSum, totalLocked, total, curve,
+    residual: residualIndex(rows),
+  }
 }
 
 function massesFor(targets: Targets, s: number, total: number): number[] {
@@ -283,7 +326,7 @@ function continuousWeights(
       // principled curve for them, so keep whatever balance the user has.
       const base = idx.map((i) => ctx.current[i])
       const sum = base.reduce((a, b) => a + b, 0)
-      const props = sum > 0 ? base.map((b) => b / sum) : idx.map(() => 1 / idx.length)
+      const props = sum > 0 ? base.map((b) => b / sum) : zeroShares(idx, ctx.residual)
       idx.forEach((i, k) => {
         w[i] = props[k] * budget
       })
@@ -338,16 +381,15 @@ function solveGamma(ctx: Ctx, budgets: number[], target: number, pooled = false)
  * it where the user already has it keeps the reported chances honest while
  * leaving RTP as the only thing being solved for.
  */
-function currentMasses(ctx: Ctx): number[] {
+function currentMasses(ctx: Ctx, targets: Targets): number[] {
   const sums = [0, 1, 2].map(
     (g) => ctx.lockedSum[g] + ctx.freeIdx[g].reduce((a, i) => a + ctx.current[i], 0),
   )
   const tot = sums.reduce((a, b) => a + b, 0)
-  if (!(tot > 0)) {
-    const counts = [0, 1, 2].map((g) => ctx.freeIdx[g].length)
-    const n = counts.reduce((a, b) => a + b, 0)
-    return n > 0 ? counts.map((c) => (ctx.total * c) / n) : [ctx.total, 0, 0]
-  }
+  // Nothing to preserve. Sizing by member count would hand the zero group a
+  // share with no relation to mass, so fall back to the chance targets' own
+  // split even though they are switched off.
+  if (!(tot > 0)) return massesFor(targets, 0, ctx.total)
   return sums.map((s) => (s / tot) * ctx.total)
 }
 
@@ -548,7 +590,7 @@ export function solveWeights(
 
   if (pooled) {
     // Nothing to search: with no chance targets there is no band to spend.
-    const { budgets, conflict } = freeBudgets(ctx, currentMasses(ctx))
+    const { budgets, conflict } = freeBudgets(ctx, currentMasses(ctx, targets))
     const [min, max] = reachRange(ctx, budgets, true)
     chosen = {
       s: 0,

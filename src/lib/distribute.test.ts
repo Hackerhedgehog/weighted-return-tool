@@ -5,6 +5,7 @@ import {
   groupOf,
   largestRemainder,
   rescaleToTotal,
+  residualIndex,
   retargetRtp,
   solveWeights,
   statsOf,
@@ -450,5 +451,56 @@ describe('solver switches', () => {
     )
     expect(r.weights[wi]).toBe(5000)
     expect(sum(r.weights)).toBe(T)
+  })
+})
+
+describe('the zero-payout residual', () => {
+  it('picks the bucket labelled 0x', () => {
+    expect(rows[residualIndex(rows)].label).toBe('0x')
+  })
+
+  it('ignores payout labels that merely contain the characters', () => {
+    const table = [
+      { ...rows[0], payout: 0, label: '1000x' },
+      { ...rows[1], payout: 0, label: '100x' },
+    ]
+    expect(residualIndex(table)).toBe(-1)
+  })
+
+  it('accepts 0x as a token inside a longer label', () => {
+    expect(residualIndex([{ ...rows[0], payout: 0, label: 'lose-0x-total' }])).toBe(0)
+  })
+
+  it('never picks a paying bucket', () => {
+    expect(residualIndex([{ ...rows[0], payout: 2, label: '0x' }])).toBe(-1)
+  })
+
+  it('gives the residual the bulk of the zero mass on a weightless table', () => {
+    const r = solveWeights(rows, T, DEFAULT_TARGETS, CURVE_PRESETS.medium)
+    const zeros = rows.map((_, i) => i).filter((i) => rows[i].payout === 0)
+    const zeroSum = zeros.reduce((a, i) => a + r.weights[i], 0)
+    expect(r.weights[residualIndex(rows)] / zeroSum).toBeCloseTo(0.8, 2)
+  })
+
+  it('splits evenly when no bucket names itself the residual', () => {
+    const anon = rows.map((r) => (r.payout === 0 ? { ...r, label: `dud-${r.bucketId}` } : r))
+    const r = solveWeights(anon, T, DEFAULT_TARGETS, CURVE_PRESETS.medium)
+    const got = anon.map((_, i) => i).filter((i) => anon[i].payout === 0).map((i) => r.weights[i])
+    expect(Math.max(...got) - Math.min(...got)).toBeLessThanOrEqual(1)
+  })
+
+  it('preserves an existing zero balance rather than reshaping it', () => {
+    const seeded = solveWeights(rows, T, DEFAULT_TARGETS, CURVE_PRESETS.medium).weights
+    const hand = withWeights(seeded).map((r) => (r.payout === 0 ? { ...r, weight: 100_000 } : r))
+    const total = hand.reduce((a, r) => a + r.weight, 0)
+    const again = solveWeights(hand, total, DEFAULT_TARGETS, CURVE_PRESETS.medium)
+    const got = hand.map((_, i) => i).filter((i) => hand[i].payout === 0).map((i) => again.weights[i])
+    expect(Math.max(...got) - Math.min(...got)).toBeLessThanOrEqual(1)
+  })
+
+  it('sizes the zero group by mass, not member count, with chances off', () => {
+    const off = { ...DEFAULT_TARGETS, useChances: false }
+    const r = solveWeights(rows, T, off, CURVE_PRESETS.medium)
+    expect(statsOf(withWeights(r.weights), T).hitChance).toBeCloseTo(0.3, 2)
   })
 })
