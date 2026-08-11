@@ -685,7 +685,14 @@ function levelBoundary(ctx: Ctx, budgets: number[], w: number[], step: number): 
  */
 function raiseResidual(ctx: Ctx, budgets: number[], w: number[], step: number): number {
   const gap = dominanceGap(ctx, w)
-  if (gap <= 0) return 0
+  // Clear the ladder by a full step rather than merely tie it. The caller
+  // re-solves gamma after every shift, so a margin sized against the
+  // pre-re-solve shapes can collapse back to nothing — and `allocate` then
+  // rounds the repair away, leaving the residual a unit or two short of a
+  // bucket it is supposed to dominate. Nothing downstream catches that:
+  // Task 6's `enforceOrder` walks the positive ladder only, and the residual
+  // pays 0.
+  if (gap <= -step) return 0
   const paying = budgets[1] + budgets[2]
   if (!(paying > 0) || !(budgets[0] > 0)) return 0
 
@@ -693,13 +700,51 @@ function raiseResidual(ctx: Ctx, budgets: number[], w: number[], step: number): 
   const top = w[ctx.residual] + gap
   const members = ctx.freeIdx[1].length + ctx.freeIdx[2].length
   const room = Math.max(0, paying - members * step)
-  const d = Math.min((gap + step) / Math.max(share + top / paying, 1e-9), room)
+  const d = Math.min((gap + 2 * step) / Math.max(share + top / paying, 1e-9), room)
   if (!(d > 0)) return 0
 
+  const keep = (paying - d) / paying
   budgets[0] += d
-  budgets[1] -= (d * budgets[1]) / paying
-  budgets[2] -= (d * budgets[2]) / paying
+  budgets[1] *= keep
+  budgets[2] *= keep
   return d
+}
+
+/**
+ * Give the residual back whatever the integer split took off it.
+ *
+ * The continuous solve leaves it clear of the ladder, but `allocate` divides
+ * the zero-payout group with a one-step-per-bucket floor, which costs the
+ * residual roughly its share of that floor — about three units on the
+ * reference table's five-bucket group. Sizing the continuous cushion to absorb
+ * that would spend hit chance the table does not need, and the size of the
+ * loss depends on the group's bucket count, so a fixed cushion is the wrong
+ * shape. Moving the units back afterwards is exact.
+ *
+ * The weight comes off the top of the ladder, which is the lowest-paying
+ * bucket there is, so this is the cheapest repair available in RTP terms — and
+ * `repairRtp` runs afterwards to take back what little it costs.
+ */
+function restoreResidual(ctx: Ctx, w: number[], step: number): void {
+  const r = ctx.residual
+  if (r === -1 || ctx.locked[r]) return
+  const ladder = [...ctx.freeIdx[1], ...ctx.freeIdx[2]]
+  if (ladder.length === 0) return
+
+  // Closing the gap against one bucket can leave another on top; each pass
+  // fixes the current highest, so the ladder's length bounds the work.
+  for (let pass = 0; pass < ladder.length; pass++) {
+    let top = ladder[0]
+    for (const i of ladder) if (w[i] > w[top]) top = i
+    if (w[top] <= w[r]) return
+    const give = Math.min(
+      Math.ceil((w[top] - w[r]) / 2 / step) * step,
+      Math.max(0, w[top] - step),
+    )
+    if (give <= 0) return
+    w[top] -= give
+    w[r] += give
+  }
 }
 
 export function solveWeights(
@@ -871,6 +916,7 @@ export function solveWeights(
   }
 
   const weights = allocate(solveCtx, cont, step)
+  restoreResidual(solveCtx, weights, step)
   repairRtp(solveCtx, weights, targets.rtp, step)
 
   const achieved = statsOf(
@@ -903,7 +949,7 @@ export function solveWeights(
   // Reachability is a property of the continuous solve. Integer rounding
   // leaves a residue whose size depends on the closest pair of payouts on the
   // ladder, so it is not evidence that the target was unreachable.
-  const [min, max] = reachRange(solveCtx, chosen.budgets, pooled)
+  const [min, max] = reachRange(solveCtx, budgets, pooled)
   if (!(targets.rtp >= min - 1e-12 && targets.rtp <= max + 1e-12)) {
     warnings.push(
       `Target RTP ${targets.rtp} is out of reach at these chances — achieved ${achieved.rtp.toFixed(6)}.`,
@@ -919,24 +965,26 @@ export function solveWeights(
       )
     }
   }
-  if (yieldedHit) {
-    warnings.push(
-      `Hit chance yielded to payout ordering — achieved ${achieved.hitChance.toFixed(3)} against a target of ${targets.hitChance}.`,
-    )
-  }
-  if (yieldedWin) {
-    warnings.push(
-      `Win chance yielded to payout ordering — achieved ${achieved.winChance.toFixed(3)} against a target of ${targets.winChance}.`,
-    )
-  }
   if (!settled) {
     warnings.push('Weights could not be brought into payout order within the solver’s iteration limit.')
   }
 
   // Nothing to report against when the chances are not being steered.
   if (targets.useChances) {
-    if (!yieldedHit) outOfBand('hit chance', achieved.hitChance, targets.hitChance)
-    if (!yieldedWin) outOfBand('win chance', achieved.winChance, targets.winChance)
+    if (yieldedHit) {
+      warnings.push(
+        `Hit chance yielded to payout ordering — achieved ${achieved.hitChance.toFixed(3)} against a target of ${targets.hitChance}.`,
+      )
+    } else {
+      outOfBand('hit chance', achieved.hitChance, targets.hitChance)
+    }
+    if (yieldedWin) {
+      warnings.push(
+        `Win chance yielded to payout ordering — achieved ${achieved.winChance.toFixed(3)} against a target of ${targets.winChance}.`,
+      )
+    } else {
+      outOfBand('win chance', achieved.winChance, targets.winChance)
+    }
   }
 
   return { weights, achieved, bandUsed: chosen.s, gamma, curveUsed, warnings }

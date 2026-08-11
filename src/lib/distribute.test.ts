@@ -639,6 +639,34 @@ describe('ordering against the chance targets', () => {
     expect(sum(r.weights)).toBe(T)
   })
 
+  it('keeps the residual dominant through the integer stage, not just the solve', () => {
+    // A low win chance leaves the residual and the top of the ladder nearly
+    // tied, so a margin that survives the solve but not the rounding shows up
+    // here and nowhere else. Nothing downstream would catch it: the ordering
+    // sweep walks the positive ladder, and the residual pays 0.
+    for (const hitChance of [0.75, 0.9, 0.95]) {
+      const r = solveWeights(rows, T, { ...DEFAULT_TARGETS, hitChance, winChance: 0.02 }, CURVE_PRESETS.medium)
+      const res = residualIndex(rows)
+      const top = Math.max(...r.weights.filter((_, i) => i !== res))
+      expect({ hitChance, dominant: r.weights[res] >= top }).toEqual({ hitChance, dominant: true })
+    }
+  })
+
+  it('does not report a chance target it was never steering', () => {
+    const off = { ...DEFAULT_TARGETS, hitChance: 0.9, winChance: 0.85, useChances: false }
+    const r = solveWeights(rows, T, off, CURVE_PRESETS.medium)
+    expect(r.warnings.filter((w) => w.includes('chance'))).toEqual([])
+  })
+
+  it('does not claim RTP was out of reach when it landed on target', () => {
+    const greedy = { ...DEFAULT_TARGETS, hitChance: 0.9, winChance: 0.85 }
+    const r = solveWeights(rows, T, greedy, CURVE_PRESETS.medium)
+    const achieved = statsOf(withWeights(r.weights), T).rtp
+    if (Math.abs(achieved - 0.95) < 1e-4) {
+      expect(r.warnings.some((w) => w.includes('out of reach'))).toBe(false)
+    }
+  })
+
   it('shifts nothing, and warns about nothing, on a table that needs neither', () => {
     const r = solveWeights(rows, T, DEFAULT_TARGETS, CURVE_PRESETS.medium)
     expect(r.warnings).toHaveLength(0)
