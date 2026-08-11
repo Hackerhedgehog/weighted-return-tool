@@ -132,6 +132,14 @@ floor is simply unenforceable there and today's `minOne` behavior stands. Only
 Auto-Distribute, which chooses the group sums, can guarantee the floor — and a
 table that came from Auto-Distribute already satisfies it.
 
+The same boundary applies to ordering. `retargetRtp` orders each band before it
+repairs RTP, but the repair itself runs **unguarded**: reaching the typed figure
+is what the RTP cell is for, RTP outranks ordering, and the function returns a
+bare `number[] | null` with nowhere to report a yield. Guarding it trades RTP
+accuracy away silently — measured worst case, a target of 1.4 landing on 0.82.
+Ordering is improved on that path; it is guaranteed only through
+Auto-Distribute.
+
 ### 2. Payout-ordered weights
 
 #### Invariants

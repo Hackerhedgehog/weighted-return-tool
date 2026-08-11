@@ -1192,18 +1192,73 @@ describe('the ladder stays in order', () => {
     expect(sum(r.weights)).toBe(T)
   })
 
-  it('keeps the ladder ordered through an RTP-cell retarget', () => {
+  it('orders a short band, where the cascade outruns the ladder length', () => {
+    // Four buckets above 1x. Each repair halves the excess and can break the
+    // pair below it, so the cascade needs more passes than there are rungs —
+    // the reference table's long, nearly-ordered ladder never exercises this.
+    const short: BucketRow[] = [0, 0.25, 0.5, 1, 2, 10, 50, 500].map((payout, i) => ({
+      uid: `s${i}`,
+      bucketId: i,
+      payout,
+      label: `${payout}x`,
+      weight: 0,
+      locked: false,
+      groupId: '',
+      weightId: '',
+    }))
+    for (const step of [1, 10, 100] as const) {
+      const r = solveWeights(short, 1_000_000, DEFAULT_TARGETS, CURVE_PRESETS.medium, step)
+      expect({ step, bad: inversions(short, r.weights) }).toEqual({ step, bad: [] })
+      expect(sum(r.weights)).toBe(1_000_000)
+      expect(Math.min(...r.weights)).toBeGreaterThanOrEqual(step)
+    }
+  })
+
+  it('reaches a retargeted RTP without moving the chances or going negative', () => {
+    // The RTP cell's contract. Ordering is improved on this path but not
+    // guaranteed: RTP outranks it and `retargetRtp` has nowhere to report a
+    // yield, so its repair runs unguarded.
     const start = solveWeights(rows, T, DEFAULT_TARGETS, CURVE_PRESETS.medium).weights
     const before = statsOf(withWeights(start), T)
     for (const rtp of [0.8, 1.05, 1.4]) {
       const out = retargetRtp(withWeights(start), T, rtp)!
       const after = statsOf(withWeights(out), T)
-      expect({ rtp, bad: inversions(rows, out) }).toEqual({ rtp, bad: [] })
+      expect({ rtp, achieved: after.rtp.toFixed(3) }).toEqual({ rtp, achieved: rtp.toFixed(3) })
       expect(sum(out)).toBe(T)
+      expect(Math.min(...out)).toBeGreaterThanOrEqual(0)
       // the whole point of the RTP cell: the chances do not budge
       expect(after.hitChance).toBeCloseTo(before.hitChance, 5)
       expect(after.winChance).toBeCloseTo(before.winChance, 5)
     }
+  })
+
+  it('never emits a negative weight when a group sits below its own floor', () => {
+    // Five win buckets sharing 300 at step 100: `largestRemainder` drops its
+    // one-step floor when the budget cannot go round, so some land on 0 — and
+    // a repair that treats one step as an unconditional minimum inverts its
+    // own clamp range on them.
+    const sparse: BucketRow[] = [
+      [0, 990_000],
+      [0.5, 9_700],
+      [2, 100],
+      [10, 100],
+      [50, 100],
+      [200, 0],
+      [1000, 0],
+    ].map(([payout, weight], i) => ({
+      uid: `n${i}`,
+      bucketId: i,
+      payout,
+      label: `${payout}x`,
+      weight,
+      locked: false,
+      groupId: '',
+      weightId: '',
+    }))
+    const out = retargetRtp(sparse, 1_000_000, 0.95, 100)
+    expect(out).not.toBeNull()
+    expect(Math.min(...out!)).toBeGreaterThanOrEqual(0)
+    expect(sum(out!)).toBe(1_000_000)
   })
 
   it('reports a lock that sits out of payout order instead of moving it', () => {
@@ -1249,12 +1304,20 @@ function inOrder(ctx: Ctx, w: number[], ladder: number[]): boolean {
  * Every fix is a transfer, so the total never moves, and weight only ever
  * travels *down* the ladder — the pairs being repaired are adjacent in payout,
  * so RTP falls by at most step × the payout gap over the total (4e-6 at step
- * 100 on the reference table). Lifting a bucket can break the pair below it,
- * hence the repeated passes; a single pair settles in one transfer, so the
- * bound is far looser than it needs to be.
+ * 100 on the reference table).
+ *
+ * It terminates: each transfer moves at least one step from a higher-payout
+ * bucket to the one below it, so the position-weighted sum `Σ k·w[ladder[k]]`
+ * strictly falls by at least `step` every time, and it is bounded below by
+ * zero. The pass cap is a runaway guard, not the thing that stops the sweep.
+ *
+ * It needs more passes than the ladder is long. Lifting a bucket can break the
+ * pair below it, and because each fix *halves* the excess rather than swapping,
+ * the resulting cascade converges geometrically rather than one rung per pass —
+ * a four-bucket band can need seven.
  */
 function enforceOrder(ctx: Ctx, w: number[], step: number, ladder: number[]): void {
-  for (let pass = 0; pass < ladder.length; pass++) {
+  for (let pass = 0; pass < ladder.length * 50 + 100; pass++) {
     let moved = false
     for (let k = 1; k < ladder.length; k++) {
       const lo = ladder[k - 1]
@@ -1310,9 +1373,16 @@ function transfer(
   const span = ctx.payouts[hi] - ctx.payouts[lo]
   if (!(span > 0)) return
 
+  // Keep the existing conditional floors. Replacing them with a bare `step`
+  // inverts the clamp's range whenever a bucket already sits below one step —
+  // `largestRemainder` drops its floor when a group's budget cannot go round —
+  // and `clamp` then returns its upper bound unconditionally, emitting a
+  // negative weight straight into the document.
+  const minLo = w[lo] >= step ? step : 0
+  const minHi = w[hi] >= step ? step : 0
   const err = () => (target - rtpOf(ctx, w)) * ctx.total
 
-  const d = clamp(Math.round(err() / span / step) * step, -(w[hi] - step), w[lo] - step)
+  const d = clamp(Math.round(err() / span / step) * step, -(w[hi] - minHi), w[lo] - minLo)
   if (d !== 0) {
     w[lo] -= d
     w[hi] += d
@@ -1326,8 +1396,8 @@ function transfer(
     const before = Math.abs(err())
     if (before === 0) return
     const dir = err() > 0 ? 1 : -1
-    if (dir === 1 && w[lo] - step < step) return
-    if (dir === -1 && w[hi] - step < step) return
+    if (dir === 1 && w[lo] - step < minLo) return
+    if (dir === -1 && w[hi] - step < minHi) return
     w[lo] -= dir * step
     w[hi] += dir * step
     if (Math.abs(err()) >= before || !inOrder(ctx, w, ladder)) {
@@ -1380,11 +1450,17 @@ Two things about that block are load-bearing:
 and add the locked note beside the other warnings, after `achieved` is computed:
 
 ```ts
-  const lockNote = lockedOrderNote(solveCtx, rows, weights)
-  if (lockNote !== null) warnings.push(lockNote)
+  // Only in the ordered regime. Once ordering has yielded the ladder is
+  // inverted everywhere on purpose, and any lock that happens to sit beside one
+  // of those inversions would be blamed for a mess it did not make — unlocking
+  // it would change nothing.
+  if (solveCtx.ordered) {
+    const lockNote = lockedOrderNote(solveCtx, rows, weights)
+    if (lockNote !== null) warnings.push(lockNote)
+  }
 ```
 
-`retargetRtp` also needs both. It promises to preserve each group's unlocked sum exactly, so it must order the two bands **separately** — `enforceOrder` only ever moves weight inside the index list it is handed, so a per-band call keeps each sum intact while a whole-ladder call would not. Add before its existing `repairRtp` call:
+`retargetRtp` gets `enforceOrder` but **not** the order guard on its repair:
 
 ```ts
   // Each band on its own: the tilt above preserves every group's unlocked sum,
@@ -1393,7 +1469,13 @@ and add the locked note beside the other warnings, after `achieved` is computed:
   for (const g of [1, 2] as const) {
     enforceOrder(ctx, result, step, ladder.filter((i) => groupOf(ctx.payouts[i]) === g))
   }
-  repairRtp(ctx, result, targetRtp, step, ladder)
+  // Unguarded, deliberately. This is the RTP cell: reaching the typed figure is
+  // the whole point of it, RTP outranks ordering, and `retargetRtp` returns a
+  // bare `number[] | null` with nowhere to report a yield. Guarding it here
+  // silently trades away RTP accuracy — measured worst case, a target of 1.4
+  // landing on 0.82 — with nothing on screen to explain why. Ordering is
+  // improved on this path but guaranteed only through Auto-Distribute.
+  repairRtp(ctx, result, targetRtp, step, [])
 ```
 
 - [ ] **Step 4: Run the tests to verify they pass**
