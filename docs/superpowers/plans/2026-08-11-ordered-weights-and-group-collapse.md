@@ -534,17 +534,34 @@ Then add the suite:
 describe('the per-band slope floor', () => {
   it('stops the curve rising at very low volatility', () => {
     const r = solveWeights(rows, T, DEFAULT_TARGETS, CURVE_PRESETS['very low'])
-    const l = ladderOf(rows, r.weights)
-    // 0.33x used to come out well below 0.6x
-    expect(l[0].w).toBeGreaterThanOrEqual(l[1].w)
+    const at = (payout: number) => r.weights[rows.findIndex((row) => row.payout === payout)]
+    // every pair the unclamped curve used to invert, in ladder order. Checking
+    // one pair would pass on a solve that still rises three rungs higher up.
+    expect(at(0.33)).toBeGreaterThanOrEqual(at(0.6))
+    expect(at(1.8)).toBeGreaterThanOrEqual(at(2))
+    expect(at(2)).toBeGreaterThanOrEqual(at(2.12))
+    expect(at(2.12)).toBeGreaterThanOrEqual(at(2.61))
     expect(statsOf(withWeights(r.weights), T).rtp).toBeCloseTo(0.95, 6)
   })
 
-  it('keeps every volatility preset usable at RTP 0.95', () => {
+  it('keeps every volatility preset hitting RTP 0.95', () => {
     for (const v of VOLATILITY_STEPS) {
       const r = solveWeights(rows, T, DEFAULT_TARGETS, CURVE_PRESETS[v])
-      expect(statsOf(withWeights(r.weights), T).rtp).toBeCloseTo(0.95, 6)
-      expect({ v, warnings: r.warnings }).toEqual({ v, warnings: [] })
+      expect({ v, rtp: statsOf(withWeights(r.weights), T).rtp.toFixed(6) }).toEqual({
+        v,
+        rtp: '0.950000',
+      })
+    }
+  })
+
+  it('flattens only the preset whose ordered ceiling falls short', () => {
+    for (const v of VOLATILITY_STEPS) {
+      const r = solveWeights(rows, T, DEFAULT_TARGETS, CURVE_PRESETS[v])
+      expect({
+        v,
+        flattened: r.curveUsed < CURVE_PRESETS[v] - 1e-9,
+        warned: r.warnings.some((w) => w.includes('Volatility flattened')),
+      }).toEqual({ v, flattened: v === 'very low', warned: v === 'very low' })
     }
   })
 
@@ -552,6 +569,8 @@ describe('the per-band slope floor', () => {
     const r = solveWeights(rows, T, { ...DEFAULT_TARGETS, rtp: 50 }, CURVE_PRESETS.medium)
     expect(statsOf(withWeights(r.weights), T).rtp).toBeCloseTo(50, 4)
     expect(r.warnings.some((w) => w.includes('ordering yielded'))).toBe(true)
+    // flattening bought nothing there, so the user's curvature comes back
+    expect(r.curveUsed).toBe(CURVE_PRESETS.medium)
   })
 })
 ```
@@ -584,21 +603,59 @@ Add above `continuousWeights`:
  *
  *   -γ·u_i - c·u_i²  ≥  -γ·u_j - c·u_j²   ⟺   γ ≥ -c·(u_i + u_j)
  *
+ * Every consecutive pair has to hold, so the binding bound is the largest of
+ * them — and `-c·(u_i + u_j)` is least negative where the pair sits lowest.
+ * The bottom rung of a band constrains it; the rest follow.
+ *
  * A band that starts well up the ladder therefore tolerates a far flatter
- * slope than one starting at u = 0. That gap is the whole reason every
- * volatility preset survives: a blanket floor of 0 puts RTP 0.95 out of reach
- * at the two lowest presets, and flattening the curve to compensate collapses
- * them onto the same shape.
+ * slope than one starting at u = 0: band 2's lowest pair is 1.8x and 2x, five
+ * times further up than band 1's. That gap is why a blanket floor of 0 — which
+ * would put RTP 0.95 out of reach at the two lowest presets — is stricter than
+ * ordering actually needs.
  */
 function bandFloor(ctx: Ctx, idx: number[]): number {
   const order = [...idx].sort((a, b) => ctx.u[a] - ctx.u[b])
-  let floor = 0
+  let lowestPair = Infinity
   for (let k = 1; k < order.length; k++) {
     const a = ctx.u[order[k - 1]]
     const b = ctx.u[order[k]]
-    if (b > a) floor = Math.min(floor, -ctx.curve * (a + b))
+    if (b > a) lowestPair = Math.min(lowestPair, a + b)
   }
-  return floor
+  return Number.isFinite(lowestPair) ? -ctx.curve * lowestPair : 0
+}
+```
+
+Note carefully: `Math.min` here picks the band's **lowest pair sum**, which then becomes the **largest** (least negative) bound once negated. Minimising the negated bound directly would pick the band's top pair — the loosest bound in the set — and leave a 23-member band effectively unclamped.
+
+And, beside it, the lever that yields when that floor is not enough:
+
+```ts
+/**
+ * The steepest curvature no greater than the user's that still reaches the RTP
+ * target with the ladder in order, or null when even a straight line cannot.
+ *
+ * The slope floor is proportional to the curvature, so a heavy curve works
+ * against itself twice: it bends the tail down *and* pins the slope further
+ * from flat. Past a point the two together put the target out of ordered
+ * reach. Volatility ranks below ordering, so it is what gives — on the
+ * reference table only `very low` needs it, flattening 0.32 to 0.265.
+ */
+function fitCurve(ctx: Ctx, budgets: number[], target: number, pooled: boolean): number | null {
+  const reaches = (c: number) => {
+    const [min, max] = reachRange({ ...ctx, curve: c }, budgets, pooled)
+    return target >= min - 1e-12 && target <= max + 1e-12
+  }
+  if (reaches(ctx.curve)) return ctx.curve
+  if (!reaches(0)) return null
+
+  let lo = 0
+  let hi = ctx.curve
+  for (let k = 0; k < BISECTION_STEPS; k++) {
+    const mid = (lo + hi) / 2
+    if (reaches(mid)) lo = mid
+    else hi = mid
+  }
+  return lo
 }
 ```
 
@@ -660,25 +717,42 @@ Replace the whole band-search block in `solveWeights` — the `Candidate` interf
     return { s: 0, budgets, conflict, reachable: reaches(budgets) }
   }
 
-  // Ordering ranks above the chance preferences but below the RTP target, so
-  // when no band position reaches the target with the ladder in order, the
-  // ladder is what gives — and the search runs again without it. Flattening
-  // the curve is not an alternative: a heavier curve lowers band 2's floor and
-  // therefore *raises* the ceiling, so flattening would move the target
-  // further away.
+  // The ranking decides what gives when the target is out of ordered reach:
+  // volatility ranks below ordering, so the curve flattens first; only when
+  // even a straight line cannot reach the target does the ladder itself yield,
+  // and then the user's curvature comes back, since flattening it bought
+  // nothing.
   let solveCtx = ctx
   let chosen = chooseBand(ctx)
-  const orderedReach = chosen.reachable
-  if (!orderedReach) {
-    solveCtx = { ...ctx, ordered: false }
-    chosen = chooseBand(solveCtx)
+  let curveUsed = ctx.curve
+  let orderYielded = false
+
+  if (!chosen.reachable) {
+    const flat = fitCurve(ctx, chosen.budgets, targets.rtp, pooled)
+    const flattened = flat === null ? null : chooseBand({ ...ctx, curve: flat })
+    if (flat !== null && flattened !== null && flattened.reachable) {
+      solveCtx = { ...ctx, curve: flat }
+      chosen = flattened
+      curveUsed = flat
+    } else {
+      solveCtx = { ...ctx, ordered: false }
+      chosen = chooseBand(solveCtx)
+      orderYielded = true
+    }
   }
 ```
 
-Use `solveCtx` for the `solveGamma`, `continuousWeights`, `allocate` and `repairRtp` calls that follow, and add the warning beside the existing reachability one:
+Use `solveCtx` for the `solveGamma`, `continuousWeights`, `allocate` and `repairRtp` calls that follow. Add `curveUsed: number` to the `SolveResult` interface, return it from `solveWeights`, and give the `empty` result `curveUsed: targets.useVolatility ? curve : 0` so every return path carries it.
+
+Add both warnings beside the existing reachability one:
 
 ```ts
-  if (!orderedReach) {
+  if (curveUsed < ctx.curve - 1e-9) {
+    warnings.push(
+      `Volatility flattened (curve ${ctx.curve} → ${curveUsed.toFixed(3)}) to keep weights ordered by payout while hitting RTP ${targets.rtp}.`,
+    )
+  }
+  if (orderYielded) {
     warnings.push(
       `Weights could not be kept in payout order at RTP ${targets.rtp} — ordering yielded to the RTP target.`,
     )
@@ -703,7 +777,7 @@ Recompute the final reachability warning against `solveCtx` rather than `chosen.
 Run: `npm run test:run`
 Expected: PASS. Two existing tests are load-bearing here and neither may be weakened:
 
-- `volatility` → `monotonically thins the big-payout tail as volatility falls` keeps its strict `toBeLessThan` — the measured tails are 878 / 764 / 581 / 328 / 109. If it fails, the clamp is landing on the wrong band.
+- `volatility` → `monotonically thins the big-payout tail as volatility falls` keeps its strict `toBeLessThan` — the measured tails are 878 / 764 / 581 / 328 / 172. If it fails, the clamp is landing on the wrong band, or `bandFloor` is picking the band's top pair instead of its bottom one.
 - `the tolerance band` → `opens only when the target is otherwise unreachable` is why `chooseBand` runs twice. With `winChance: 0.0005` the ordered ceiling never reaches RTP 0.7–0.82 at any band position, so the ordered pass finds nothing; the unordered re-run is what re-opens the band at `s = 0.86`. A single pass that froze the ordered pass's `s = 0` budgets would fail this test.
 
 - [ ] **Step 5: Lint and commit**
