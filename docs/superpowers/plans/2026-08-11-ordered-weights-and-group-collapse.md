@@ -866,6 +866,17 @@ describe('ordering against the chance targets', () => {
     expect(r.warnings.filter((w) => w.includes('chance'))).toEqual([])
   })
 
+  it('leaves the ladder alone once ordering has yielded', () => {
+    // Ordering gave way to reach this target, so the solve is deliberately
+    // piling mass on the top of the ladder. Forcing the residual back above it
+    // would take that mass straight off again, and repairRtp cannot pull it
+    // back out of the zero band.
+    const steep = { ...DEFAULT_TARGETS, hitChance: 0.9, winChance: 0.85, rtp: 700 }
+    const r = solveWeights(rows, T, steep, CURVE_PRESETS.medium)
+    expect(r.warnings.some((w) => w.includes('ordering yielded'))).toBe(true)
+    expect(Math.abs(statsOf(withWeights(r.weights), T).rtp - 700)).toBeLessThan(1)
+  })
+
   it('does not claim RTP was out of reach when it landed on target', () => {
     const greedy = { ...DEFAULT_TARGETS, hitChance: 0.9, winChance: 0.85 }
     const r = solveWeights(rows, T, greedy, CURVE_PRESETS.medium)
@@ -1018,9 +1029,11 @@ In `solveWeights`, replace the single `solveGamma` / `continuousWeights` pair wi
   }
 
   const weights = allocate(solveCtx, cont, step)
-  restoreResidual(solveCtx, weights, step)
+  if (solveCtx.ordered) restoreResidual(solveCtx, weights, step)
   repairRtp(solveCtx, weights, targets.rtp, step)
 ```
+
+The guard matters as much as the call. Residual dominance is an *ordering* rule, and once ordering has yielded the solve is deliberately concentrating mass on the ladder's top bucket to reach the RTP target. Repairing the residual there would siphon weight straight back off that bucket, and `repairRtp` cannot undo it — it only reshuffles within the win band, never pulls weight back out of the zero band. The result is a solve tens of percent below its target with nothing said about it. The continuous-stage helpers are already skipped in that regime by the loop's `if (!solveCtx.ordered) break`; this is the same rule applied to the integer stage.
 
 `restoreResidual` is the last piece, and it goes beside the two shift helpers:
 

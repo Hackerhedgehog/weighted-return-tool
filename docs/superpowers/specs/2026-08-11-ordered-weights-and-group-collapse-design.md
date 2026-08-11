@@ -307,7 +307,11 @@ bucket it is supposed to dominate. The loss scales with the group's bucket
 count, so no fixed cushion in the continuous solve is the right shape; moving
 the units back afterwards is exact. It runs *after* `enforceOrder`, which
 pushes weight down the ladder and can otherwise lift the lowest-paying bucket
-back over the residual.
+back over the residual — and, like every other ordering repair, only when the
+solve is in the ordered regime. Once ordering has yielded, the solve is
+deliberately concentrating mass on the top of the ladder to reach the RTP
+target; taking it back off to satisfy an ordering rule the solve has already
+given up would miss the target with nothing said about it.
 
 #### Zero-payout split
 
