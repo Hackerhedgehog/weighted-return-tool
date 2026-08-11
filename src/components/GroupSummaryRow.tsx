@@ -3,16 +3,6 @@ import { fmtDecimal, fmtPayout, fmtWeight } from '../lib/format'
 import { rowTint } from '../lib/palette'
 import { GridCell, LockCell, type CellNavProps } from './cells'
 
-/**
- * One collapsed bucket group, as a single grid row.
- *
- * Weights, weighted value and chance are sums, so the columns still foot to
- * the totals row; payout is the weight-weighted mean, which is the same figure
- * the distribution chart puts a collapsed group bar at. Every cell is
- * read-only — an aggregate has no single row to write back to — except the
- * lock, which sets every member at once.
- */
-
 interface GroupSummaryRowProps {
   unit: Extract<TableRow, { kind: 'group' }>
   rowIdx: number
@@ -24,6 +14,15 @@ interface GroupSummaryRowProps {
   onKeyDown: (e: React.KeyboardEvent) => void
 }
 
+/**
+ * One collapsed bucket group, as a single grid row.
+ *
+ * Weights, weighted value and chance are sums, so the columns still foot to
+ * the totals row; payout is the weight-weighted mean, which is the same figure
+ * the distribution chart puts a collapsed group bar at. Every cell is
+ * read-only — an aggregate has no single row to write back to — except the
+ * lock, which sets every member at once.
+ */
 export function GroupSummaryRow({
   unit,
   rowIdx,

@@ -1,4 +1,4 @@
-import { useCallback, useState } from 'react'
+import { useCallback, useMemo, useState } from 'react'
 
 export interface CellPos {
   row: number
@@ -61,9 +61,26 @@ export function useGridNavigation(opts: Options): GridNav {
   } = opts
   const pageSize = opts.pageSize ?? 12
 
-  const [sel, setSel] = useState<CellPos>({ row: 0, col: 0 })
+  const [rawSel, setSel] = useState<CellPos>({ row: 0, col: 0 })
   const [editing, setEditing] = useState(false)
   const [seed, setSeed] = useState<EditSeed>({ mode: 'raw' })
+
+  // The row count can shrink under the selection — a group collapsing, or a
+  // smaller table loading. Only the selected cell carries tabIndex 0, so a
+  // `sel` left pointing past the end would cost the grid its keyboard entry
+  // point altogether until something is clicked. Deriving the visible
+  // selection here, rather than storing a raw value and correcting it in an
+  // effect, fixes that on the very render that shrinks the table — there is
+  // no in-between frame where every row index is out of range — and if the
+  // count grows back the original position reappears, since the underlying
+  // state was never overwritten.
+  const sel = useMemo<CellPos>(
+    () => ({
+      row: clamp(rawSel.row, 0, Math.max(0, rowCount - 1)),
+      col: clamp(rawSel.col, 0, Math.max(0, colCount - 1)),
+    }),
+    [rawSel, rowCount, colCount],
+  )
 
   const select = useCallback(
     (pos: CellPos) => {
