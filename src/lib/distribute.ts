@@ -606,12 +606,20 @@ function inOrder(ctx: Ctx, w: number[], ladder: number[]): boolean {
  * Every fix is a transfer, so the total never moves, and weight only ever
  * travels *down* the ladder — the pairs being repaired are adjacent in payout,
  * so RTP falls by at most step × the payout gap over the total (4e-6 at step
- * 100 on the reference table). Lifting a bucket can break the pair below it,
- * hence the repeated passes; a single pair settles in one transfer, so the
- * bound is far looser than it needs to be.
+ * 100 on the reference table).
+ *
+ * It terminates: each transfer moves at least one step from a higher-payout
+ * bucket to the one below it, so the position-weighted sum `Σ k·w[ladder[k]]`
+ * strictly falls by at least `step` every time, and it is bounded below by
+ * zero. The pass cap is a runaway guard, not the thing that stops the sweep.
+ *
+ * It needs more passes than the ladder is long. Lifting a bucket can break the
+ * pair below it, and because each fix *halves* the excess rather than swapping,
+ * the resulting cascade converges geometrically rather than one rung per pass —
+ * a four-bucket band can need seven.
  */
 function enforceOrder(ctx: Ctx, w: number[], step: number, ladder: number[]): void {
-  for (let pass = 0; pass < ladder.length; pass++) {
+  for (let pass = 0; pass < ladder.length * 50 + 100; pass++) {
     let moved = false
     for (let k = 1; k < ladder.length; k++) {
       const lo = ladder[k - 1]
@@ -664,9 +672,16 @@ function transfer(
   const span = ctx.payouts[hi] - ctx.payouts[lo]
   if (!(span > 0)) return
 
+  // Keep the existing conditional floors. Replacing them with a bare `step`
+  // inverts the clamp's range whenever a bucket already sits below one step —
+  // `largestRemainder` drops its floor when a group's budget cannot go round —
+  // and `clamp` then returns its upper bound unconditionally, emitting a
+  // negative weight straight into the document.
+  const minLo = w[lo] >= step ? step : 0
+  const minHi = w[hi] >= step ? step : 0
   const err = () => (target - rtpOf(ctx, w)) * ctx.total
 
-  const d = clamp(Math.round(err() / span / step) * step, -(w[hi] - step), w[lo] - step)
+  const d = clamp(Math.round(err() / span / step) * step, -(w[hi] - minHi), w[lo] - minLo)
   if (d !== 0) {
     w[lo] -= d
     w[hi] += d
@@ -680,8 +695,8 @@ function transfer(
     const before = Math.abs(err())
     if (before === 0) return
     const dir = err() > 0 ? 1 : -1
-    if (dir === 1 && w[lo] - step < step) return
-    if (dir === -1 && w[hi] - step < step) return
+    if (dir === 1 && w[lo] - step < minLo) return
+    if (dir === -1 && w[hi] - step < minHi) return
     w[lo] -= dir * step
     w[hi] += dir * step
     if (Math.abs(err()) >= before || !inOrder(ctx, w, ladder)) {
@@ -988,20 +1003,16 @@ export function solveWeights(
     break
   }
 
-  // Empty when order has yielded to RTP: the ladder is then left with
-  // deliberate inversions (Task 5's GAMMA_UNORDERED path), and `transfer`'s
-  // ladder guard checks the *whole* ladder, so handing it a non-empty list
-  // here would see those pre-existing inversions and revert every
-  // RTP-improving move, silently disabling repairRtp for exactly the case
-  // where the ladder is expected to be out of order.
+  // An unordered solve carries deliberate inversions, so `inOrder` would read
+  // them as breakage and veto every RTP-improving transfer `repairRtp` tries —
+  // silently disabling the repair in the one regime that most needs it.
+  // Handing it an empty ladder switches the guard off along with the regime.
   const ladder = solveCtx.ordered ? ladderIdx(solveCtx) : []
   const weights = allocate(solveCtx, cont, step)
-  if (solveCtx.ordered) enforceOrder(solveCtx, weights, step, ladder)
-  // Residual dominance is itself an ordering rule, so it keeps the same gate
-  // as `enforceOrder`: once order has yielded to RTP, forcing the residual
-  // back above the ladder would only pile the mass `raiseResidual` gave away
-  // straight back onto it, fighting the very target that made order yield.
-  if (solveCtx.ordered) restoreResidual(solveCtx, weights, step)
+  if (solveCtx.ordered) {
+    enforceOrder(solveCtx, weights, step, ladder)
+    restoreResidual(solveCtx, weights, step)
+  }
   repairRtp(solveCtx, weights, targets.rtp, step, ladder)
 
   const achieved = statsOf(
@@ -1009,8 +1020,14 @@ export function solveWeights(
     totalWeight,
   )
 
-  const lockNote = lockedOrderNote(solveCtx, rows, weights)
-  if (lockNote !== null) warnings.push(lockNote)
+  // Only in the ordered regime. Once ordering has yielded the ladder is
+  // inverted everywhere on purpose, and any lock that happens to sit beside one
+  // of those inversions would be blamed for a mess it did not make — unlocking
+  // it would change nothing.
+  if (solveCtx.ordered) {
+    const lockNote = lockedOrderNote(solveCtx, rows, weights)
+    if (lockNote !== null) warnings.push(lockNote)
+  }
 
   if (chosen.conflict && targets.useChances) {
     const over = [0, 1, 2].filter(
@@ -1228,6 +1245,12 @@ export function retargetRtp(
   for (const g of [1, 2] as const) {
     enforceOrder(ctx, result, step, ladder.filter((i) => groupOf(ctx.payouts[i]) === g))
   }
-  repairRtp(ctx, result, targetRtp, step, ladder)
+  // Unguarded, deliberately. This is the RTP cell: reaching the typed figure is
+  // the whole point of it, RTP outranks ordering, and `retargetRtp` returns a
+  // bare `number[] | null` with nowhere to report a yield. Guarding it here
+  // silently trades away RTP accuracy — measured worst case, a target of 1.4
+  // landing on 0.82 — with nothing on screen to explain why. Ordering is
+  // improved on this path but guaranteed only through Auto-Distribute.
+  repairRtp(ctx, result, targetRtp, step, [])
   return result
 }

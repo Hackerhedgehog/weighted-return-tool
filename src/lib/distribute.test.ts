@@ -719,18 +719,73 @@ describe('the ladder stays in order', () => {
     expect(sum(r.weights)).toBe(T)
   })
 
-  it('keeps the ladder ordered through an RTP-cell retarget', () => {
+  it('orders a short band, where the cascade outruns the ladder length', () => {
+    // Four buckets above 1x. Each repair halves the excess and can break the
+    // pair below it, so the cascade needs more passes than there are rungs —
+    // the reference table's long, nearly-ordered ladder never exercises this.
+    const short: BucketRow[] = [0, 0.25, 0.5, 1, 2, 10, 50, 500].map((payout, i) => ({
+      uid: `s${i}`,
+      bucketId: i,
+      payout,
+      label: `${payout}x`,
+      weight: 0,
+      locked: false,
+      groupId: '',
+      weightId: '',
+    }))
+    for (const step of [1, 10, 100] as const) {
+      const r = solveWeights(short, 1_000_000, DEFAULT_TARGETS, CURVE_PRESETS.medium, step)
+      expect({ step, bad: inversions(short, r.weights) }).toEqual({ step, bad: [] })
+      expect(sum(r.weights)).toBe(1_000_000)
+      expect(Math.min(...r.weights)).toBeGreaterThanOrEqual(step)
+    }
+  })
+
+  it('reaches a retargeted RTP without moving the chances or going negative', () => {
+    // The RTP cell's contract. Ordering is improved on this path but not
+    // guaranteed: RTP outranks it and `retargetRtp` has nowhere to report a
+    // yield, so its repair runs unguarded.
     const start = solveWeights(rows, T, DEFAULT_TARGETS, CURVE_PRESETS.medium).weights
     const before = statsOf(withWeights(start), T)
     for (const rtp of [0.8, 1.05, 1.4]) {
       const out = retargetRtp(withWeights(start), T, rtp)!
       const after = statsOf(withWeights(out), T)
-      expect({ rtp, bad: inversions(rows, out) }).toEqual({ rtp, bad: [] })
+      expect({ rtp, achieved: after.rtp.toFixed(3) }).toEqual({ rtp, achieved: rtp.toFixed(3) })
       expect(sum(out)).toBe(T)
+      expect(Math.min(...out)).toBeGreaterThanOrEqual(0)
       // the whole point of the RTP cell: the chances do not budge
       expect(after.hitChance).toBeCloseTo(before.hitChance, 5)
       expect(after.winChance).toBeCloseTo(before.winChance, 5)
     }
+  })
+
+  it('never emits a negative weight when a group sits below its own floor', () => {
+    // Five win buckets sharing 300 at step 100: `largestRemainder` drops its
+    // one-step floor when the budget cannot go round, so some land on 0 — and
+    // a repair that treats one step as an unconditional minimum inverts its
+    // own clamp range on them.
+    const sparse: BucketRow[] = [
+      [0, 990_000],
+      [0.5, 9_700],
+      [2, 100],
+      [10, 100],
+      [50, 100],
+      [200, 0],
+      [1000, 0],
+    ].map(([payout, weight], i) => ({
+      uid: `n${i}`,
+      bucketId: i,
+      payout,
+      label: `${payout}x`,
+      weight,
+      locked: false,
+      groupId: '',
+      weightId: '',
+    }))
+    const out = retargetRtp(sparse, 1_000_000, 0.95, 100)
+    expect(out).not.toBeNull()
+    expect(Math.min(...out!)).toBeGreaterThanOrEqual(0)
+    expect(sum(out!)).toBe(1_000_000)
   })
 
   it('reports a lock that sits out of payout order instead of moving it', () => {
