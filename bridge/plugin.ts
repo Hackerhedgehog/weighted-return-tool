@@ -24,6 +24,21 @@ function readBody(req: IncomingMessage): Promise<string> {
 }
 
 /**
+ * A cross-origin form POST is a CORS "simple request" — the browser never
+ * preflights it, so it reaches this middleware regardless of Vite's
+ * server.cors allowlist (which, for this project, deliberately includes
+ * ngrok hosts). Demanding an explicit `application/json` Content-Type turns
+ * a cross-origin caller into one that *does* need a preflight, which Vite's
+ * default CORS then refuses — a form post, or any simple cross-site request,
+ * can never set this header itself. Both real callers (the app's `saveTsv`,
+ * the CLI's switch call) already send it, so nothing legitimate breaks.
+ */
+function hasJsonContentType(req: IncomingMessage): boolean {
+  const contentType = req.headers['content-type']
+  return typeof contentType === 'string' && contentType.toLowerCase().startsWith('application/json')
+}
+
+/**
  * Serves the CLI's set-values file to the app, writes its export back, and
  * lets the CLI re-point the session at another file entirely.
  *
@@ -57,6 +72,10 @@ export function bridgePlugin(env: Record<string, string | undefined> = process.e
           send(res, { status: 405, body: { error: 'Use POST.' } })
           return
         }
+        if (!hasJsonContentType(req)) {
+          send(res, { status: 415, body: { error: 'Content-Type must be application/json.' } })
+          return
+        }
         readBody(req)
           .then((raw) => {
             let parsed: unknown
@@ -76,6 +95,10 @@ export function bridgePlugin(env: Record<string, string | undefined> = process.e
           send(res, { status: 405, body: { error: 'Use POST.' } })
           return
         }
+        if (!hasJsonContentType(req)) {
+          send(res, { status: 415, body: { error: 'Content-Type must be application/json.' } })
+          return
+        }
         readBody(req)
           .then((raw) => {
             let parsed: unknown
@@ -88,7 +111,10 @@ export function bridgePlugin(env: Record<string, string | undefined> = process.e
             const { result, next } = switchResult(parsed)
             if (next !== null) {
               session = next
-              console.log(`[bridge] switched to ${next.file}`)
+              // Named explicitly — the startup log's "saves land in <dir>"
+              // goes stale the instant a switch changes the directory, so
+              // the terminal must never be left claiming the old one.
+              console.log(`[bridge] switched to ${next.file} (saves land in ${next.dir})`)
               // The app loads the bridge session on mount, so a full reload is
               // the whole of the handover.
               server.hot.send({ type: 'full-reload', path: '*' })
