@@ -764,6 +764,33 @@ input.gcell.editing {
   user-select: none;
 }
 
+.gcell.lock.partial {
+  opacity: 0.55;
+}
+
+.grid-row.group-summary .gcell {
+  font-weight: 600;
+}
+
+.group-expander {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  width: 100%;
+  padding: 4px 6px;
+  border: 0;
+  background: none;
+  font: inherit;
+  font-weight: 600;
+  color: inherit;
+  text-align: left;
+  cursor: pointer;
+}
+
+.group-expander:hover {
+  text-decoration: underline;
+}
+
 .totals-row td {
   position: sticky;
   bottom: 0;

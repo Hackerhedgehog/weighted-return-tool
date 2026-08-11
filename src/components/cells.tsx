@@ -1,30 +1,35 @@
 import { useEffect, useRef, useState } from 'react'
 import { evaluateExpression } from '../lib/expr'
+import type { LockState } from '../lib/groups'
 import type { EditSeed } from './useGridNavigation'
 import { remapNumpadComma } from './numpadDecimal'
 
 const FLASH_MS = 700
 
-interface GridCellProps {
+/** The navigation wiring every grid cell shares, whatever it renders. */
+export interface CellNavProps {
+  selected: boolean
+  editing: boolean
+  seed: EditSeed
+  onSelect: () => void
+  onStartEdit: (seed: EditSeed) => void
+  onStopEdit: () => void
+  onNavigate: (dr: number, dc: number) => void
+  onKeyDown: (e: React.KeyboardEvent) => void
+}
+
+interface GridCellProps extends CellNavProps {
   /** Formatted text shown when the cell is idle. */
   display: string
   /** Underlying value an edit starts from — unformatted, no separators. */
   raw: string
   numeric: boolean
   editable: boolean
-  selected: boolean
-  editing: boolean
-  seed: EditSeed
   /** Numeric cells: called with the evaluated number. */
   onCommitValue?: (n: number) => void
   /** Text cells: called with the raw string. */
   onCommitText?: (s: string) => void
   validate?: (n: number) => boolean
-  onSelect: () => void
-  onStartEdit: (seed: EditSeed) => void
-  onStopEdit: () => void
-  onNavigate: (dr: number, dc: number) => void
-  onKeyDown: (e: React.KeyboardEvent) => void
   className?: string
   title?: string
 }
@@ -188,13 +193,13 @@ function CellInput({ initial, numeric, onCommit, onCancel, onNavigate }: CellInp
 
 /** Lock toggle in the leftmost column. Not exported to TSV. */
 export function LockCell({
-  locked,
+  state,
   selected,
   onToggle,
   onSelect,
   onKeyDown,
 }: {
-  locked: boolean
+  state: LockState
   selected: boolean
   onToggle: () => void
   onSelect: () => void
@@ -209,19 +214,28 @@ export function LockCell({
     }
   }, [selected])
 
+  const label =
+    state === 'all'
+      ? 'Locked — Auto-Distribute will not change this weight'
+      : state === 'some'
+        ? 'Partly locked — click to lock the rest'
+        : 'Unlocked'
+
   return (
     <div
       ref={ref}
-      className={`gcell lock ${selected ? 'selected' : ''} ${locked ? 'on' : ''}`}
+      className={`gcell lock ${selected ? 'selected' : ''} ${state === 'all' ? 'on' : ''} ${
+        state === 'some' ? 'partial' : ''
+      }`}
       tabIndex={selected ? 0 : -1}
       role="gridcell"
-      aria-label={locked ? 'Locked — Auto-Distribute will not change this weight' : 'Unlocked'}
-      title={locked ? 'Locked — Auto-Distribute will not change this weight' : 'Click to lock'}
+      aria-label={label}
+      title={state === 'none' ? 'Click to lock' : label}
       onMouseDown={onSelect}
       onClick={onToggle}
       onKeyDown={onKeyDown}
     >
-      {locked ? '🔒' : '　'}
+      {state === 'none' ? '　' : state === 'all' ? '🔒' : '🔓'}
     </div>
   )
 }
