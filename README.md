@@ -122,16 +122,26 @@ How the tool turns targets into weights, and the knobs that shape the result.
 
 ### The solver
 
-`Auto-Distribute` assigns weights to every unlocked bucket. Four controls,
-resolved in this order of authority:
+`Auto-Distribute` assigns weights to every unlocked bucket. The targets are
+over-constrained, so they are resolved by rank — most important to maintain
+first:
 
-1. **Locked rows** are absolute and never move.
-2. **Target RTP** is hit exactly, to integer-weight granularity.
-3. **Preferred Hit Chance / Win Chance** are met exactly whenever RTP allows,
-   otherwise inside a tolerance band.
-4. **Volatility** shapes whatever freedom remains.
+1. **Locked rows** are absolute — never touched, never reordered, and a lock
+   that breaks the payout ladder is reported rather than moved.
+2. **Target RTP** is hit exactly, to integer-weight granularity, by solving
+   the slope of the weight curve.
+3. **Ordering**: every unlocked bucket holds at least one weight step, weight
+   never rises as payout rises, and the residual `0x` bucket is the largest
+   weight in the table. Equal payouts are unconstrained against each other,
+   which is what keeps the tease buckets free to sit below the ladder.
+4. **Volatility** shapes whatever freedom is left, as curvature of that curve.
+5. **Preferred Hit Chance**, then 6. **Win Chance**, are satisfied
+   *structurally*, by deciding how much total weight each payout group
+   receives. They are preferences with a relative tolerance band; the band is
+   spent when the RTP target is otherwise unreachable, and the masses
+   themselves are overridden when ordering demands it.
 
-Steps 3 and 4 can each be **switched off** from the `Solve for` checkboxes.
+Steps 4, 5 and 6 can each be **switched off** from the `Solve for` checkboxes.
 Off, the fields keep reporting what the table currently achieves — they simply
 stop being goals, so everything goes into RTP. With chance targets off the
 paying groups are pooled and the curve is free to move mass across the whole
@@ -150,8 +160,29 @@ payout == 0      →  1 − hitChance
 payout > 1       →  winChance
 ```
 
-Zero-payout buckets keep their existing relative balance, since they contribute
-nothing to RTP and there is no principled curve for a tease bucket.
+Every unlocked bucket keeps at least one weight step, so Auto-Distribute never
+leaves a hole in the table. When the total cannot fund that — 30 buckets at a
+step of 100 needs 3,000 — the solve is refused and the notice names a total
+that works.
+
+Weights also come out ordered: walking up the payout ladder, weight never
+rises. Ordering outranks both chance targets, so a table whose targets cannot
+be met in order has its chances moved instead, and the notice says which one
+gave way. It does *not* outrank RTP — but it is only given up when giving it up
+actually helps: an RTP target that is unreachable either way keeps the ladder
+and simply reports the miss.
+
+Zero-payout buckets are exempt from ordering against each other, which is what
+lets a tease bucket sit below the top paying bucket. The one exception is the
+residual — the bucket labelled `0x` — which always holds the table's largest
+weight. On a table with no weights yet it takes 80% of the zero-payout mass and
+the teases split the rest; once those buckets carry weights of their own,
+Auto-Distribute preserves their balance instead, since they contribute nothing
+to RTP and there is no principled curve for a tease bucket.
+
+Ordering is Auto-Distribute's guarantee specifically. Typing into the totals
+row's RTP cell reshapes the table too, and it orders each payout group as it
+goes, but reaching the figure you typed wins there when the two disagree.
 
 ### Tolerance
 
@@ -190,6 +221,14 @@ from very high to very low.
 **Tuning:** the `Curve c` field next to the presets is directly editable, so you
 can feel the shape out against the log-log chart. Once you know the values you
 want, put them in `CURVE_PRESETS` in `src/lib/types.ts`.
+
+Volatility is the first thing spent when it conflicts with keeping weights
+ordered. The ordering constraint puts a floor under the curve's slope, and that
+floor is proportional to the curvature, so a heavy curve works against itself
+twice: it thins the tail *and* pins the slope further from flat. Past a point
+the two together put the RTP target out of reach with the ladder in order. On
+the reference table that happens at `very low` alone, which flattens from 0.32
+to 0.265 and says so in a notice; the other four presets are untouched.
 
 ### Weight step
 

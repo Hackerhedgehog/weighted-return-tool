@@ -3,21 +3,48 @@ import type { BucketRow, Targets, WeightStep } from './types'
 /**
  * Weight distribution solver.
  *
- * The three targets and the volatility setting are over-constrained, so they
- * are resolved by rank:
+ * The targets are over-constrained, so they are resolved by rank — most
+ * important to maintain first:
  *
- *  1. Locked weights are absolute — never touched.
- *  2. Hit and win chance are satisfied *structurally*, by deciding how much
- *     total weight each payout group receives. They are preferences with a
- *     relative tolerance band; the band is spent only when the RTP target is
- *     otherwise unreachable, and then only as far as needed.
- *  3. RTP is hit exactly (to integer-weight granularity) by solving the slope
+ *  1. Locked weights are absolute — never touched, never reordered, and a lock
+ *     that breaks the payout ladder is reported rather than moved.
+ *  2. RTP is hit exactly (to integer-weight granularity) by solving the slope
  *     of the weight curve.
+ *  3. Ordering: every unlocked bucket holds at least one weight step, weight
+ *     never rises as payout rises, and the residual `0x` bucket is the largest
+ *     weight in the table. Equal payouts are unconstrained against each other,
+ *     which is what keeps the tease buckets free to sit below the ladder.
  *  4. Volatility shapes whatever freedom is left, as curvature of that curve.
+ *  5. Hit chance, then 6. win chance, are satisfied *structurally*, by deciding
+ *     how much total weight each payout group receives. They are preferences
+ *     with a relative tolerance band; the band is spent when the RTP target is
+ *     otherwise unreachable, and the masses themselves are overridden when
+ *     ordering demands it.
  *
- * Steps 3 and 4 do not collide because slope and curvature are different basis
- * functions: `share ∝ exp(−γ·u − c·u²)` with `u = ln(payout) − ln(pMin)`.
- * Solving γ for RTP leaves c — and therefore the volatility setting — intact.
+ * Steps 2 and 4 do not collide: slope and curvature are different basis
+ * functions in `share ∝ exp(−γ·u − c·u²)`, `u = ln(payout) − ln(pMin)`, so
+ * solving γ for RTP leaves c — and therefore the volatility setting — intact.
+ *
+ * Steps 3 and 4 do collide, and the rank decides it. Ordering constrains γ from
+ * below, band by band, at `−c·(u_i + u_j)` over the band's *lowest* consecutive
+ * pair — the one that binds hardest (see `bandFloor`). Past a certain curvature
+ * that floor and the thinned tail together put the RTP target out of ordered
+ * reach, so `fitCurve` flattens the curvature until the target is back inside
+ * it, and the solve says so. Only when even a straight line falls short does
+ * ordering itself yield — and then only if abandoning it actually brings the
+ * target into reach, since giving up the ladder for a target that is missed
+ * either way buys nothing.
+ *
+ * The integer stage carries the same invariants the continuous one does.
+ * `allocate`'s rounding is blind to the ladder, so `enforceOrder` re-sorts it
+ * and `restoreResidual` gives the residual back what the zero group's own
+ * weight floor took off it. `repairRtp` then recovers the RTP that costs, under
+ * a guard that refuses any transfer which would put the ladder back out of
+ * order.
+ *
+ * All three are switched off together once ordering has yielded: the two
+ * repairs would be meaningless, and the guard would read the solve's deliberate
+ * inversions as damage and veto every move that could reach the target.
  */
 
 export interface SolveResult {
