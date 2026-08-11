@@ -847,6 +847,34 @@ describe('ordering against the chance targets', () => {
     expect(sum(r.weights)).toBe(T)
   })
 
+  it('keeps the residual dominant through the integer stage, not just the solve', () => {
+    // A low win chance leaves the residual and the top of the ladder nearly
+    // tied, so a margin that survives the solve but not the rounding shows up
+    // here and nowhere else. Nothing downstream would catch it: the ordering
+    // sweep walks the positive ladder, and the residual pays 0.
+    for (const hitChance of [0.75, 0.9, 0.95]) {
+      const r = solveWeights(rows, T, { ...DEFAULT_TARGETS, hitChance, winChance: 0.02 }, CURVE_PRESETS.medium)
+      const res = residualIndex(rows)
+      const top = Math.max(...r.weights.filter((_, i) => i !== res))
+      expect({ hitChance, dominant: r.weights[res] >= top }).toEqual({ hitChance, dominant: true })
+    }
+  })
+
+  it('does not report a chance target it was never steering', () => {
+    const off = { ...DEFAULT_TARGETS, hitChance: 0.9, winChance: 0.85, useChances: false }
+    const r = solveWeights(rows, T, off, CURVE_PRESETS.medium)
+    expect(r.warnings.filter((w) => w.includes('chance'))).toEqual([])
+  })
+
+  it('does not claim RTP was out of reach when it landed on target', () => {
+    const greedy = { ...DEFAULT_TARGETS, hitChance: 0.9, winChance: 0.85 }
+    const r = solveWeights(rows, T, greedy, CURVE_PRESETS.medium)
+    const achieved = statsOf(withWeights(r.weights), T).rtp
+    if (Math.abs(achieved - 0.95) < 1e-4) {
+      expect(r.warnings.some((w) => w.includes('out of reach'))).toBe(false)
+    }
+  })
+
   it('shifts nothing, and warns about nothing, on a table that needs neither', () => {
     const r = solveWeights(rows, T, DEFAULT_TARGETS, CURVE_PRESETS.medium)
     expect(r.warnings).toHaveLength(0)
@@ -934,7 +962,14 @@ function levelBoundary(ctx: Ctx, budgets: number[], w: number[], step: number): 
  */
 function raiseResidual(ctx: Ctx, budgets: number[], w: number[], step: number): number {
   const gap = dominanceGap(ctx, w)
-  if (gap <= 0) return 0
+  // Clear the ladder by a full step rather than merely tie it. The caller
+  // re-solves gamma after every shift, so a margin sized against the
+  // pre-re-solve shapes can collapse back to nothing — and `allocate` then
+  // rounds the repair away, leaving the residual a unit or two short of a
+  // bucket it is supposed to dominate. Nothing downstream catches that:
+  // Task 6's `enforceOrder` walks the positive ladder only, and the residual
+  // pays 0.
+  if (gap <= -step) return 0
   const paying = budgets[1] + budgets[2]
   if (!(paying > 0) || !(budgets[0] > 0)) return 0
 
@@ -942,12 +977,13 @@ function raiseResidual(ctx: Ctx, budgets: number[], w: number[], step: number): 
   const top = w[ctx.residual] + gap
   const members = ctx.freeIdx[1].length + ctx.freeIdx[2].length
   const room = Math.max(0, paying - members * step)
-  const d = Math.min((gap + step) / Math.max(share + top / paying, 1e-9), room)
+  const d = Math.min((gap + 2 * step) / Math.max(share + top / paying, 1e-9), room)
   if (!(d > 0)) return 0
 
+  const keep = (paying - d) / paying
   budgets[0] += d
-  budgets[1] -= (d * budgets[1]) / paying
-  budgets[2] -= (d * budgets[2]) / paying
+  budgets[1] *= keep
+  budgets[2] *= keep
   return d
 }
 ```
@@ -982,34 +1018,86 @@ In `solveWeights`, replace the single `solveGamma` / `continuousWeights` pair wi
   }
 
   const weights = allocate(solveCtx, cont, step)
+  restoreResidual(solveCtx, weights, step)
   repairRtp(solveCtx, weights, targets.rtp, step)
 ```
 
-Replace the `outOfBand` calls at the end so a chance that yielded reports once, not twice, and add the new warnings:
+`restoreResidual` is the last piece, and it goes beside the two shift helpers:
 
 ```ts
-  if (yieldedHit) {
-    warnings.push(
-      `Hit chance yielded to payout ordering — achieved ${achieved.hitChance.toFixed(3)} against a target of ${targets.hitChance}.`,
+/**
+ * Give the residual back whatever the integer split took off it.
+ *
+ * The continuous solve leaves it clear of the ladder, but `allocate` divides
+ * the zero-payout group with a one-step-per-bucket floor, which costs the
+ * residual roughly its share of that floor — about three units on the
+ * reference table's five-bucket group. Sizing the continuous cushion to absorb
+ * that would spend hit chance the table does not need, and the size of the
+ * loss depends on the group's bucket count, so a fixed cushion is the wrong
+ * shape. Moving the units back afterwards is exact.
+ *
+ * The weight comes off the top of the ladder, which is the lowest-paying
+ * bucket there is, so this is the cheapest repair available in RTP terms — and
+ * `repairRtp` runs afterwards to take back what little it costs.
+ */
+function restoreResidual(ctx: Ctx, w: number[], step: number): void {
+  const r = ctx.residual
+  if (r === -1 || ctx.locked[r]) return
+  const ladder = [...ctx.freeIdx[1], ...ctx.freeIdx[2]]
+  if (ladder.length === 0) return
+
+  // Closing the gap against one bucket can leave another on top; each pass
+  // fixes the current highest, so the ladder's length bounds the work.
+  for (let pass = 0; pass < ladder.length; pass++) {
+    let top = ladder[0]
+    for (const i of ladder) if (w[i] > w[top]) top = i
+    if (w[top] <= w[r]) return
+    const give = Math.min(
+      Math.ceil((w[top] - w[r]) / 2 / step) * step,
+      Math.max(0, w[top] - step),
     )
+    if (give <= 0) return
+    w[top] -= give
+    w[r] += give
   }
-  if (yieldedWin) {
-    warnings.push(
-      `Win chance yielded to payout ordering — achieved ${achieved.winChance.toFixed(3)} against a target of ${targets.winChance}.`,
-    )
-  }
+}
+```
+
+Replace the `outOfBand` calls at the end so a chance that yielded reports once, not twice. Both yield warnings name a *target*, so both belong inside the existing `targets.useChances` guard — with the chance targets switched off there is no target to have missed, and `currentMasses` deliberately holds the zero-payout share wherever the user left it:
+
+```ts
   if (!settled) {
     warnings.push('Weights could not be brought into payout order within the solver’s iteration limit.')
   }
 
   // Nothing to report against when the chances are not being steered.
   if (targets.useChances) {
-    if (!yieldedHit) outOfBand('hit chance', achieved.hitChance, targets.hitChance)
-    if (!yieldedWin) outOfBand('win chance', achieved.winChance, targets.winChance)
+    if (yieldedHit) {
+      warnings.push(
+        `Hit chance yielded to payout ordering — achieved ${achieved.hitChance.toFixed(3)} against a target of ${targets.hitChance}.`,
+      )
+    } else {
+      outOfBand('hit chance', achieved.hitChance, targets.hitChance)
+    }
+    if (yieldedWin) {
+      warnings.push(
+        `Win chance yielded to payout ordering — achieved ${achieved.winChance.toFixed(3)} against a target of ${targets.winChance}.`,
+      )
+    } else {
+      outOfBand('win chance', achieved.winChance, targets.winChance)
+    }
   }
 ```
 
 Note the existing `outOfBand` helper writes `Achieved hit chance …` / `Achieved win chance …`; leave its text alone.
+
+The RTP reachability warning further down currently reads `reachRange(solveCtx, chosen.budgets, pooled)`. Point it at the post-loop `budgets` instead:
+
+```ts
+  const [min, max] = reachRange(solveCtx, budgets, pooled)
+```
+
+`chosen.budgets` is the range the solve *would* have had before any mass moved. Shifting mass out of the win band lowers the RTP floor, so a target the pre-shift range called unreachable is often hit exactly — at hit 0.9 / win 0.85 the solve lands on 0.950000 and then reports that 0.95 was out of reach. Reading the budgets the solve actually used closes that, and the mirror case where a shift lowers the ceiling under a target that *was* reachable.
 
 - [ ] **Step 5: Run the tests to verify they pass**
 
@@ -1261,8 +1349,11 @@ In `solveWeights`, replace the allocate/repair pair from Task 5 with:
   const ladder = ladderIdx(solveCtx)
   const weights = allocate(solveCtx, cont, step)
   if (solveCtx.ordered) enforceOrder(solveCtx, weights, step, ladder)
+  restoreResidual(solveCtx, weights, step)
   repairRtp(solveCtx, weights, targets.rtp, step, ladder)
 ```
+
+Note the order: `restoreResidual` moves **after** `enforceOrder`, not before it. `enforceOrder` pushes weight down the ladder, so it can lift the lowest-paying bucket back above the residual — running the residual repair first would leave that undone.
 
 and add the locked note beside the other warnings, after `achieved` is computed:
 

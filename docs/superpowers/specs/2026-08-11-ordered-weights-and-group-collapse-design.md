@@ -295,8 +295,19 @@ band search  ->  [ solveGamma (clamped per band by bandFloor)
                    -> shift budgets and repeat ]  x ORDER_ROUNDS
              ->  allocate (with reserved floors)
              ->  enforceOrder
+             ->  restoreResidual
              ->  repairRtp (order-guarded)
 ```
+
+`restoreResidual` is the residual's half of the integer stage. `allocate`
+divides the zero-payout group with a one-step-per-bucket floor, which costs the
+residual roughly its share of that floor — around three units on the reference
+table's five-bucket group — and that is enough to leave it a unit below a
+bucket it is supposed to dominate. The loss scales with the group's bucket
+count, so no fixed cushion in the continuous solve is the right shape; moving
+the units back afterwards is exact. It runs *after* `enforceOrder`, which
+pushes weight down the ladder and can otherwise lift the lowest-paying bucket
+back over the residual.
 
 #### Zero-payout split
 
