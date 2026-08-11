@@ -1359,14 +1359,23 @@ Extend the comment above `repairRtp`'s accuracy note with the caveat that the gu
 In `solveWeights`, replace the allocate/repair pair from Task 5 with:
 
 ```ts
-  const ladder = ladderIdx(solveCtx)
+  // An unordered solve carries deliberate inversions, so `inOrder` would read
+  // them as breakage and veto every RTP-improving transfer `repairRtp` tries —
+  // silently disabling the repair in the one regime that most needs it.
+  // Handing it an empty ladder switches the guard off along with the regime.
+  const ladder = solveCtx.ordered ? ladderIdx(solveCtx) : []
   const weights = allocate(solveCtx, cont, step)
-  if (solveCtx.ordered) enforceOrder(solveCtx, weights, step, ladder)
-  restoreResidual(solveCtx, weights, step)
+  if (solveCtx.ordered) {
+    enforceOrder(solveCtx, weights, step, ladder)
+    restoreResidual(solveCtx, weights, step)
+  }
   repairRtp(solveCtx, weights, targets.rtp, step, ladder)
 ```
 
-Note the order: `restoreResidual` moves **after** `enforceOrder`, not before it. `enforceOrder` pushes weight down the ladder, so it can lift the lowest-paying bucket back above the residual — running the residual repair first would leave that undone.
+Two things about that block are load-bearing:
+
+- `restoreResidual` comes **after** `enforceOrder`, not before. `enforceOrder` pushes weight down the ladder, so it can lift the lowest-paying bucket back above the residual — running the residual repair first would leave that undone.
+- `restoreResidual` keeps the `solveCtx.ordered` gate Task 5 gave it. Both ordering repairs now sit under the one gate, which is why they read as a pair.
 
 and add the locked note beside the other warnings, after `achieved` is computed:
 
