@@ -249,6 +249,18 @@ describe('rescaleToTotal', () => {
     const out = rescaleToTotal(src, 3000)!
     expect(sum(out)).toBe(3000)
   })
+
+  it('keeps every unlocked bucket above zero when scaling down', () => {
+    const out = rescaleToTotal(withWeights(start), 60)!
+    expect(out).not.toBeNull()
+    expect(Math.min(...out)).toBeGreaterThanOrEqual(1)
+    expect(sum(out)).toBe(60)
+  })
+
+  it('refuses a total that cannot floor every unlocked bucket', () => {
+    expect(rescaleToTotal(withWeights(start), 20)).toBeNull()
+    expect(rescaleToTotal(withWeights(start), 2_000, 100)).toBeNull()
+  })
 })
 
 describe('retargetRtp', () => {

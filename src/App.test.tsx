@@ -127,6 +127,18 @@ describe('App', () => {
     ).toBeDefined()
   })
 
+  it('explains a total too small to floor every bucket', () => {
+    loadRealData()
+    const cell = document.querySelector('.totals-row .col-weight .gcell') as HTMLElement
+    fireEvent.mouseDown(cell)
+    fireEvent.doubleClick(cell)
+    const input = document.querySelector('.totals-row .col-weight input') as HTMLInputElement
+    fireEvent.change(input, { target: { value: '20' } })
+    fireEvent.keyDown(input, { key: 'Enter' })
+
+    expect(screen.getByText(/cannot give all 30 unlocked buckets/)).toBeDefined()
+  })
+
   it('adds to a cell when an operator is typed on it', () => {
     loadRealData()
     const cell = document.querySelector('.grid-row .col-weight .gcell') as HTMLElement

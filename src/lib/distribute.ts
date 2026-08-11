@@ -801,9 +801,13 @@ export function rescaleToTotal(
   const freeIdx = rows.map((_, i) => i).filter((i) => !rows[i].locked)
   if (freeIdx.length === 0) return budget === 0 ? out : null
 
+  // Scaling down must not silently delete a bucket, so refuse rather than
+  // return a table with holes in it.
+  if (budget < freeIdx.length * step) return null
+
   const base = freeIdx.map((i) => out[i])
   const anyPositive = base.some((b) => b > 0)
-  const alloc = largestRemainder(anyPositive ? base : base.map(() => 1), budget, false, step)
+  const alloc = largestRemainder(anyPositive ? base : base.map(() => 1), budget, true, step)
   freeIdx.forEach((i, k) => {
     out[i] = alloc[k]
   })

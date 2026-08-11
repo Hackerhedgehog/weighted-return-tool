@@ -25,7 +25,14 @@ import {
 import { clampBankrollConfig } from './lib/bankroll'
 import { DEFAULT_WIDTHS, sortRows } from './lib/columns'
 import { parseTsv, SAMPLE_TSV } from './lib/parse'
-import { rescaleToTotal, retargetRtp, solveWeights, statsOf, stepBlockWarning } from './lib/distribute'
+import {
+  floorBlockWarning,
+  rescaleToTotal,
+  retargetRtp,
+  solveWeights,
+  statsOf,
+  stepBlockWarning,
+} from './lib/distribute'
 import { buildTsv, copyTsv, downloadTsv, withTsvExtension } from './lib/exportTsv'
 import { buildGrouping, groupLockState, nextGroupColor, nextGroupId, seedGroups, type LockState } from './lib/groups'
 import { emptyHistory, pushHistory, redo, undo, type HistoryState } from './lib/history'
@@ -452,10 +459,10 @@ export default function App() {
       const d = docRef.current
       const scaled = rescaleToTotal(d.rows, next, d.weightStep)
       if (scaled === null) {
-        const lockedSum = d.rows
-          .filter((r) => r.locked)
-          .reduce((a, r) => a + r.weight, 0)
-        if (d.rows.every((r) => r.locked)) {
+        const d2 = d
+        const lockedSum = d2.rows.filter((r) => r.locked).reduce((a, r) => a + r.weight, 0)
+        const budget = Math.round(next) - lockedSum
+        if (d2.rows.every((r) => r.locked)) {
           setNotices([
             `Every row is locked — unlock something or set the total to exactly the locked weight (${lockedSum.toLocaleString('en-US')}).`,
           ])
@@ -463,8 +470,10 @@ export default function App() {
           setNotices([
             `Total weight cannot be set below the locked weight (${lockedSum.toLocaleString('en-US')}).`,
           ])
+        } else if (budget % d2.weightStep !== 0) {
+          setNotices([stepBlockWarning(budget, lockedSum, d2.weightStep)])
         } else {
-          setNotices([stepBlockWarning(Math.round(next) - lockedSum, lockedSum, d.weightStep)])
+          setNotices([floorBlockWarning(d2.rows, d2.weightStep, Math.round(next))])
         }
         return
       }
