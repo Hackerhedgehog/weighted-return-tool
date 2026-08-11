@@ -859,7 +859,31 @@ describe('ordering against the chance targets', () => {
 Run: `npx vitest run src/lib/distribute.test.ts -t "ordering against the chance targets"`
 Expected: FAIL — the flat-chance solve reports `0.6x=1 < 1.8x=…` as an inversion and carries no `Win chance yielded` warning; the greedy solve leaves the residual below the 0.33x bucket.
 
-- [ ] **Step 3: Add the fixed-point loop**
+- [ ] **Step 3: Only spend ordering when it buys something**
+
+Task 4 left the ordering-yield decision unconditional: when the target is out of ordered reach, it drops to the unordered regime whatever happens next. But the unordered regime is not always any better. Setting hit chance 0.9 and win chance 0.85 forces 85% of the weight into a band whose lowest payout is 1.8x, so RTP cannot fall below ≈1.549 at *any* curve or slope — the default target of 0.95 is unreachable ordered **and** unordered. Yielding there gives up the ladder and gets nothing for it, and the mass-shifting loop below is skipped into the bargain.
+
+In `solveWeights`, replace the `else` branch of the `!chosen.reachable` block:
+
+```ts
+    } else {
+      const unordered = { ...ctx, ordered: false }
+      const relaxed = chooseBand(unordered)
+      // Ordering only gives way when giving way actually brings the target
+      // into reach. When it is out of reach either way, the ladder is the one
+      // constraint still worth honouring — and the RTP warning below reports
+      // the miss regardless.
+      if (relaxed.reachable) {
+        solveCtx = unordered
+        chosen = relaxed
+        orderYielded = true
+      }
+    }
+```
+
+`curveUsed` stays at `ctx.curve` on both paths, as before.
+
+- [ ] **Step 4: Add the fixed-point loop**
 
 In `src/lib/distribute.ts`, add above `solveWeights`:
 
@@ -987,12 +1011,21 @@ Replace the `outOfBand` calls at the end so a chance that yielded reports once, 
 
 Note the existing `outOfBand` helper writes `Achieved hit chance …` / `Achieved win chance …`; leave its text alone.
 
-- [ ] **Step 4: Run the tests to verify they pass**
+- [ ] **Step 5: Run the tests to verify they pass**
 
 Run: `npm run test:run`
-Expected: PASS. `never leaves the band, whatever the RTP target` and `opens only when the target is otherwise unreachable` both exercise the band search and must stay green.
+Expected: PASS.
 
-- [ ] **Step 5: Lint and commit**
+`keeps the residual the largest weight at a high hit chance` is the test that needs Step 3. At hit 0.9 / win 0.85 the RTP target is unreachable in both regimes, so without Step 3 the solve drops to unordered, skips the loop entirely, and leaves the residual buried. With Step 3 it stays ordered, `raiseResidual` moves mass into the zero band until the residual clears the ladder, and hit chance is what gives. That solve also emits the RTP-out-of-reach warning, which is correct and expected alongside the hit-chance one.
+
+These existing tests exercise the band search the loop wraps, and must stay green:
+
+- `the tolerance band` → `never leaves the band, whatever the RTP target` — at RTP 200 nothing is reachable in either regime, so Step 3 now keeps that solve ordered. Hit chance must still land on 0.3 (no shift is needed there: the residual holds 56% of the table against a ladder top near 9%).
+- `the tolerance band` → `opens only when the target is otherwise unreachable`
+- `the tolerance band` → `warns when even the band cannot reach the target`
+- `solveWeights at the default targets` → `lands on the preferred chances without spending the band`
+
+- [ ] **Step 6: Lint and commit**
 
 ```bash
 npm run lint
