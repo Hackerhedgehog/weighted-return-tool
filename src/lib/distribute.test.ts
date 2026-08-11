@@ -20,6 +20,13 @@ const T = 1200350
 const withWeights = (w: number[]): BucketRow[] => rows.map((r, i) => ({ ...r, weight: w[i] }))
 const sum = (w: number[]) => w.reduce((a, b) => a + b, 0)
 
+/** The payout ladder, lowest payout first. */
+const ladderOf = (rs: BucketRow[], w: number[]) =>
+  rs
+    .map((r, i) => ({ p: r.payout, label: r.label, w: w[i] }))
+    .filter((e) => e.p > 0)
+    .sort((a, b) => a.p - b.p)
+
 describe('groupOf', () => {
   it('splits on 0 and 1', () => {
     expect(groupOf(0)).toBe(0)
@@ -558,5 +565,29 @@ describe('the zero-payout residual', () => {
     const off = { ...DEFAULT_TARGETS, useChances: false }
     const r = solveWeights(rows, T, off, CURVE_PRESETS.medium)
     expect(statsOf(withWeights(r.weights), T).hitChance).toBeCloseTo(0.3, 2)
+  })
+})
+
+describe('the per-band slope floor', () => {
+  it('stops the curve rising at very low volatility', () => {
+    const r = solveWeights(rows, T, DEFAULT_TARGETS, CURVE_PRESETS['very low'])
+    const l = ladderOf(rows, r.weights)
+    // 0.33x used to come out well below 0.6x
+    expect(l[0].w).toBeGreaterThanOrEqual(l[1].w)
+    expect(statsOf(withWeights(r.weights), T).rtp).toBeCloseTo(0.95, 6)
+  })
+
+  it('keeps every volatility preset usable at RTP 0.95', () => {
+    for (const v of VOLATILITY_STEPS) {
+      const r = solveWeights(rows, T, DEFAULT_TARGETS, CURVE_PRESETS[v])
+      expect(statsOf(withWeights(r.weights), T).rtp).toBeCloseTo(0.95, 6)
+      expect({ v, warnings: r.warnings }).toEqual({ v, warnings: [] })
+    }
+  })
+
+  it('lets ordering go rather than miss the RTP target', () => {
+    const r = solveWeights(rows, T, { ...DEFAULT_TARGETS, rtp: 50 }, CURVE_PRESETS.medium)
+    expect(statsOf(withWeights(r.weights), T).rtp).toBeCloseTo(50, 4)
+    expect(r.warnings.some((w) => w.includes('ordering yielded'))).toBe(true)
   })
 })

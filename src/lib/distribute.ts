@@ -35,8 +35,9 @@ export interface Stats {
   winChance: number
 }
 
-const GAMMA_LO = -40
 const GAMMA_HI = 40
+/** Only reached when the RTP target is out of reach with the ladder in order. */
+const GAMMA_UNORDERED = -40
 const BISECTION_STEPS = 200
 /** Band resolution: 100 steps per side is far finer than a ±3.5% band needs. */
 const BAND_STEPS = 100
@@ -241,6 +242,7 @@ interface Ctx {
   total: number
   curve: number
   residual: number
+  ordered: boolean
 }
 
 function buildCtx(rows: BucketRow[], total: number, curve: number): Ctx {
@@ -270,6 +272,7 @@ function buildCtx(rows: BucketRow[], total: number, curve: number): Ctx {
   return {
     n, payouts, locked, current, u, freeIdx, lockedSum, totalLocked, total, curve,
     residual: residualIndex(rows),
+    ordered: true,
   }
 }
 
@@ -352,6 +355,31 @@ function curveBands(ctx: Ctx, budgets: number[], pooled: boolean): [number[], nu
   return [[[...ctx.freeIdx[1], ...ctx.freeIdx[2]], budgets[1] + budgets[2]]]
 }
 
+/**
+ * Smallest slope that keeps a band non-increasing, given the curvature.
+ *
+ * Ordering is a condition between *consecutive* buckets, not on the curve's
+ * derivative: for u_i < u_j the shape needs
+ *
+ *   -γ·u_i - c·u_i²  ≥  -γ·u_j - c·u_j²   ⟺   γ ≥ -c·(u_i + u_j)
+ *
+ * A band that starts well up the ladder therefore tolerates a far flatter
+ * slope than one starting at u = 0. That gap is the whole reason every
+ * volatility preset survives: a blanket floor of 0 puts RTP 0.95 out of reach
+ * at the two lowest presets, and flattening the curve to compensate collapses
+ * them onto the same shape.
+ */
+function bandFloor(ctx: Ctx, idx: number[]): number {
+  const order = [...idx].sort((a, b) => ctx.u[a] - ctx.u[b])
+  let floor = 0
+  for (let k = 1; k < order.length; k++) {
+    const a = ctx.u[order[k - 1]]
+    const b = ctx.u[order[k]]
+    if (b > a) floor = Math.min(floor, -ctx.curve * (a + b))
+  }
+  return floor
+}
+
 /** Continuous (pre-rounding) weights for a given band position and slope. */
 function continuousWeights(
   ctx: Ctx,
@@ -380,7 +408,8 @@ function continuousWeights(
 
   for (const [idx, budget] of curveBands(ctx, budgets, pooled)) {
     if (idx.length === 0 || !(budget > 0)) continue
-    const logs = idx.map((i) => -gamma * ctx.u[i] - ctx.curve * ctx.u[i] * ctx.u[i])
+    const g = ctx.ordered ? Math.max(gamma, bandFloor(ctx, idx)) : gamma
+    const logs = idx.map((i) => -g * ctx.u[i] - ctx.curve * ctx.u[i] * ctx.u[i])
     const maxLog = Math.max(...logs)
     const raw = logs.map((l) => Math.exp(l - maxLog))
     const sum = raw.reduce((a, b) => a + b, 0)
@@ -403,12 +432,12 @@ function rtpOf(ctx: Ctx, w: number[]): number {
 function reachRange(ctx: Ctx, budgets: number[], pooled = false): [number, number] {
   return [
     rtpOf(ctx, continuousWeights(ctx, budgets, GAMMA_HI, pooled)),
-    rtpOf(ctx, continuousWeights(ctx, budgets, GAMMA_LO, pooled)),
+    rtpOf(ctx, continuousWeights(ctx, budgets, GAMMA_UNORDERED, pooled)),
   ]
 }
 
 function solveGamma(ctx: Ctx, budgets: number[], target: number, pooled = false): number {
-  let lo = GAMMA_LO
+  let lo = GAMMA_UNORDERED
   let hi = GAMMA_HI
   const [min, max] = reachRange(ctx, budgets, pooled)
   const goal = clamp(target, min, max)
@@ -650,53 +679,62 @@ export function solveWeights(
     reachable: boolean
   }
 
-  let chosen: Candidate | null = null
-  let fallback: Candidate | null = null
-
-  if (pooled) {
-    // Nothing to search: with no chance targets there is no band to spend.
-    const { budgets, conflict } = freeBudgets(ctx, currentMasses(ctx, targets), step)
-    const [min, max] = reachRange(ctx, budgets, true)
-    chosen = {
-      s: 0,
-      budgets,
-      conflict,
-      reachable: targets.rtp >= min - 1e-12 && targets.rtp <= max + 1e-12,
+  /**
+   * The band position to solve at: the least tolerance spent that puts the RTP
+   * target in reach, or — when nothing does — the first lock-clean position.
+   *
+   * Ordering outranks the chance preferences, so the ordered pass gets first
+   * refusal on the band; only when no position reaches the target in order
+   * does the caller run this again unordered, which is the pre-ordering search
+   * exactly.
+   */
+  const chooseBand = (c: Ctx): Candidate => {
+    const reaches = (budgets: number[]) => {
+      const [min, max] = reachRange(c, budgets, pooled)
+      return targets.rtp >= min - 1e-12 && targets.rtp <= max + 1e-12
     }
+
+    if (pooled) {
+      // Nothing to search: with no chance targets there is no band to spend.
+      const { budgets, conflict } = freeBudgets(c, currentMasses(c, targets), step)
+      return { s: 0, budgets, conflict, reachable: reaches(budgets) }
+    }
+
+    let fallback: Candidate | null = null
+    for (const s of bandCandidates()) {
+      const { budgets, conflict } = freeBudgets(c, massesFor(targets, s, totalWeight), step)
+      const candidate: Candidate = { s, budgets, conflict, reachable: reaches(budgets) }
+      if (!conflict && candidate.reachable) return candidate
+      // Locks are hard, so a lock-clean position beats an RTP-reachable one.
+      if (!conflict && fallback === null) fallback = candidate
+    }
+    if (fallback !== null) return fallback
+
+    const { budgets, conflict } = freeBudgets(c, massesFor(targets, 0, totalWeight), step)
+    return { s: 0, budgets, conflict, reachable: reaches(budgets) }
   }
 
-  for (const s of chosen !== null ? [] : bandCandidates()) {
-    const { budgets, conflict } = freeBudgets(ctx, massesFor(targets, s, totalWeight), step)
-    const [min, max] = reachRange(ctx, budgets)
-    const reachable = targets.rtp >= min - 1e-12 && targets.rtp <= max + 1e-12
-    const candidate: Candidate = { s, budgets, conflict, reachable }
-
-    if (!conflict && reachable) {
-      chosen = candidate
-      break
-    }
-    // Locks are hard, so a lock-clean position beats an RTP-reachable one.
-    if (!conflict && fallback === null) fallback = candidate
+  // Ordering ranks above the chance preferences but below the RTP target, so
+  // when no band position reaches the target with the ladder in order, the
+  // ladder is what gives — and the search runs again without it. Flattening
+  // the curve is not an alternative: a heavier curve lowers band 2's floor and
+  // therefore *raises* the ceiling, so flattening would move the target
+  // further away.
+  let solveCtx = ctx
+  let chosen = chooseBand(ctx)
+  const orderedReach = chosen.reachable
+  if (!orderedReach) {
+    solveCtx = { ...ctx, ordered: false }
+    chosen = chooseBand(solveCtx)
   }
 
-  if (chosen === null) {
-    if (fallback !== null) {
-      chosen = fallback
-    } else {
-      const { budgets, conflict } = freeBudgets(ctx, massesFor(targets, 0, totalWeight), step)
-      const [min, max] = reachRange(ctx, budgets)
-      chosen = {
-        s: 0,
-        budgets,
-        conflict,
-        reachable: targets.rtp >= min - 1e-12 && targets.rtp <= max + 1e-12,
-      }
-    }
-  }
-
-  const gamma = solveGamma(ctx, chosen.budgets, targets.rtp, pooled)
-  const weights = allocate(ctx, continuousWeights(ctx, chosen.budgets, gamma, pooled), step)
-  repairRtp(ctx, weights, targets.rtp, step)
+  const gamma = solveGamma(solveCtx, chosen.budgets, targets.rtp, pooled)
+  const weights = allocate(
+    solveCtx,
+    continuousWeights(solveCtx, chosen.budgets, gamma, pooled),
+    step,
+  )
+  repairRtp(solveCtx, weights, targets.rtp, step)
 
   const achieved = statsOf(
     rows.map((r, i) => ({ ...r, weight: weights[i] })),
@@ -714,10 +752,17 @@ export function solveWeights(
     }
   }
 
+  if (!orderedReach) {
+    warnings.push(
+      `Weights could not be kept in payout order at RTP ${targets.rtp} — ordering yielded to the RTP target.`,
+    )
+  }
+
   // Reachability is a property of the continuous solve. Integer rounding
   // leaves a residue whose size depends on the closest pair of payouts on the
   // ladder, so it is not evidence that the target was unreachable.
-  if (!chosen.reachable) {
+  const [min, max] = reachRange(solveCtx, chosen.budgets, pooled)
+  if (!(targets.rtp >= min - 1e-12 && targets.rtp <= max + 1e-12)) {
     warnings.push(
       `Target RTP ${targets.rtp} is out of reach at these chances — achieved ${achieved.rtp.toFixed(6)}.`,
     )
