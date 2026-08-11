@@ -280,11 +280,18 @@ Replace `freeBudgets` entirely:
  *
  * Locked weight is subtracted first; a group whose locks already overrun its
  * mass is clamped to zero and flagged. Every unlocked bucket is then owed one
- * step off the top, so a group the chance targets leave empty still cannot
- * starve its members — the floor has to be reserved *before* the split, not
- * applied inside it, because a group with no mass gets no split to apply it in.
- * Whatever survives is rescaled so the budgets add up to exactly the unlocked
- * total; otherwise the weights would not sum to the grand total.
+ * step, so a group the chance targets leave empty still cannot starve its
+ * members — the floor has to be applied *to* the split rather than inside it,
+ * because a group with no mass gets no split to apply it in.
+ *
+ * The floor is a minimum, not a tax. A group already clearing one step per
+ * bucket keeps its mass share untouched, which is the normal case and what
+ * keeps the chance targets landing exactly; only a group that cannot fund its
+ * own floor takes anything, and it comes from the slack of the groups that
+ * can. Reserving a flat `count x step` off the top instead would shift mass
+ * toward whichever group has the most buckets per unit of mass — on the
+ * reference table at step 100 that is the 23-bucket win group, and it drags
+ * hit chance from 0.300 to 0.301 for no reason at all.
  */
 function freeBudgets(
   ctx: Ctx,
@@ -295,24 +302,46 @@ function freeBudgets(
   const raw = [0, 1, 2].map((g) => masses[g] - ctx.lockedSum[g])
   const conflict = raw.some((v) => v < -0.5)
 
-  const reserve = [0, 1, 2].map((g) => ctx.freeIdx[g].length * step)
-  const spare = Math.max(0, free - reserve[0] - reserve[1] - reserve[2])
-
-  const shares = raw.map((v, g) => (ctx.freeIdx[g].length === 0 ? 0 : Math.max(0, v)))
-  const sum = shares.reduce((a, b) => a + b, 0)
-
-  if (sum > 0) {
-    const k = spare / sum
-    return { budgets: shares.map((v, g) => reserve[g] + v * k), conflict }
-  }
-
-  // No group can take mass. Spread the spare by unlocked bucket count so the
-  // total still balances.
   const counts = [0, 1, 2].map((g) => ctx.freeIdx[g].length)
   const totalCount = counts.reduce((a, b) => a + b, 0)
   if (totalCount === 0) return { budgets: [0, 0, 0], conflict }
-  return { budgets: counts.map((c, g) => reserve[g] + (spare * c) / totalCount), conflict }
+
+  const shares = raw.map((v, g) => (counts[g] === 0 ? 0 : Math.max(0, v)))
+  const sum = shares.reduce((a, b) => a + b, 0)
+  // No group can take weight by mass. Spread by unlocked bucket count so the
+  // total still balances.
+  const base =
+    sum > 0 ? shares.map((v) => (v / sum) * free) : counts.map((c) => (free * c) / totalCount)
+
+  const reserve = counts.map((c) => c * step)
+  const need = base.map((b, g) => Math.max(0, reserve[g] - b))
+  const shortfall = need.reduce((a, b) => a + b, 0)
+  if (shortfall <= 0) return { budgets: base, conflict }
+
+  const slack = base.map((b, g) => Math.max(0, b - reserve[g]))
+  const totalSlack = slack.reduce((a, b) => a + b, 0)
+  // `solveWeights` refuses before reaching here when the free weight cannot
+  // cover every reserve, which is exactly the condition that guarantees
+  // `totalSlack >= shortfall`.
+  if (!(totalSlack > 0)) return { budgets: reserve, conflict }
+  return {
+    budgets: base.map((b, g) => b + need[g] - (slack[g] / totalSlack) * shortfall),
+    conflict,
+  }
 }
+```
+
+The budgets still sum to exactly `free`: `base` does, and the correction adds `shortfall` and takes `shortfall` back. A group with a shortfall lands on exactly its reserve (`base + need === reserve`, and its slack is 0 so it gives nothing back); a group with slack keeps at least its own reserve, because `shortfall <= totalSlack`.
+
+Add a sixth test to the suite above, pinning the property this formula exists to preserve — the floor must cost the chance targets nothing when it does not bind:
+
+```ts
+  it('costs the chance targets nothing when every group clears its floor', () => {
+    const r = solveWeights(rows, 1_200_300, DEFAULT_TARGETS, CURVE_PRESETS.medium, 100)
+    const s = statsOf(withWeights(r.weights), 1_200_300)
+    expect(s.hitChance).toBeCloseTo(0.3, 4)
+    expect(s.winChance).toBeCloseTo(0.12, 4)
+  })
 ```
 
 Pass `step` as the third argument at all three `freeBudgets(...)` call sites in `solveWeights` — the pooled branch, the band-candidate loop, and the no-candidate fallback.
