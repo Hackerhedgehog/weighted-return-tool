@@ -1896,7 +1896,7 @@ export function buildTableRows(
 - [ ] **Step 4: Run the tests to verify they pass**
 
 Run: `npx vitest run src/lib/tableRows.test.ts`
-Expected: PASS, all eight cases.
+Expected: PASS, all seven cases.
 
 - [ ] **Step 5: Lint and commit**
 

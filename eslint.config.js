@@ -18,5 +18,13 @@ export default defineConfig([
     languageOptions: {
       globals: globals.browser,
     },
+    rules: {
+      // A parameter can be load-bearing for a signature without being read:
+      // the bridge-session fetch mock has to declare `init` for its callers to
+      // index `mock.calls[n][1]`, even though the mock body ignores it. The
+      // underscore is the intent marker; honour it rather than deleting
+      // parameters the types depend on.
+      '@typescript-eslint/no-unused-vars': ['error', { argsIgnorePattern: '^_' }],
+    },
   },
 ])
