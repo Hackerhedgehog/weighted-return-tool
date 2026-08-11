@@ -916,7 +916,7 @@ export function solveWeights(
   }
 
   const weights = allocate(solveCtx, cont, step)
-  restoreResidual(solveCtx, weights, step)
+  if (solveCtx.ordered) restoreResidual(solveCtx, weights, step)
   repairRtp(solveCtx, weights, targets.rtp, step)
 
   const achieved = statsOf(

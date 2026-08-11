@@ -658,6 +658,17 @@ describe('ordering against the chance targets', () => {
     expect(r.warnings.filter((w) => w.includes('chance'))).toEqual([])
   })
 
+  it('leaves the ladder alone once ordering has yielded', () => {
+    // Ordering gave way to reach this target, so the solve is deliberately
+    // piling mass on the top of the ladder. Forcing the residual back above it
+    // would take that mass straight off again, and repairRtp cannot pull it
+    // back out of the zero band.
+    const steep = { ...DEFAULT_TARGETS, hitChance: 0.9, winChance: 0.85, rtp: 700 }
+    const r = solveWeights(rows, T, steep, CURVE_PRESETS.medium)
+    expect(r.warnings.some((w) => w.includes('ordering yielded'))).toBe(true)
+    expect(Math.abs(statsOf(withWeights(r.weights), T).rtp - 700)).toBeLessThan(1)
+  })
+
   it('does not claim RTP was out of reach when it landed on target', () => {
     const greedy = { ...DEFAULT_TARGETS, hitChance: 0.9, winChance: 0.85 }
     const r = solveWeights(rows, T, greedy, CURVE_PRESETS.medium)
