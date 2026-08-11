@@ -90,3 +90,65 @@ describe('saveResult', () => {
     ).toBe(409)
   })
 })
+
+import { mkdirSync } from 'node:fs'
+import { switchResult } from './handlers'
+
+describe('switchResult', () => {
+  it('accepts a real tsv in a real directory', () => {
+    const cfg = tempCfg()
+    const { result, next } = switchResult({
+      dir: cfg.dir,
+      file: cfg.file,
+      exportName: 'ref-weights-buy-bonus.tsv',
+      game: 'imperial-express',
+    })
+    expect(result.status).toBe(200)
+    expect(next).toEqual({
+      dir: cfg.dir,
+      file: cfg.file,
+      exportName: 'ref-weights-buy-bonus.tsv',
+      game: 'imperial-express',
+    })
+  })
+
+  it('defaults the export name and the game', () => {
+    const cfg = tempCfg()
+    const { next } = switchResult({ dir: cfg.dir, file: cfg.file })
+    expect(next?.exportName).toBe('ref-weights-regular.tsv')
+    expect(next?.game).toBe('')
+  })
+
+  it('rejects a body that is not an object', () => {
+    expect(switchResult('nope').result.status).toBe(400)
+    expect(switchResult(null).result.status).toBe(400)
+  })
+
+  it('rejects a file that does not exist', () => {
+    const cfg = tempCfg()
+    const { result, next } = switchResult({ dir: cfg.dir, file: resolve(cfg.dir, 'gone.tsv') })
+    expect(result.status).toBe(400)
+    expect(next).toBeNull()
+  })
+
+  it('rejects a file that is not a tsv', () => {
+    const cfg = tempCfg()
+    const csv = resolve(cfg.dir, 'ScenarioSet0.csv')
+    writeFileSync(csv, 'x', 'utf8')
+    expect(switchResult({ dir: cfg.dir, file: csv }).result.status).toBe(400)
+  })
+
+  it('rejects a directory that is not a directory', () => {
+    const cfg = tempCfg()
+    expect(switchResult({ dir: cfg.file, file: cfg.file }).result.status).toBe(400)
+  })
+
+  it('rejects an export name that could escape the directory', () => {
+    const cfg = tempCfg()
+    const sub = resolve(cfg.dir, 'sub')
+    mkdirSync(sub)
+    expect(
+      switchResult({ dir: cfg.dir, file: cfg.file, exportName: '../out.tsv' }).result.status,
+    ).toBe(400)
+  })
+})
