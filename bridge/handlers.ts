@@ -1,4 +1,4 @@
-import { existsSync, readFileSync, writeFileSync } from 'node:fs'
+import { existsSync, readFileSync, statSync, writeFileSync } from 'node:fs'
 import { basename } from 'node:path'
 import type { BridgeConfig } from './config.ts'
 import { resolveSavePath } from './save.ts'
@@ -58,4 +58,39 @@ export function saveResult(cfg: BridgeConfig, body: unknown): JsonResult {
   } catch (err) {
     return { status: 500, body: { error: (err as Error).message } }
   }
+}
+
+const FALLBACK_EXPORT_NAME = 'ref-weights-regular.tsv'
+
+/**
+ * Re-points the session at another file, so a running tool can be fed the next
+ * bet mode — or another game entirely — without restarting the dev server.
+ *
+ * Everything is validated here rather than trusted from the caller: the CLI is
+ * the only intended client, but this is an open port on the dev machine.
+ * `resolveSavePath` is reused for the export name so a switch can never widen
+ * what a later save is allowed to write.
+ */
+export function switchResult(body: unknown): { result: JsonResult; next: BridgeConfig | null } {
+  const bad = (error: string) => ({ result: { status: 400, body: { error } }, next: null })
+  const b = body as { dir?: unknown; file?: unknown; exportName?: unknown; game?: unknown } | null
+
+  if (b === null || typeof b !== 'object') return bad('Body must be a JSON object.')
+  if (typeof b.dir !== 'string' || b.dir === '') return bad('dir must be a non-empty string.')
+  if (typeof b.file !== 'string' || b.file === '') return bad('file must be a non-empty string.')
+  if (b.exportName !== undefined && typeof b.exportName !== 'string') {
+    return bad('exportName must be a string.')
+  }
+  if (b.game !== undefined && typeof b.game !== 'string') return bad('game must be a string.')
+
+  if (!existsSync(b.dir) || !statSync(b.dir).isDirectory()) return bad(`Not a directory: ${b.dir}`)
+  if (!existsSync(b.file) || !statSync(b.file).isFile()) return bad(`Not a file: ${b.file}`)
+  if (!b.file.toLowerCase().endsWith('.tsv')) return bad('file must be a .tsv')
+
+  const exportName = b.exportName === undefined || b.exportName === '' ? FALLBACK_EXPORT_NAME : b.exportName
+  const save = resolveSavePath(b.dir, exportName)
+  if (!save.ok) return bad(save.error)
+
+  const next: BridgeConfig = { dir: b.dir, file: b.file, exportName, game: b.game ?? '' }
+  return { result: { status: 200, body: { ok: true, dir: next.dir, file: next.file } }, next }
 }

@@ -9,6 +9,7 @@ weights — then exports a `.tsv` the engine can read back.
 - [Requirements](#requirements)
 - [Install](#install)
 - [Usage](#usage)
+- [Bridge](#bridge)
 - [Data formats](#data-formats)
   - [Input — what you paste](#input--what-you-paste)
   - [Output — what you export](#output--what-you-export)
@@ -62,6 +63,32 @@ npm test           # vitest, watch mode
 npm run test:run   # vitest, single run
 npm run lint       # eslint
 ```
+
+## Bridge
+
+When `tools/auto-scenarios` launches the dev server, it sets four environment
+variables (`WRT_BRIDGE_DIR`, `WRT_BRIDGE_FILE`, `WRT_BRIDGE_EXPORT_NAME`,
+`WRT_BRIDGE_GAME`) and a Vite plugin (`bridge/`) serves three routes:
+
+- `GET /__bridge/session` → the TSV plus its metadata
+- `POST /__bridge/save` → writes one `.tsv` into the bridge directory; `409`
+  if it exists and `overwrite` was not `true`
+- `POST /__bridge/switch` → re-points the session at another file — or
+  another game's directory entirely — and pushes a full page reload
+
+Without those variables the plugin registers nothing, and the tool behaves
+exactly as it does when started with a plain `npm run dev`.
+
+The two routes are guarded differently, because they do different things. A
+**save** writes, so its filename can only ever name a single `.tsv` directly
+inside the nominated directory — separators, traversal, colons, control
+characters and non-`.tsv` names are all refused. A **switch** only re-points
+the session at something that already exists: its `dir` must be an existing
+directory and its `file` an existing `.tsv`, but that file may be any `.tsv`
+on disk, anywhere — it is read, never written. What a switch cannot do is
+widen what a later save may write: its `exportName` goes through the same
+save-path check, so the new session's export stays a single `.tsv` inside the
+new `dir`.
 
 ## Data formats
 
