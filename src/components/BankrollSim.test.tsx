@@ -55,23 +55,39 @@ beforeEach(() => {
 afterEach(cleanup)
 
 function renderSim(
-  worker?: FakeWorker,
-  config: BankrollConfig = DEFAULT_BANKROLL,
-  tableRtp = 0.95,
+  over: {
+    worker?: FakeWorker
+    config?: BankrollConfig
+    tableRtp?: number
+    yZoom?: number
+    onYZoom?: (z: number) => void
+    yPan?: number
+    onYPan?: (p: number) => void
+    xZoom?: number
+    onXZoom?: (z: number) => void
+    xPan?: number
+    onXPan?: (p: number) => void
+  } = {},
 ) {
   const onConfig = vi.fn()
   render(
     <BankrollSim
       rows={rows}
       totalWeight={1_000_000}
-      tableRtp={tableRtp}
-      config={config}
+      tableRtp={over.tableRtp ?? 0.95}
+      config={over.config ?? DEFAULT_BANKROLL}
       onConfig={onConfig}
       chartHeight={260}
       onChartHeight={vi.fn()}
-      yZoom={1}
-      onYZoom={vi.fn()}
-      createWorker={worker === undefined ? undefined : () => worker}
+      yZoom={over.yZoom ?? 1}
+      onYZoom={over.onYZoom ?? vi.fn()}
+      yPan={over.yPan ?? 0}
+      onYPan={over.onYPan ?? vi.fn()}
+      xZoom={over.xZoom ?? 1}
+      onXZoom={over.onXZoom ?? vi.fn()}
+      xPan={over.xPan ?? 0}
+      onXPan={over.onXPan ?? vi.fn()}
+      createWorker={over.worker === undefined ? undefined : () => over.worker!}
     />,
   )
   return onConfig
@@ -79,14 +95,14 @@ function renderSim(
 
 describe('BankrollSim fields', () => {
   it('shows the configured credits, bet and multiplier', () => {
-    renderSim(new FakeWorker())
+    renderSim({ worker: new FakeWorker() })
     expect(screen.getByDisplayValue('1,000,000')).toBeDefined()
     expect((screen.getByLabelText('Bet') as HTMLInputElement).value).toBe('1')
     expect((screen.getByLabelText('RTP multiplier') as HTMLInputElement).value).toBe('1')
   })
 
   it('commits shorthand credits on Enter', () => {
-    const onConfig = renderSim(new FakeWorker())
+    const onConfig = renderSim({ worker: new FakeWorker() })
     const input = screen.getByLabelText('Starting credits')
     fireEvent.change(input, { target: { value: '2m' } })
     fireEvent.keyDown(input, { key: 'Enter' })
@@ -94,7 +110,7 @@ describe('BankrollSim fields', () => {
   })
 
   it('keeps a fractional bet', () => {
-    const onConfig = renderSim(new FakeWorker())
+    const onConfig = renderSim({ worker: new FakeWorker() })
     const input = screen.getByLabelText('Bet')
     fireEvent.change(input, { target: { value: '0.5' } })
     fireEvent.keyDown(input, { key: 'Enter' })
@@ -102,7 +118,7 @@ describe('BankrollSim fields', () => {
   })
 
   it('commits an arithmetic bet on Enter', () => {
-    const onConfig = renderSim(new FakeWorker())
+    const onConfig = renderSim({ worker: new FakeWorker() })
     const input = screen.getByLabelText('Bet')
     fireEvent.change(input, { target: { value: '1/4' } })
     fireEvent.keyDown(input, { key: 'Enter' })
@@ -110,7 +126,7 @@ describe('BankrollSim fields', () => {
   })
 
   it('reverts an unreadable entry on blur', () => {
-    renderSim(new FakeWorker())
+    renderSim({ worker: new FakeWorker() })
     const input = screen.getByLabelText('Bet')
     fireEvent.change(input, { target: { value: 'abc' } })
     fireEvent.blur(input)
@@ -120,12 +136,12 @@ describe('BankrollSim fields', () => {
 
 describe('BankrollSim guards', () => {
   it('disables Run when the bet exceeds the credits', () => {
-    renderSim(new FakeWorker(), { credits: 10, bet: 50, rtpMultiplier: 1 })
+    renderSim({ worker: new FakeWorker(), config: { credits: 10, bet: 50, rtpMultiplier: 1 } })
     expect((screen.getByRole('button', { name: 'Run' }) as HTMLButtonElement).disabled).toBe(true)
   })
 
   it('disables Run when workers are unavailable', () => {
-    renderSim(undefined)
+    renderSim()
     expect((screen.getByRole('button', { name: 'Run' }) as HTMLButtonElement).disabled).toBe(true)
   })
 
@@ -133,18 +149,18 @@ describe('BankrollSim guards', () => {
     // 0.5 * 2 is exactly 1 in floating point — unlike 0.95 * (1 / 0.95),
     // which lands one ULP under 1 and never actually reaches the boundary
     // this test claims to pin.
-    renderSim(new FakeWorker(), { ...DEFAULT_BANKROLL, rtpMultiplier: 2 }, 0.5)
+    renderSim({ worker: new FakeWorker(), config: { ...DEFAULT_BANKROLL, rtpMultiplier: 2 }, tableRtp: 0.5 })
     expect(screen.getByRole('status', { name: 'Bankroll warning' })).toBeDefined()
     expect((screen.getByRole('button', { name: 'Run' }) as HTMLButtonElement).disabled).toBe(false)
   })
 
   it('does not warn just below an effective RTP of 1', () => {
-    renderSim(new FakeWorker(), { ...DEFAULT_BANKROLL, rtpMultiplier: 0.999 }, 1)
+    renderSim({ worker: new FakeWorker(), config: { ...DEFAULT_BANKROLL, rtpMultiplier: 0.999 }, tableRtp: 1 })
     expect(screen.queryByRole('status', { name: 'Bankroll warning' })).toBeNull()
   })
 
   it('does not warn below an effective RTP of 1', () => {
-    renderSim(new FakeWorker(), DEFAULT_BANKROLL, 0.95)
+    renderSim({ worker: new FakeWorker(), config: DEFAULT_BANKROLL, tableRtp: 0.95 })
     expect(screen.queryByRole('status', { name: 'Bankroll warning' })).toBeNull()
   })
 })
@@ -152,7 +168,7 @@ describe('BankrollSim guards', () => {
 describe('BankrollSim runs', () => {
   it('starts a run with scaled config and the raw table', () => {
     const w = new FakeWorker()
-    renderSim(w)
+    renderSim({ worker: w })
     fireEvent.click(screen.getByRole('button', { name: 'Run' }))
 
     expect(w.posted).toHaveLength(1)
@@ -166,7 +182,7 @@ describe('BankrollSim runs', () => {
 
   it('streams the balance and the stat tiles', () => {
     const w = new FakeWorker()
-    renderSim(w)
+    renderSim({ worker: w })
     fireEvent.click(screen.getByRole('button', { name: 'Run' }))
 
     reply(w, {
@@ -183,7 +199,7 @@ describe('BankrollSim runs', () => {
 
   it('offers Continue only when a chunk capped with credit left', () => {
     const w = new FakeWorker()
-    renderSim(w)
+    renderSim({ worker: w })
     fireEvent.click(screen.getByRole('button', { name: 'Run' }))
 
     reply(w, {
@@ -217,6 +233,12 @@ describe('BankrollSim runs', () => {
         onChartHeight={vi.fn()}
         yZoom={1}
         onYZoom={vi.fn()}
+        yPan={0}
+        onYPan={vi.fn()}
+        xZoom={1}
+        onXZoom={vi.fn()}
+        xPan={0}
+        onXPan={vi.fn()}
         createWorker={createWorker}
       />,
     )
@@ -241,7 +263,7 @@ describe('BankrollSim runs', () => {
 
   it('offers no Continue after a bust', () => {
     const w = new FakeWorker()
-    renderSim(w)
+    renderSim({ worker: w })
     fireEvent.click(screen.getByRole('button', { name: 'Run' }))
 
     reply(w, {
@@ -259,7 +281,7 @@ describe('BankrollSim runs', () => {
 
   it('cancel terminates the worker, ends the run and keeps the line', () => {
     const w = new FakeWorker()
-    renderSim(w)
+    renderSim({ worker: w })
     fireEvent.click(screen.getByRole('button', { name: 'Run' }))
     reply(w, { type: 'progress', points: [{ spins: 100, balance: 1200 }], state: state() })
 
@@ -271,7 +293,7 @@ describe('BankrollSim runs', () => {
 
   it('surfaces a worker error', () => {
     const w = new FakeWorker()
-    renderSim(w)
+    renderSim({ worker: w })
     fireEvent.click(screen.getByRole('button', { name: 'Run' }))
     reply(w, { type: 'error', message: 'Every bucket has zero weight — nothing to play.' })
     expect(screen.getByText(/zero weight/)).toBeDefined()
@@ -279,7 +301,7 @@ describe('BankrollSim runs', () => {
 
   it('shows the y-axis zoom handle once a run has produced a chart', () => {
     const w = new FakeWorker()
-    renderSim(w)
+    renderSim({ worker: w })
     fireEvent.click(screen.getByRole('button', { name: 'Run' }))
     reply(w, { type: 'progress', points: [{ spins: 100, balance: 1200 }], state: state() })
     expect(screen.getByRole('slider', { name: "Zoom the bankroll chart's y-axis" })).toBeDefined()
@@ -289,7 +311,7 @@ describe('BankrollSim runs', () => {
 describe('BankrollSim stat tiles snapshot the run', () => {
   it('scales Biggest Win by the run\'s own bet, not the default of 1', () => {
     const w = new FakeWorker()
-    renderSim(w, { ...DEFAULT_BANKROLL, bet: 4 })
+    renderSim({ worker: w, config: { ...DEFAULT_BANKROLL, bet: 4 } })
     fireEvent.click(screen.getByRole('button', { name: 'Run' }))
 
     reply(w, { type: 'progress', points: [{ spins: 100, balance: 1200 }], state: state({ maxWin: 12 }) })
@@ -311,6 +333,12 @@ describe('BankrollSim stat tiles snapshot the run', () => {
       onChartHeight: vi.fn(),
       yZoom: 1,
       onYZoom: vi.fn(),
+      yPan: 0,
+      onYPan: vi.fn(),
+      xZoom: 1,
+      onXZoom: vi.fn(),
+      xPan: 0,
+      onXPan: vi.fn(),
       createWorker: () => w,
     })
     const { rerender } = render(<BankrollSim {...props(DEFAULT_BANKROLL)} />)
@@ -343,7 +371,7 @@ describe('BankrollSim stat tiles snapshot the run', () => {
     // holding half a credit — fmtWeight would round that to "1", reading as
     // a lie right next to a legend that says there is no credit left to bet.
     const w = new FakeWorker()
-    renderSim(w)
+    renderSim({ worker: w })
     fireEvent.click(screen.getByRole('button', { name: 'Run' }))
 
     reply(w, {
@@ -360,5 +388,16 @@ describe('BankrollSim stat tiles snapshot the run', () => {
     expect(document.querySelector('.sim-progress-text')?.textContent).toBe(
       'busted after 10 spins',
     )
+  })
+})
+
+describe('BankrollSim pan/x-zoom threading', () => {
+  it('passes the x-zoom and pan props through to BankrollChart', () => {
+    const w = new FakeWorker()
+    renderSim({ worker: w, xZoom: 0.6, yPan: 0.2 })
+    fireEvent.click(screen.getByRole('button', { name: 'Run' }))
+    reply(w, { type: 'progress', points: [{ spins: 100, balance: 1200 }], state: state() })
+    const slider = screen.getByRole('slider', { name: "Zoom the bankroll chart's x-axis" })
+    expect(slider.getAttribute('aria-valuenow')).toBe('0.6')
   })
 })

@@ -50,6 +50,12 @@ interface BankrollSimProps {
   /** Owned by App and persisted, like chartHeight — the panel only passes it through. */
   yZoom: number
   onYZoom: (z: number) => void
+  yPan: number
+  onYPan: (p: number) => void
+  xZoom: number
+  onXZoom: (z: number) => void
+  xPan: number
+  onXPan: (p: number) => void
   createWorker?: () => BankrollWorkerLike
 }
 
@@ -84,6 +90,12 @@ export function BankrollSim({
   onChartHeight,
   yZoom,
   onYZoom,
+  yPan,
+  onYPan,
+  xZoom,
+  onXZoom,
+  xPan,
+  onXPan,
   createWorker,
 }: BankrollSimProps) {
   const [run, setRun] = useState<Run | null>(null)
@@ -331,6 +343,12 @@ export function BankrollSim({
           onHeight={onChartHeight}
           yZoom={yZoom}
           onYZoom={onYZoom}
+          yPan={yPan}
+          onYPan={onYPan}
+          xZoom={xZoom}
+          onXZoom={onXZoom}
+          xPan={xPan}
+          onXPan={onXPan}
         />
       ) : (
         <div className="chart-wrap">

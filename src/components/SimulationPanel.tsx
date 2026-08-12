@@ -28,8 +28,20 @@ interface SimulationPanelProps {
   /** Independent per mode — each chart keeps its own zoom. */
   simYZoom: number
   onSimYZoom: (z: number) => void
+  simYPan: number
+  onSimYPan: (p: number) => void
+  simXZoom: number
+  onSimXZoom: (z: number) => void
+  simXPan: number
+  onSimXPan: (p: number) => void
   bankrollYZoom: number
   onBankrollYZoom: (z: number) => void
+  bankrollYPan: number
+  onBankrollYPan: (p: number) => void
+  bankrollXZoom: number
+  onBankrollXZoom: (z: number) => void
+  bankrollXPan: number
+  onBankrollXPan: (p: number) => void
   createWorker?: () => SimWorkerLike
   createBankrollWorker?: () => BankrollWorkerLike
 }
@@ -53,8 +65,20 @@ export function SimulationPanel({
   onChartHeight,
   simYZoom,
   onSimYZoom,
+  simYPan,
+  onSimYPan,
+  simXZoom,
+  onSimXZoom,
+  simXPan,
+  onSimXPan,
   bankrollYZoom,
   onBankrollYZoom,
+  bankrollYPan,
+  onBankrollYPan,
+  bankrollXZoom,
+  onBankrollXZoom,
+  bankrollXPan,
+  onBankrollXPan,
   createWorker,
   createBankrollWorker,
 }: SimulationPanelProps) {
@@ -86,6 +110,12 @@ export function SimulationPanel({
           onChartHeight={onChartHeight}
           yZoom={simYZoom}
           onYZoom={onSimYZoom}
+          yPan={simYPan}
+          onYPan={onSimYPan}
+          xZoom={simXZoom}
+          onXZoom={onSimXZoom}
+          xPan={simXPan}
+          onXPan={onSimXPan}
           createWorker={createWorker}
         />
       ) : (
@@ -99,6 +129,12 @@ export function SimulationPanel({
           onChartHeight={onChartHeight}
           yZoom={bankrollYZoom}
           onYZoom={onBankrollYZoom}
+          yPan={bankrollYPan}
+          onYPan={onBankrollYPan}
+          xZoom={bankrollXZoom}
+          onXZoom={onBankrollXZoom}
+          xPan={bankrollXPan}
+          onXPan={onBankrollXPan}
           createWorker={createBankrollWorker}
         />
       )}
