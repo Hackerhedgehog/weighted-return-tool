@@ -1,8 +1,12 @@
 import { useMemo, useState } from 'react'
 import { ChartReadout, type ReadoutStat } from './ChartReadout'
 import { ChartResizeGrip } from './ChartResizeGrip'
+import { ChartScrollbar } from './ChartScrollbar'
+import { ChartXAxisZoom } from './ChartXAxisZoom'
 import { ChartYAxisZoom } from './ChartYAxisZoom'
 import { fmtCompact, niceCeil, SIM_HEIGHT, useContainerWidth } from './chartUtils'
+import { useChartAxes } from './useChartAxes'
+import { useMiddleDragPan } from './useMiddleDragPan'
 import { fmtCredits, fmtWeight } from '../lib/format'
 import type { BankrollPoint, BankrollState } from '../lib/bankroll'
 
@@ -29,9 +33,16 @@ interface BankrollChartProps {
   /** Multiplies the auto-fit ceiling; 1 is auto, <1 zooms in, >1 zooms out. */
   yZoom: number
   onYZoom: (z: number) => void
+  /** Fraction of the auto-fit ceiling the view is centered away from default; see chartView.ts. */
+  yPan: number
+  onYPan: (p: number) => void
+  xZoom: number
+  onXZoom: (z: number) => void
+  xPan: number
+  onXPan: (p: number) => void
 }
 
-const MARGIN = { top: 14, right: 74, bottom: 40, left: 72 }
+const MARGIN = { top: 14, right: 88, bottom: 52, left: 72 }
 
 export function BankrollChart({
   points,
@@ -41,6 +52,12 @@ export function BankrollChart({
   onHeight,
   yZoom,
   onYZoom,
+  yPan,
+  onYPan,
+  xZoom,
+  onXZoom,
+  xPan,
+  onXPan,
 }: BankrollChartProps) {
   const [containerRef, width] = useContainerWidth()
   const [hover, setHover] = useState<number | null>(null)
@@ -56,10 +73,40 @@ export function BankrollChart({
     [state.peak, startCredits],
   )
 
-  const yMax = autoYMax * yZoom
+  const trueYMax = autoYMax
 
-  const x = (spins: number) => MARGIN.left + (spins / totalSpins) * plotW
-  const y = (v: number) => MARGIN.top + plotH * (1 - Math.min(Math.max(v, 0), yMax) / yMax)
+  const { viewX, viewY, setXPan, setYPan, resetView, xScrollbar, yScrollbar } = useChartAxes({
+    xExtent: totalSpins,
+    xZoom,
+    onXZoom,
+    xPan,
+    onXPan,
+    autoYMax,
+    trueYMax,
+    yZoom,
+    onYZoom,
+    yPan,
+    onYPan,
+    keepZeroVisible: true,
+  })
+
+  const middleDragPan = useMiddleDragPan({
+    xZoom,
+    xPan,
+    onXPan: setXPan,
+    yZoom,
+    yPan,
+    onYPan: setYPan,
+    plotW,
+    plotH,
+  })
+
+  const x = (spins: number) =>
+    MARGIN.left + ((spins - viewX.min) / Math.max(1e-9, viewX.max - viewX.min)) * plotW
+  const y = (v: number) => {
+    const clamped = Math.min(Math.max(v, viewY.min), viewY.max)
+    return MARGIN.top + plotH * (1 - (clamped - viewY.min) / Math.max(1e-9, viewY.max - viewY.min))
+  }
 
   const path = useMemo(
     () =>
@@ -67,22 +114,22 @@ export function BankrollChart({
         .map((p, i) => `${i === 0 ? 'M' : 'L'}${x(p.spins).toFixed(1)},${y(p.balance).toFixed(1)}`)
         .join(''),
     // eslint-disable-next-line react-hooks/exhaustive-deps
-    [points, yMax, plotW, plotH, totalSpins],
+    [points, viewX.min, viewX.max, viewY.min, viewY.max, plotW, plotH],
   )
 
   const yTicks = [0, 0.25, 0.5, 0.75, 1].map((t) => ({
     y: MARGIN.top + plotH * (1 - t),
-    label: fmtCompact(t * yMax),
+    label: fmtCompact(viewY.min + t * (viewY.max - viewY.min)),
   }))
   const xTicks = [0, 0.25, 0.5, 0.75, 1].map((t) => ({
     x: MARGIN.left + plotW * t,
-    label: fmtCompact(t * totalSpins),
+    label: fmtCompact(viewX.min + t * (viewX.max - viewX.min)),
   }))
 
   const onMove = (e: React.MouseEvent<SVGRectElement>) => {
     if (points.length === 0) return
     const rect = e.currentTarget.getBoundingClientRect()
-    const spins = ((e.clientX - rect.left) / Math.max(1, plotW)) * totalSpins
+    const spins = viewX.min + ((e.clientX - rect.left) / Math.max(1, plotW)) * (viewX.max - viewX.min)
     let best = 0
     let bestDist = Infinity
     for (let i = 0; i < points.length; i++) {
@@ -122,9 +169,17 @@ export function BankrollChart({
           <span className="legend-line bankroll-start" /> started with {fmtCredits(startCredits)}
         </span>
         {state.busted && <span className="legend-note">busted — no credit left to bet</span>}
+        <button type="button" className="btn chart-reset" onClick={resetView} title="Zoom out to fit all data, centered">
+          Reset view
+        </button>
       </div>
 
       <svg width={width} height={height} role="img" aria-label="Bankroll results">
+        <defs>
+          <clipPath id="bankroll-chart-plot-clip">
+            <rect x={MARGIN.left} y={MARGIN.top} width={Math.max(0, plotW)} height={Math.max(0, plotH)} />
+          </clipPath>
+        </defs>
         {yTicks.map((t, i) => (
           <g key={i}>
             <line className="grid-line" x1={MARGIN.left} x2={width - MARGIN.right} y1={t.y} y2={t.y} />
@@ -158,24 +213,26 @@ export function BankrollChart({
           start
         </text>
 
-        {points.length > 0 && <path className="bankroll-path" d={path} />}
+        <g clipPath="url(#bankroll-chart-plot-clip)">
+          {points.length > 0 && <path className="bankroll-path" d={path} />}
 
-        {state.busted && last !== undefined && (
-          <g className="bankroll-bust">
-            <line x1={x(last.spins)} x2={x(last.spins)} y1={MARGIN.top} y2={MARGIN.top + plotH} />
-            <circle cx={x(last.spins)} cy={y(last.balance)} r={3.5} />
-          </g>
-        )}
+          {state.busted && last !== undefined && (
+            <g className="bankroll-bust">
+              <line x1={x(last.spins)} x2={x(last.spins)} y1={MARGIN.top} y2={MARGIN.top + plotH} />
+              <circle cx={x(last.spins)} cy={y(last.balance)} r={3.5} />
+            </g>
+          )}
 
-        {h !== null && (
-          <line
-            className="sim-crosshair"
-            x1={x(points[h].spins)}
-            x2={x(points[h].spins)}
-            y1={MARGIN.top}
-            y2={MARGIN.top + plotH}
-          />
-        )}
+          {h !== null && (
+            <line
+              className="sim-crosshair"
+              x1={x(points[h].spins)}
+              x2={x(points[h].spins)}
+              y1={MARGIN.top}
+              y2={MARGIN.top + plotH}
+            />
+          )}
+        </g>
 
         <text className="axis-title" x={width / 2} y={height - 8} textAnchor="middle">
           spins
@@ -190,6 +247,7 @@ export function BankrollChart({
           fill="transparent"
           onMouseMove={onMove}
           onMouseLeave={() => setHover(null)}
+          {...middleDragPan}
         />
 
         <ChartYAxisZoom
@@ -201,6 +259,41 @@ export function BankrollChart({
           height={plotH}
           label="Zoom the bankroll chart's y-axis"
         />
+        <ChartXAxisZoom
+          zoom={xZoom}
+          onZoom={onXZoom}
+          x={MARGIN.left}
+          y={height - MARGIN.bottom}
+          width={plotW}
+          height={MARGIN.bottom}
+          label="Zoom the bankroll chart's x-axis"
+        />
+        {xScrollbar !== null && (
+          <ChartScrollbar
+            orientation="x"
+            x={MARGIN.left}
+            y={height - 24}
+            width={plotW}
+            height={6}
+            size={xScrollbar.size}
+            start={xScrollbar.start}
+            onScroll={xScrollbar.onScroll}
+            label="Scroll the bankroll chart horizontally"
+          />
+        )}
+        {yScrollbar !== null && (
+          <ChartScrollbar
+            orientation="y"
+            x={width - 10}
+            y={MARGIN.top}
+            width={6}
+            height={plotH}
+            size={yScrollbar.size}
+            start={yScrollbar.start}
+            onScroll={yScrollbar.onScroll}
+            label="Scroll the bankroll chart vertically"
+          />
+        )}
       </svg>
 
       <ChartReadout
