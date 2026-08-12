@@ -55,10 +55,10 @@ export function useMiddleDragPan({
       onXPan(d.startXPan - xZoom * (dx / Math.max(1, plotW)))
       onYPan(d.startYPan + yZoom * (dy / Math.max(1, plotH)))
     },
-    onPointerUp: () => {
+    onPointerUp: (_e: React.PointerEvent) => {
       drag.current = null
     },
-    onPointerCancel: () => {
+    onPointerCancel: (_e: React.PointerEvent) => {
       drag.current = null
     },
   }
