@@ -45,6 +45,13 @@ export interface Workspace {
   /** Optional — absent in workspaces saved before the y-axis could be zoomed. */
   simChartYZoom?: number
   bankrollChartYZoom?: number
+  /** Optional — absent in workspaces saved before x-axis zoom/pan and y-pan existed. */
+  simChartXZoom?: number
+  simChartXPan?: number
+  simChartYPan?: number
+  bankrollChartXZoom?: number
+  bankrollChartXPan?: number
+  bankrollChartYPan?: number
   /** Optional — absent in workspaces saved before table groups could collapse. */
   tableCollapsed?: string[]
 }
@@ -148,6 +155,12 @@ function isWorkspace(v: unknown): v is Workspace {
     (v.chartHeightAuto === undefined || typeof v.chartHeightAuto === 'boolean') &&
     (v.simChartYZoom === undefined || isFiniteNumber(v.simChartYZoom)) &&
     (v.bankrollChartYZoom === undefined || isFiniteNumber(v.bankrollChartYZoom)) &&
+    (v.simChartXZoom === undefined || isFiniteNumber(v.simChartXZoom)) &&
+    (v.simChartXPan === undefined || isFiniteNumber(v.simChartXPan)) &&
+    (v.simChartYPan === undefined || isFiniteNumber(v.simChartYPan)) &&
+    (v.bankrollChartXZoom === undefined || isFiniteNumber(v.bankrollChartXZoom)) &&
+    (v.bankrollChartXPan === undefined || isFiniteNumber(v.bankrollChartXPan)) &&
+    (v.bankrollChartYPan === undefined || isFiniteNumber(v.bankrollChartYPan)) &&
     (v.tableCollapsed === undefined ||
       (Array.isArray(v.tableCollapsed) && v.tableCollapsed.every((s) => typeof s === 'string')))
   )
