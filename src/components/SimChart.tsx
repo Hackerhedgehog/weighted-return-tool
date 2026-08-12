@@ -1,8 +1,12 @@
 import { useMemo, useState } from 'react'
 import { ChartReadout, type ReadoutStat } from './ChartReadout'
 import { ChartResizeGrip } from './ChartResizeGrip'
+import { ChartScrollbar } from './ChartScrollbar'
+import { ChartXAxisZoom } from './ChartXAxisZoom'
 import { ChartYAxisZoom } from './ChartYAxisZoom'
 import { fmtCompact, niceCeil, SIM_HEIGHT, useContainerWidth } from './chartUtils'
+import { useChartAxes } from './useChartAxes'
+import { useMiddleDragPan } from './useMiddleDragPan'
 import { fmtRtp, fmtWeight } from '../lib/format'
 
 /**
@@ -29,9 +33,16 @@ interface SimChartProps {
   /** Multiplies the auto-fit ceiling; 1 is auto, <1 zooms in, >1 zooms out. */
   yZoom: number
   onYZoom: (z: number) => void
+  /** Fraction of the auto-fit ceiling the view is centered away from default; see chartView.ts. */
+  yPan: number
+  onYPan: (p: number) => void
+  xZoom: number
+  onXZoom: (z: number) => void
+  xPan: number
+  onXPan: (p: number) => void
 }
 
-const MARGIN = { top: 14, right: 74, bottom: 40, left: 64 }
+const MARGIN = { top: 14, right: 82, bottom: 52, left: 64 }
 
 export function SimChart({
   points,
@@ -42,6 +53,12 @@ export function SimChart({
   onHeight,
   yZoom,
   onYZoom,
+  yPan,
+  onYPan,
+  xZoom,
+  onXZoom,
+  xPan,
+  onXPan,
 }: SimChartProps) {
   const [containerRef, width] = useContainerWidth()
   const [hover, setHover] = useState<number | null>(null)
@@ -83,19 +100,53 @@ export function SimChart({
     return niceCeil(Math.max(p95 * 1.15, cumMax * 1.15, expectedRtp * 1.3, 1e-9))
   }, [points, cumulative, expectedRtp])
 
-  const yMax = autoYMax * yZoom
+  /** The real max across every series — ignores the p95 clip, drives Reset View and the pan bound. */
+  const trueYMax = useMemo(() => {
+    if (points.length === 0) return niceCeil(expectedRtp * 1.5)
+    const dataMax = Math.max(...points, ...cumulative, expectedRtp)
+    return niceCeil(Math.max(dataMax, 1e-9))
+  }, [points, cumulative, expectedRtp])
 
-  // Recomputed against the *effective* (zoomed) ceiling: a block that only
-  // clips once the user zooms in should count.
-  const clipped = useMemo(() => points.filter((v) => v > yMax).length, [points, yMax])
+  const { viewX, viewY, setXPan, setYPan, resetView, xScrollbar, yScrollbar } = useChartAxes({
+    xExtent: requestedSpins,
+    xZoom,
+    onXZoom,
+    xPan,
+    onXPan,
+    autoYMax,
+    trueYMax,
+    yZoom,
+    onYZoom,
+    yPan,
+    onYPan,
+  })
 
-  const x = (spins: number) => MARGIN.left + (requestedSpins > 0 ? spins / requestedSpins : 0) * plotW
-  const y = (v: number) => MARGIN.top + plotH * (1 - Math.min(v, yMax) / yMax)
+  const middleDragPan = useMiddleDragPan({
+    xZoom,
+    xPan,
+    onXPan: setXPan,
+    yZoom,
+    yPan,
+    onYPan: setYPan,
+    plotW,
+    plotH,
+  })
+
+  // Recomputed against the *effective* (zoomed+panned) ceiling: a block that
+  // only clips once the user zooms/pans should count.
+  const clipped = useMemo(() => points.filter((v) => v > viewY.max).length, [points, viewY.max])
+
+  const x = (spins: number) =>
+    MARGIN.left + ((spins - viewX.min) / Math.max(1e-9, viewX.max - viewX.min)) * plotW
+  const y = (v: number) => {
+    const clamped = Math.min(Math.max(v, viewY.min), viewY.max)
+    return MARGIN.top + plotH * (1 - (clamped - viewY.min) / Math.max(1e-9, viewY.max - viewY.min))
+  }
 
   const meanPath = useMemo(
     () => points.map((v, i) => `${i === 0 ? 'M' : 'L'}${x(spinsAt[i]).toFixed(1)},${y(v).toFixed(1)}`).join(''),
     // eslint-disable-next-line react-hooks/exhaustive-deps
-    [points, spinsAt, yMax, plotW, plotH, requestedSpins],
+    [points, spinsAt, viewX.min, viewX.max, viewY.min, viewY.max, plotW, plotH],
   )
   const cumPath = useMemo(
     () =>
@@ -103,23 +154,23 @@ export function SimChart({
         .map((v, i) => `${i === 0 ? 'M' : 'L'}${x(spinsAt[i]).toFixed(1)},${y(v).toFixed(1)}`)
         .join(''),
     // eslint-disable-next-line react-hooks/exhaustive-deps
-    [cumulative, spinsAt, yMax, plotW, plotH, requestedSpins],
+    [cumulative, spinsAt, viewX.min, viewX.max, viewY.min, viewY.max, plotW, plotH],
   )
 
   const yTicks = [0, 0.25, 0.5, 0.75, 1].map((t) => ({
     y: MARGIN.top + plotH * (1 - t),
-    label: fmtRtp(t * yMax),
+    label: fmtRtp(viewY.min + t * (viewY.max - viewY.min)),
   }))
   const xTicks = [0, 0.25, 0.5, 0.75, 1].map((t) => ({
     x: MARGIN.left + plotW * t,
-    label: fmtCompact(t * requestedSpins),
+    label: fmtCompact(viewX.min + t * (viewX.max - viewX.min)),
   }))
 
   const onMove = (e: React.MouseEvent<SVGRectElement>) => {
     if (points.length === 0) return
     const rect = e.currentTarget.getBoundingClientRect()
     const px = e.clientX - rect.left
-    const spins = (px / Math.max(1, plotW)) * requestedSpins
+    const spins = viewX.min + (px / Math.max(1, plotW)) * (viewX.max - viewX.min)
     let best = 0
     let bestDist = Infinity
     for (let i = 0; i < spinsAt.length; i++) {
@@ -163,9 +214,17 @@ export function SimChart({
             {clipped} spike block{clipped > 1 ? 's' : ''} pinned to the top edge
           </span>
         )}
+        <button type="button" className="btn chart-reset" onClick={resetView} title="Zoom out to fit all data, centered">
+          Reset view
+        </button>
       </div>
 
       <svg width={width} height={height} role="img" aria-label="Simulation results">
+        <defs>
+          <clipPath id="sim-chart-plot-clip">
+            <rect x={MARGIN.left} y={MARGIN.top} width={Math.max(0, plotW)} height={Math.max(0, plotH)} />
+          </clipPath>
+        </defs>
         {yTicks.map((t, i) => (
           <g key={i}>
             <line className="grid-line" x1={MARGIN.left} x2={width - MARGIN.right} y1={t.y} y2={t.y} />
@@ -199,18 +258,19 @@ export function SimChart({
           {fmtRtp(expectedRtp)}
         </text>
 
-        {points.length > 0 && <path className="sim-mean-path" d={meanPath} />}
-        {cumulative.length > 0 && <path className="sim-cum-path" d={cumPath} />}
-
-        {h !== null && (
-          <line
-            className="sim-crosshair"
-            x1={x(spinsAt[h])}
-            x2={x(spinsAt[h])}
-            y1={MARGIN.top}
-            y2={MARGIN.top + plotH}
-          />
-        )}
+        <g clipPath="url(#sim-chart-plot-clip)">
+          {points.length > 0 && <path className="sim-mean-path" d={meanPath} />}
+          {cumulative.length > 0 && <path className="sim-cum-path" d={cumPath} />}
+          {h !== null && (
+            <line
+              className="sim-crosshair"
+              x1={x(spinsAt[h])}
+              x2={x(spinsAt[h])}
+              y1={MARGIN.top}
+              y2={MARGIN.top + plotH}
+            />
+          )}
+        </g>
 
         <text className="axis-title" x={width / 2} y={height - 8} textAnchor="middle">
           spins
@@ -225,6 +285,7 @@ export function SimChart({
           fill="transparent"
           onMouseMove={onMove}
           onMouseLeave={() => setHover(null)}
+          {...middleDragPan}
         />
 
         <ChartYAxisZoom
@@ -236,6 +297,41 @@ export function SimChart({
           height={plotH}
           label="Zoom the simulation chart's y-axis"
         />
+        <ChartXAxisZoom
+          zoom={xZoom}
+          onZoom={onXZoom}
+          x={MARGIN.left}
+          y={height - MARGIN.bottom}
+          width={plotW}
+          height={MARGIN.bottom}
+          label="Zoom the simulation chart's x-axis"
+        />
+        {xScrollbar !== null && (
+          <ChartScrollbar
+            orientation="x"
+            x={MARGIN.left}
+            y={height - 24}
+            width={plotW}
+            height={6}
+            size={xScrollbar.size}
+            start={xScrollbar.start}
+            onScroll={xScrollbar.onScroll}
+            label="Scroll the simulation chart horizontally"
+          />
+        )}
+        {yScrollbar !== null && (
+          <ChartScrollbar
+            orientation="y"
+            x={width - 10}
+            y={MARGIN.top}
+            width={6}
+            height={plotH}
+            size={yScrollbar.size}
+            start={yScrollbar.start}
+            onScroll={yScrollbar.onScroll}
+            label="Scroll the simulation chart vertically"
+          />
+        )}
       </svg>
 
       <ChartReadout

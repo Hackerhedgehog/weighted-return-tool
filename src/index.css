@@ -1347,6 +1347,33 @@ input.gcell.editing {
   outline-offset: -2px;
 }
 
+.x-zoom-hit {
+  cursor: ew-resize;
+  touch-action: none;
+  outline: none;
+}
+
+.x-zoom-hit:focus-visible {
+  outline: 2px solid var(--accent-soft);
+  outline-offset: -2px;
+}
+
+.chart-scrollbar-track {
+  fill: var(--line);
+}
+
+.chart-scrollbar-thumb {
+  fill: var(--line-strong);
+  cursor: grab;
+  touch-action: none;
+  outline: none;
+}
+
+.chart-scrollbar-thumb:hover,
+.chart-scrollbar-thumb:focus-visible {
+  fill: var(--accent-soft);
+}
+
 /* ---------- paste panel ---------- */
 
 .paste-hero {
