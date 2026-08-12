@@ -98,7 +98,19 @@ export function useChartAxes(cfg: ChartAxesConfig): ChartAxes {
   }
 
   const xGeom = scrollbarGeometry(cfg.xExtent, cfg.xZoom, xPan, 0, cfg.xExtent)
-  const yGeom = scrollbarGeometry(cfg.autoYMax, cfg.yZoom, yPan, 0, yExtent)
+  // For a keepZeroVisible chart, the pan's reachable viewMin range is exactly
+  // [-span, 0] — one view-width wide, by construction of
+  // clampPanKeepZeroVisible (center is bounded to [-span/2, span/2]). There is
+  // no more to scroll to at any zoom level while zero stays visible, so the
+  // scrollbar's own geometry must be measured against that actual reachable
+  // range, not the [0, yExtent] range non-zero-visible charts use — which
+  // correctly yields size=1 (no scrollbar needed) here, always. Middle-mouse
+  // drag-pan remains the correct way to adjust this chart's y-view.
+  const ySpan = cfg.autoYMax * cfg.yZoom
+  const yGeom =
+    cfg.keepZeroVisible === true
+      ? scrollbarGeometry(cfg.autoYMax, cfg.yZoom, yPan, -ySpan, 0)
+      : scrollbarGeometry(cfg.autoYMax, cfg.yZoom, yPan, 0, yExtent)
 
   const xScrollbar: ScrollbarState | null =
     xGeom.size >= FULL_SIZE_EPSILON

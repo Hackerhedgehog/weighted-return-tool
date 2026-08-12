@@ -111,4 +111,16 @@ describe('useChartAxes', () => {
     expect(pan1).toBeCloseTo(-0.5, 6)
     expect(pan2).toBeCloseTo(-0.3, 6)
   })
+
+  it('never reports a y scrollbar for a keepZeroVisible chart, at any zoom (the reachable pan range is provably exactly one view-width wide)', () => {
+    const { result: atDefaultZoom } = renderHook(() =>
+      useChartAxes(baseConfig({ yZoom: 1, autoYMax: 2000, trueYMax: 2000, keepZeroVisible: true })),
+    )
+    expect(atDefaultZoom.current.yScrollbar).toBeNull()
+
+    const { result: zoomedIn } = renderHook(() =>
+      useChartAxes(baseConfig({ yZoom: 0.2, autoYMax: 2000, trueYMax: 2000, keepZeroVisible: true })),
+    )
+    expect(zoomedIn.current.yScrollbar).toBeNull()
+  })
 })
