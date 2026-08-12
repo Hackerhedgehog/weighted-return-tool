@@ -47,7 +47,7 @@ import {
 import { bridgeLoadPlan, feedTabName, freshTabsState, withNewTab, withoutTab } from './lib/tabs'
 import { fetchSession, saveTsv, type BridgeSession } from './lib/bridge'
 import { BucketTable } from './components/BucketTable'
-import { clampHeight, clampZoom, DIST_HEIGHT, SIM_HEIGHT } from './components/chartUtils'
+import { clampHeight, clampZoom, DIST_HEIGHT, SIM_HEIGHT, X_ZOOM_RANGE } from './components/chartUtils'
 import { DistributionChart } from './components/DistributionChart'
 import { GroupChips } from './components/GroupChips'
 import { SettingsPanel } from './components/SettingsPanel'
@@ -196,6 +196,16 @@ function WorkspaceView({
   const [bankrollChartYZoom, setBankrollChartYZoom] = useState(() =>
     clampZoom(saved?.bankrollChartYZoom ?? 1),
   )
+  const [simChartXZoom, setSimChartXZoom] = useState(() =>
+    clampZoom(saved?.simChartXZoom ?? 1, X_ZOOM_RANGE),
+  )
+  const [simChartXPan, setSimChartXPan] = useState(saved?.simChartXPan ?? 0)
+  const [simChartYPan, setSimChartYPan] = useState(saved?.simChartYPan ?? 0)
+  const [bankrollChartXZoom, setBankrollChartXZoom] = useState(() =>
+    clampZoom(saved?.bankrollChartXZoom ?? 1, X_ZOOM_RANGE),
+  )
+  const [bankrollChartXPan, setBankrollChartXPan] = useState(saved?.bankrollChartXPan ?? 0)
+  const [bankrollChartYPan, setBankrollChartYPan] = useState(saved?.bankrollChartYPan ?? 0)
   const [exportFilename, setExportFilename] = useState(
     saved?.exportFilename ?? DEFAULT_EXPORT_FILENAME,
   )
@@ -373,6 +383,12 @@ function WorkspaceView({
       simChartHeight,
       simChartYZoom,
       bankrollChartYZoom,
+      simChartXZoom,
+      simChartXPan,
+      simChartYPan,
+      bankrollChartXZoom,
+      bankrollChartXPan,
+      bankrollChartYPan,
       targetsCollapsed,
       tableCollapsed: collapsedGroups,
     }
@@ -392,6 +408,12 @@ function WorkspaceView({
     simChartHeight,
     simChartYZoom,
     bankrollChartYZoom,
+    simChartXZoom,
+    simChartXPan,
+    simChartYPan,
+    bankrollChartXZoom,
+    bankrollChartXPan,
+    bankrollChartYPan,
     targetsCollapsed,
     collapsedGroups,
   ])
@@ -1029,6 +1051,18 @@ function WorkspaceView({
               onSimYZoom={setSimChartYZoom}
               bankrollYZoom={bankrollChartYZoom}
               onBankrollYZoom={setBankrollChartYZoom}
+              simYPan={simChartYPan}
+              onSimYPan={setSimChartYPan}
+              simXZoom={simChartXZoom}
+              onSimXZoom={setSimChartXZoom}
+              simXPan={simChartXPan}
+              onSimXPan={setSimChartXPan}
+              bankrollYPan={bankrollChartYPan}
+              onBankrollYPan={setBankrollChartYPan}
+              bankrollXZoom={bankrollChartXZoom}
+              onBankrollXZoom={setBankrollChartXZoom}
+              bankrollXPan={bankrollChartXPan}
+              onBankrollXPan={setBankrollChartXPan}
             />
           </section>
         </main>
