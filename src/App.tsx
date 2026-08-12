@@ -47,7 +47,7 @@ import {
 import { bridgeLoadPlan, feedTabName, freshTabsState, withNewTab, withoutTab } from './lib/tabs'
 import { fetchSession, saveTsv, type BridgeSession } from './lib/bridge'
 import { BucketTable } from './components/BucketTable'
-import { clampHeight, clampZoom, DIST_HEIGHT, SIM_HEIGHT, X_ZOOM_RANGE } from './components/chartUtils'
+import { clampHeight, DIST_HEIGHT, SIM_HEIGHT } from './components/chartUtils'
 import { DistributionChart } from './components/DistributionChart'
 import { GroupChips } from './components/GroupChips'
 import { SettingsPanel } from './components/SettingsPanel'
@@ -192,18 +192,12 @@ function WorkspaceView({
   const [simChartHeight, setSimChartHeight] = useState(() =>
     clampHeight(saved?.simChartHeight ?? SIM_HEIGHT.fallback, SIM_HEIGHT),
   )
-  const [simChartYZoom, setSimChartYZoom] = useState(() => clampZoom(saved?.simChartYZoom ?? 1))
-  const [bankrollChartYZoom, setBankrollChartYZoom] = useState(() =>
-    clampZoom(saved?.bankrollChartYZoom ?? 1),
-  )
-  const [simChartXZoom, setSimChartXZoom] = useState(() =>
-    clampZoom(saved?.simChartXZoom ?? 1, X_ZOOM_RANGE),
-  )
+  const [simChartYZoom, setSimChartYZoom] = useState(saved?.simChartYZoom ?? 1)
+  const [bankrollChartYZoom, setBankrollChartYZoom] = useState(saved?.bankrollChartYZoom ?? 1)
+  const [simChartXZoom, setSimChartXZoom] = useState(saved?.simChartXZoom ?? 1)
   const [simChartXPan, setSimChartXPan] = useState(saved?.simChartXPan ?? 0)
   const [simChartYPan, setSimChartYPan] = useState(saved?.simChartYPan ?? 0)
-  const [bankrollChartXZoom, setBankrollChartXZoom] = useState(() =>
-    clampZoom(saved?.bankrollChartXZoom ?? 1, X_ZOOM_RANGE),
-  )
+  const [bankrollChartXZoom, setBankrollChartXZoom] = useState(saved?.bankrollChartXZoom ?? 1)
   const [bankrollChartXPan, setBankrollChartXPan] = useState(saved?.bankrollChartXPan ?? 0)
   const [bankrollChartYPan, setBankrollChartYPan] = useState(saved?.bankrollChartYPan ?? 0)
   const [exportFilename, setExportFilename] = useState(

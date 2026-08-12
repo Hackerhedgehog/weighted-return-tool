@@ -107,7 +107,17 @@ export function SimChart({
     return niceCeil(Math.max(dataMax, 1e-9))
   }, [points, cumulative, expectedRtp])
 
-  const { viewX, viewY, setXPan, setYPan, resetView, xScrollbar, yScrollbar } = useChartAxes({
+  const {
+    viewX,
+    viewY,
+    xPan: clampedXPan,
+    yPan: clampedYPan,
+    setXPan,
+    setYPan,
+    resetView,
+    xScrollbar,
+    yScrollbar,
+  } = useChartAxes({
     xExtent: requestedSpins,
     xZoom,
     onXZoom,
@@ -123,10 +133,10 @@ export function SimChart({
 
   const middleDragPan = useMiddleDragPan({
     xZoom,
-    xPan,
+    xPan: clampedXPan,
     onXPan: setXPan,
     yZoom,
-    yPan,
+    yPan: clampedYPan,
     onYPan: setYPan,
     plotW,
     plotH,

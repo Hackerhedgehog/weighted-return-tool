@@ -39,6 +39,10 @@ export interface ScrollbarState {
 export interface ChartAxes {
   viewX: ViewRange
   viewY: ViewRange
+  /** The pan value actually used to render viewX — after clamping. Needed by callers (useMiddleDragPan) that must start a drag from the value the user is actually looking at, not the possibly-stale raw prop. */
+  xPan: number
+  /** Same as xPan, for the y-axis. */
+  yPan: number
   setXPan: (p: number) => void
   setYPan: (p: number) => void
   resetView: () => void
@@ -51,11 +55,23 @@ const FULL_SIZE_EPSILON = 0.999
 
 export function useChartAxes(cfg: ChartAxesConfig): ChartAxes {
   const xPan = clampPanToExtent(cfg.xExtent, cfg.xZoom, cfg.xPan, cfg.xExtent)
-  const yPanExtentClamped = clampPanToExtent(cfg.autoYMax, cfg.yZoom, cfg.yPan, cfg.trueYMax)
+
+  // The extent a plain (non-zero-visible) pan is bounded to must never be
+  // narrower than the chart's own default ceiling — otherwise a converged
+  // run (autoYMax padded above the true max, the common case) would fail
+  // the zoom=1/pan=0 pixel-identity invariant the moment trueYMax dips
+  // below autoYMax.
+  const yExtent = Math.max(cfg.autoYMax, cfg.trueYMax)
+
+  // keepZeroVisible charts (BankrollChart) use ONLY the zero-visible clamp
+  // for y, not the extent clamp too — composing both would force
+  // viewMin >= 0 AND viewMin <= 0 simultaneously, pinning pan to a single
+  // frozen value at every zoom level (the exact "stuck at 0" bug this
+  // feature exists to fix).
   const yPan =
     cfg.keepZeroVisible === true
-      ? clampPanKeepZeroVisible(cfg.autoYMax, cfg.yZoom, yPanExtentClamped)
-      : yPanExtentClamped
+      ? clampPanKeepZeroVisible(cfg.autoYMax, cfg.yZoom, cfg.yPan)
+      : clampPanToExtent(cfg.autoYMax, cfg.yZoom, cfg.yPan, yExtent)
 
   const viewX = viewRange(cfg.xExtent, cfg.xZoom, xPan)
   const viewY = viewRange(cfg.autoYMax, cfg.yZoom, yPan)
@@ -65,11 +81,10 @@ export function useChartAxes(cfg: ChartAxesConfig): ChartAxes {
   }
 
   const setYPan = (p: number) => {
-    const clamped = clampPanToExtent(cfg.autoYMax, cfg.yZoom, p, cfg.trueYMax)
     cfg.onYPan(
       cfg.keepZeroVisible === true
-        ? clampPanKeepZeroVisible(cfg.autoYMax, cfg.yZoom, clamped)
-        : clamped,
+        ? clampPanKeepZeroVisible(cfg.autoYMax, cfg.yZoom, p)
+        : clampPanToExtent(cfg.autoYMax, cfg.yZoom, p, yExtent),
     )
   }
 
@@ -83,7 +98,7 @@ export function useChartAxes(cfg: ChartAxesConfig): ChartAxes {
   }
 
   const xGeom = scrollbarGeometry(cfg.xExtent, cfg.xZoom, xPan, 0, cfg.xExtent)
-  const yGeom = scrollbarGeometry(cfg.autoYMax, cfg.yZoom, yPan, 0, cfg.trueYMax)
+  const yGeom = scrollbarGeometry(cfg.autoYMax, cfg.yZoom, yPan, 0, yExtent)
 
   const xScrollbar: ScrollbarState | null =
     xGeom.size >= FULL_SIZE_EPSILON
@@ -100,8 +115,8 @@ export function useChartAxes(cfg: ChartAxesConfig): ChartAxes {
       : {
           ...yGeom,
           onScroll: (start) =>
-            setYPan(panFromScrollbarStart(cfg.autoYMax, cfg.yZoom, start, 0, cfg.trueYMax)),
+            setYPan(panFromScrollbarStart(cfg.autoYMax, cfg.yZoom, start, 0, yExtent)),
         }
 
-  return { viewX, viewY, setXPan, setYPan, resetView, xScrollbar, yScrollbar }
+  return { viewX, viewY, xPan, yPan, setXPan, setYPan, resetView, xScrollbar, yScrollbar }
 }

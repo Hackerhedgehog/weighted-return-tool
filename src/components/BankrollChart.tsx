@@ -75,7 +75,17 @@ export function BankrollChart({
 
   const trueYMax = autoYMax
 
-  const { viewX, viewY, setXPan, setYPan, resetView, xScrollbar, yScrollbar } = useChartAxes({
+  const {
+    viewX,
+    viewY,
+    xPan: clampedXPan,
+    yPan: clampedYPan,
+    setXPan,
+    setYPan,
+    resetView,
+    xScrollbar,
+    yScrollbar,
+  } = useChartAxes({
     xExtent: totalSpins,
     xZoom,
     onXZoom,
@@ -92,10 +102,10 @@ export function BankrollChart({
 
   const middleDragPan = useMiddleDragPan({
     xZoom,
-    xPan,
+    xPan: clampedXPan,
     onXPan: setXPan,
     yZoom,
-    yPan,
+    yPan: clampedYPan,
     onYPan: setYPan,
     plotW,
     plotH,

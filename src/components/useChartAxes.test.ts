@@ -91,4 +91,24 @@ describe('useChartAxes', () => {
     // fitZoomPan(50, 0, 200): zoom = 200/50 = 4; pan = (0+200)/2/50 - 0.5 = 1.5
     expect(onYPan).toHaveBeenCalledWith(1.5)
   })
+
+  it('preserves the zoom=1/pan=0 default view even when trueYMax is below autoYMax (the common non-spike case)', () => {
+    const { result } = renderHook(() => useChartAxes(baseConfig({ autoYMax: 2, trueYMax: 1 })))
+    expect(result.current.viewY).toEqual({ min: 0, max: 2 })
+  })
+
+  it('lets the y-pan actually move under keepZeroVisible, rather than freezing at every zoom (regression for the composed-clamp bug)', () => {
+    const onYPan = vi.fn()
+    const { result } = renderHook(() =>
+      useChartAxes(baseConfig({ yZoom: 0.5, autoYMax: 2000, trueYMax: 2000, keepZeroVisible: true, onYPan })),
+    )
+    act(() => result.current.setYPan(-0.5))
+    const pan1 = onYPan.mock.calls.at(-1)![0] as number
+    onYPan.mockClear()
+    act(() => result.current.setYPan(-0.3))
+    const pan2 = onYPan.mock.calls.at(-1)![0] as number
+    expect(pan1).not.toBe(pan2)
+    expect(pan1).toBeCloseTo(-0.5, 6)
+    expect(pan2).toBeCloseTo(-0.3, 6)
+  })
 })

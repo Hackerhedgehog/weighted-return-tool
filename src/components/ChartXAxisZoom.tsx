@@ -51,7 +51,7 @@ export function ChartXAxisZoom({ zoom, onZoom, x, y, width, height, label }: Cha
       aria-orientation="horizontal"
       aria-valuenow={Math.round(zoom * 1000) / 1000}
       aria-valuemin={X_ZOOM_RANGE.min}
-      aria-valuemax={X_ZOOM_RANGE.max}
+      aria-valuemax={Math.max(X_ZOOM_RANGE.max, zoom)}
       tabIndex={0}
       onPointerDown={(e) => {
         if (e.button !== 0) return

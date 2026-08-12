@@ -97,4 +97,9 @@ describe('ChartXAxisZoom', () => {
     expect(handle.getAttribute('aria-orientation')).toBe('horizontal')
     expect(handle.getAttribute('tabindex')).toBe('0')
   })
+
+  it('widens aria-valuemax when the zoom exceeds the nominal range (e.g. after Reset View)', () => {
+    const { handle } = renderZoom(25) // Reset View can set a zoom this large for an extreme spike
+    expect(handle.getAttribute('aria-valuemax')).toBe('25')
+  })
 })

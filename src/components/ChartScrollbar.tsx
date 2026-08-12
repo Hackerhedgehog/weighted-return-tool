@@ -35,7 +35,13 @@ export function ChartScrollbar({
   const trackLength = orientation === 'x' ? width : height
 
   const thumbLength = Math.max(4, size * trackLength)
-  const thumbOffset = start * trackLength
+  // For the y-axis, "start" is defined in data terms (0 = bottom of the
+  // data range = low values); a top-down screen track needs the opposite —
+  // a high-value view (start near 1-size) drawn near the top (small pixel
+  // offset). The x-axis has no such flip: screen-left already matches
+  // "start of the data range."
+  const thumbOffset =
+    orientation === 'y' ? (1 - start - size) * trackLength : start * trackLength
   const thumbRect =
     orientation === 'x'
       ? { x: x + thumbOffset, y, width: thumbLength, height }
@@ -67,7 +73,13 @@ export function ChartScrollbar({
           if (d === null) return
           const client = orientation === 'x' ? e.clientX : e.clientY
           const delta = (client - d.startClient) / Math.max(1, trackLength)
-          onScroll(Math.min(1 - size, Math.max(0, d.startPos + delta)))
+          // Dragging down on screen must reveal lower data values (the
+          // thumb "follows" the cursor) — since the y track is drawn
+          // top-down while `start` increases toward the top of the data
+          // range, a downward drag must DECREASE start, the opposite sign
+          // from the x case.
+          const signedDelta = orientation === 'y' ? -delta : delta
+          onScroll(Math.min(1 - size, Math.max(0, d.startPos + signedDelta)))
         }}
         onPointerUp={() => {
           drag.current = null

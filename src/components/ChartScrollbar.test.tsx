@@ -41,11 +41,11 @@ describe('ChartScrollbar', () => {
     expect(last(onScroll)).toBeCloseTo(0.6, 1) // clamped at 1 - 0.4
   })
 
-  it('dragging the y thumb down increases start, clamped to 1 - size', () => {
-    const { thumb, onScroll } = renderBar('y', 0.5, 0)
+  it('dragging the y thumb down decreases start, clamped to 0', () => {
+    const { thumb, onScroll } = renderBar('y', 0.5, 0.5)
     fireEvent.pointerDown(thumb, { pointerId: 1, clientY: 0 })
     fireEvent.pointerMove(thumb, { pointerId: 1, clientY: 1000 })
-    expect(last(onScroll)).toBeCloseTo(0.5, 1) // clamped at 1 - 0.5
+    expect(last(onScroll)).toBeCloseTo(0, 1) // clamped at 0
   })
 
   it('ignores movement once the drag has ended', () => {
@@ -54,5 +54,30 @@ describe('ChartScrollbar', () => {
     fireEvent.pointerUp(thumb, { pointerId: 1, clientX: 0 })
     fireEvent.pointerMove(thumb, { pointerId: 1, clientX: 400 })
     expect(onScroll).not.toHaveBeenCalled()
+  })
+
+  it('positions the y thumb near the top of the track when viewing high values (not inverted)', () => {
+    // size=0.2, start=0.8 means viewing near the TOP of the data range.
+    render(
+      <svg>
+        <ChartScrollbar orientation="y" x={0} y={0} width={6} height={200} size={0.2} start={0.8} onScroll={vi.fn()} label="Scroll" />
+      </svg>,
+    )
+    const thumb = screen.getByRole('scrollbar', { name: 'Scroll' })
+    expect(Number(thumb.getAttribute('y'))).toBeCloseTo(0, 1)
+  })
+
+  it('dragging the y thumb down decreases start (reveals lower values, not inverted)', () => {
+    const onScroll = vi.fn()
+    render(
+      <svg>
+        <ChartScrollbar orientation="y" x={0} y={0} width={6} height={200} size={0.2} start={0.5} onScroll={onScroll} label="Scroll" />
+      </svg>,
+    )
+    const thumb = screen.getByRole('scrollbar', { name: 'Scroll' })
+    fireEvent.pointerDown(thumb, { pointerId: 1, clientY: 0 })
+    fireEvent.pointerMove(thumb, { pointerId: 1, clientY: 40 })
+    const last = onScroll.mock.calls.at(-1)![0] as number
+    expect(last).toBeLessThan(0.5)
   })
 })
