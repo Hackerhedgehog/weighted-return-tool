@@ -206,6 +206,39 @@ describe('storage', () => {
     expect(loaded?.bankrollChartYZoom).toBeUndefined()
   })
 
+  it('round-trips the new pan/x-zoom fields and rejects a non-numeric one', () => {
+    saveWorkspace({
+      ...workspace,
+      simChartXZoom: 0.6,
+      simChartXPan: 0.1,
+      simChartYPan: -0.2,
+      bankrollChartXZoom: 0.8,
+      bankrollChartXPan: 0,
+      bankrollChartYPan: 0.05,
+    })
+    const loaded = loadWorkspace()
+    expect(loaded?.simChartXZoom).toBe(0.6)
+    expect(loaded?.simChartXPan).toBe(0.1)
+    expect(loaded?.simChartYPan).toBe(-0.2)
+    expect(loaded?.bankrollChartXZoom).toBe(0.8)
+    expect(loaded?.bankrollChartXPan).toBe(0)
+    expect(loaded?.bankrollChartYPan).toBe(0.05)
+
+    store.set(STORAGE_KEY, JSON.stringify({ ...workspace, simChartXPan: 'wide' }))
+    expect(loadWorkspace()).toBeNull()
+  })
+
+  it('accepts a workspace saved before the pan/x-zoom fields existed', () => {
+    saveWorkspace(workspace)
+    const loaded = loadWorkspace()
+    expect(loaded?.simChartXZoom).toBeUndefined()
+    expect(loaded?.simChartXPan).toBeUndefined()
+    expect(loaded?.simChartYPan).toBeUndefined()
+    expect(loaded?.bankrollChartXZoom).toBeUndefined()
+    expect(loaded?.bankrollChartXPan).toBeUndefined()
+    expect(loaded?.bankrollChartYPan).toBeUndefined()
+  })
+
   it('round-trips forceStack and rejects a non-boolean', () => {
     saveWorkspace({ ...workspace, chart: { ...DEFAULT_CHART, forceStack: true } })
     expect(loadWorkspace()?.chart.forceStack).toBe(true)

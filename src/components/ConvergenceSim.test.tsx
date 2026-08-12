@@ -38,20 +38,39 @@ beforeEach(() => {
 
 afterEach(cleanup)
 
-function renderPanel(worker?: FakeWorker, spins = 1000) {
+function renderPanel(
+  over: {
+    worker?: FakeWorker
+    spins?: number
+    yZoom?: number
+    onYZoom?: (z: number) => void
+    yPan?: number
+    onYPan?: (p: number) => void
+    xZoom?: number
+    onXZoom?: (z: number) => void
+    xPan?: number
+    onXPan?: (p: number) => void
+  } = {},
+) {
   const onSpins = vi.fn()
   render(
     <ConvergenceSim
       rows={rows}
       totalWeight={1_000_000}
       expectedRtp={0.6}
-      spins={spins}
+      spins={over.spins ?? 1000}
       onSpins={onSpins}
       chartHeight={260}
       onChartHeight={vi.fn()}
-      yZoom={1}
-      onYZoom={vi.fn()}
-      createWorker={worker === undefined ? undefined : () => worker}
+      yZoom={over.yZoom ?? 1}
+      onYZoom={over.onYZoom ?? vi.fn()}
+      yPan={over.yPan ?? 0}
+      onYPan={over.onYPan ?? vi.fn()}
+      xZoom={over.xZoom ?? 1}
+      onXZoom={over.onXZoom ?? vi.fn()}
+      xPan={over.xPan ?? 0}
+      onXPan={over.onXPan ?? vi.fn()}
+      createWorker={over.worker === undefined ? undefined : () => over.worker!}
     />,
   )
   return onSpins
@@ -59,13 +78,13 @@ function renderPanel(worker?: FakeWorker, spins = 1000) {
 
 describe('ConvergenceSim', () => {
   it('shows the configured spin count and a Run button', () => {
-    renderPanel(new FakeWorker(), 100_000_000)
+    renderPanel({ worker: new FakeWorker(), spins: 100_000_000 })
     expect(screen.getByDisplayValue('100,000,000')).toBeDefined()
     expect(screen.getByRole('button', { name: 'Run' })).toBeDefined()
   })
 
   it('commits a parsed shorthand spin count on Enter', () => {
-    const onSpins = renderPanel(new FakeWorker())
+    const onSpins = renderPanel({ worker: new FakeWorker() })
     const input = screen.getByLabelText('Spins')
     fireEvent.change(input, { target: { value: '50m' } })
     fireEvent.keyDown(input, { key: 'Enter' })
@@ -73,7 +92,7 @@ describe('ConvergenceSim', () => {
   })
 
   it('commits an arithmetic spin count on Enter', () => {
-    const onSpins = renderPanel(new FakeWorker())
+    const onSpins = renderPanel({ worker: new FakeWorker() })
     const input = screen.getByLabelText('Spins')
     fireEvent.change(input, { target: { value: '5000*20' } })
     fireEvent.keyDown(input, { key: 'Enter' })
@@ -81,13 +100,13 @@ describe('ConvergenceSim', () => {
   })
 
   it('disables Run when workers are unavailable', () => {
-    renderPanel(undefined)
+    renderPanel()
     expect((screen.getByRole('button', { name: 'Run' }) as HTMLButtonElement).disabled).toBe(true)
   })
 
   it('runs, streams stats live, and finishes', () => {
     const w = new FakeWorker()
-    renderPanel(w)
+    renderPanel({ worker: w })
 
     fireEvent.click(screen.getByRole('button', { name: 'Run' }))
     expect(w.posted).toHaveLength(1)
@@ -116,14 +135,14 @@ describe('ConvergenceSim', () => {
   })
 
   it('can be resized before a run has produced a chart', () => {
-    renderPanel(new FakeWorker())
+    renderPanel({ worker: new FakeWorker() })
     expect(screen.queryByRole('img', { name: 'Simulation results' })).toBeNull()
     expect(screen.getByRole('separator', { name: 'Resize the simulation chart' })).toBeDefined()
   })
 
   it('cancel terminates the worker and keeps the partial stats', () => {
     const w = new FakeWorker()
-    renderPanel(w)
+    renderPanel({ worker: w })
     fireEvent.click(screen.getByRole('button', { name: 'Run' }))
 
     reply(w, {
@@ -141,12 +160,26 @@ describe('ConvergenceSim', () => {
 
   it('shows the y-axis zoom handle once a run has produced a chart', () => {
     const w = new FakeWorker()
-    renderPanel(w)
+    renderPanel({ worker: w })
     fireEvent.click(screen.getByRole('button', { name: 'Run' }))
     reply(w, {
       type: 'done',
       agg: { spins: 1000, sum: 950, sumSq: 1805, hits: 250, wins: 250, maxWin: 2 },
     })
     expect(screen.getByRole('slider', { name: "Zoom the simulation chart's y-axis" })).toBeDefined()
+  })
+})
+
+describe('ConvergenceSim pan/x-zoom threading', () => {
+  it('passes the x-zoom and pan props through to SimChart', () => {
+    const w = new FakeWorker()
+    renderPanel({ worker: w, xZoom: 0.6, yPan: 0.2 })
+    fireEvent.click(screen.getByRole('button', { name: 'Run' }))
+    reply(w, {
+      type: 'done',
+      agg: { spins: 1000, sum: 950, sumSq: 1805, hits: 250, wins: 250, maxWin: 2 },
+    })
+    const slider = screen.getByRole('slider', { name: "Zoom the simulation chart's x-axis" })
+    expect(slider.getAttribute('aria-valuenow')).toBe('0.6')
   })
 })

@@ -37,6 +37,12 @@ function renderChart(
     startCredits?: number
     yZoom?: number
     onYZoom?: (z: number) => void
+    yPan?: number
+    onYPan?: (p: number) => void
+    xZoom?: number
+    onXZoom?: (z: number) => void
+    xPan?: number
+    onXPan?: (p: number) => void
   } = {},
 ) {
   render(
@@ -48,6 +54,12 @@ function renderChart(
       onHeight={vi.fn()}
       yZoom={over.yZoom ?? 1}
       onYZoom={over.onYZoom ?? vi.fn()}
+      yPan={over.yPan ?? 0}
+      onYPan={over.onYPan ?? vi.fn()}
+      xZoom={over.xZoom ?? 1}
+      onXZoom={over.onXZoom ?? vi.fn()}
+      xPan={over.xPan ?? 0}
+      onXPan={over.onXPan ?? vi.fn()}
     />,
   )
 }
@@ -69,11 +81,11 @@ describe('BankrollChart', () => {
 
   it('marks the starting credits so up and down read at a glance', () => {
     renderChart()
-    // peak 1200 → yMax = niceCeil(1260) = 2000; plotH = 260 - 14 - 40 = 206
-    // y(1000) = 14 + 206 * (1 - 1000/2000) = 117
+    // peak 1200 → yMax = niceCeil(1260) = 2000; plotH = 260 - 14 - 52 = 194
+    // y(1000) = 14 + 194 * (1 - 1000/2000) = 111
     const line = document.querySelector('.bankroll-start-line') as SVGLineElement
     expect(line).not.toBeNull()
-    expect(Number(line.getAttribute('y1'))).toBeCloseTo(117, 1)
+    expect(Number(line.getAttribute('y1'))).toBeCloseTo(111, 1)
   })
 
   it('shows a bust marker only once the run has busted', () => {
@@ -142,5 +154,30 @@ describe('BankrollChart', () => {
     // zoomed to 0.5 → effective yMax 1000, so the same top tick now reads "1k".
     renderChart({ yZoom: 0.5 })
     expect([...document.querySelectorAll('.axis-label')].map((n) => n.textContent)).toContain('1k')
+  })
+})
+
+describe('BankrollChart pan and x-zoom', () => {
+  it('renders an x-axis zoom handle', () => {
+    renderChart()
+    expect(screen.getByRole('slider', { name: "Zoom the bankroll chart's x-axis" })).toBeDefined()
+  })
+
+  it('keeps 0 visible however far the y-axis is panned', () => {
+    // Zoomed tight (yZoom 0.2), then middle-drag far down — per
+    // useMiddleDragPan's convention, dragging down raises the visible
+    // range, which is exactly the direction that would hide 0 above the
+    // view if BankrollChart's zero-visible clamp weren't wired in.
+    renderChart({ yZoom: 0.2 })
+    const hit = document.querySelector('.sim-hit')!
+    fireEvent.pointerDown(hit, { pointerId: 1, button: 1, clientX: 0, clientY: 0 })
+    fireEvent.pointerMove(hit, { pointerId: 1, clientX: 0, clientY: 10_000 })
+    const labels = [...document.querySelectorAll('.axis-label')].map((n) => n.textContent)
+    expect(labels).toContain('0')
+  })
+
+  it('renders a reset view button', () => {
+    renderChart()
+    expect(screen.getByRole('button', { name: /reset/i })).toBeDefined()
   })
 })

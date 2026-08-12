@@ -38,8 +38,20 @@ function renderPanel(mode: SimMode) {
       onChartHeight={vi.fn()}
       simYZoom={1}
       onSimYZoom={vi.fn()}
+      simYPan={0}
+      onSimYPan={vi.fn()}
+      simXZoom={1}
+      onSimXZoom={vi.fn()}
+      simXPan={0}
+      onSimXPan={vi.fn()}
       bankrollYZoom={1}
       onBankrollYZoom={vi.fn()}
+      bankrollYPan={0}
+      onBankrollYPan={vi.fn()}
+      bankrollXZoom={1}
+      onBankrollXZoom={vi.fn()}
+      bankrollXPan={0}
+      onBankrollXPan={vi.fn()}
     />,
   )
   return onMode
@@ -94,8 +106,20 @@ describe('SimulationPanel y-zoom independence', () => {
         onChartHeight={vi.fn()}
         simYZoom={0.5}
         onSimYZoom={vi.fn()}
+        simYPan={0}
+        onSimYPan={vi.fn()}
+        simXZoom={1}
+        onSimXZoom={vi.fn()}
+        simXPan={0}
+        onSimXPan={vi.fn()}
         bankrollYZoom={3}
         onBankrollYZoom={vi.fn()}
+        bankrollYPan={0}
+        onBankrollYPan={vi.fn()}
+        bankrollXZoom={1}
+        onBankrollXZoom={vi.fn()}
+        bankrollXPan={0}
+        onBankrollXPan={vi.fn()}
         createWorker={() => worker}
       />,
     )
@@ -133,8 +157,20 @@ describe('SimulationPanel y-zoom independence', () => {
         onChartHeight={vi.fn()}
         simYZoom={0.5}
         onSimYZoom={vi.fn()}
+        simYPan={0}
+        onSimYPan={vi.fn()}
+        simXZoom={1}
+        onSimXZoom={vi.fn()}
+        simXPan={0}
+        onSimXPan={vi.fn()}
         bankrollYZoom={3}
         onBankrollYZoom={vi.fn()}
+        bankrollYPan={0}
+        onBankrollYPan={vi.fn()}
+        bankrollXZoom={1}
+        onBankrollXZoom={vi.fn()}
+        bankrollXPan={0}
+        onBankrollXPan={vi.fn()}
         createBankrollWorker={() => worker}
       />,
     )
@@ -160,5 +196,56 @@ describe('SimulationPanel y-zoom independence', () => {
     })
     const slider = screen.getByRole('slider', { name: "Zoom the bankroll chart's y-axis" })
     expect(slider.getAttribute('aria-valuenow')).toBe('3')
+  })
+
+  it("threads the convergence chart's own x-zoom and pan, not the bankroll chart's", () => {
+    const worker = {
+      onmessage: null as ((e: MessageEvent<SimWorkerMessage>) => void) | null,
+      postMessage: () => {},
+      terminate: () => {},
+    }
+    render(
+      <SimulationPanel
+        mode="convergence"
+        onMode={vi.fn()}
+        rows={rows}
+        totalWeight={1_000_000}
+        expectedRtp={0.95}
+        spins={1000}
+        onSpins={vi.fn()}
+        bankroll={DEFAULT_BANKROLL}
+        onBankroll={vi.fn()}
+        chartHeight={260}
+        onChartHeight={vi.fn()}
+        simYZoom={1}
+        onSimYZoom={vi.fn()}
+        simYPan={0}
+        onSimYPan={vi.fn()}
+        simXZoom={0.7}
+        onSimXZoom={vi.fn()}
+        simXPan={0}
+        onSimXPan={vi.fn()}
+        bankrollYZoom={1}
+        onBankrollYZoom={vi.fn()}
+        bankrollYPan={0}
+        onBankrollYPan={vi.fn()}
+        bankrollXZoom={0.3}
+        onBankrollXZoom={vi.fn()}
+        bankrollXPan={0}
+        onBankrollXPan={vi.fn()}
+        createWorker={() => worker}
+      />,
+    )
+    fireEvent.click(screen.getByRole('button', { name: 'Run' }))
+    act(() => {
+      worker.onmessage?.({
+        data: {
+          type: 'done',
+          agg: { spins: 1000, sum: 950, sumSq: 1805, hits: 250, wins: 250, maxWin: 2 },
+        },
+      } as MessageEvent<SimWorkerMessage>)
+    })
+    const slider = screen.getByRole('slider', { name: "Zoom the simulation chart's x-axis" })
+    expect(slider.getAttribute('aria-valuenow')).toBe('0.7')
   })
 })

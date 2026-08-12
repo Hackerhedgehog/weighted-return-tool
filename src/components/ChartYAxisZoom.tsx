@@ -64,7 +64,7 @@ export function ChartYAxisZoom({ zoom, onZoom, x, y, width, height, label }: Cha
       aria-orientation="vertical"
       aria-valuenow={Math.round(zoom * 1000) / 1000}
       aria-valuemin={Y_ZOOM_RANGE.min}
-      aria-valuemax={Y_ZOOM_RANGE.max}
+      aria-valuemax={Math.max(Y_ZOOM_RANGE.max, zoom)}
       tabIndex={0}
       onPointerDown={(e) => {
         if (e.button !== 0) return
