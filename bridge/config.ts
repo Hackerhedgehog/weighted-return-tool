@@ -14,11 +14,27 @@ export interface BridgeConfig {
 /** How the latest feed asked to be applied: replace the current tab or open a new one. */
 export type OpenAs = 'overwrite' | 'new-tab'
 
+/** One file of a feed. A single-file switch is a batch of one. */
+export interface FeedRef {
+  /** Absolute path of the set-values / ref-weights file to serve. */
+  file: string
+  /** Default filename the tool exports this feed under. */
+  exportName: string
+  /** Game directory name, shown in the tool's UI. */
+  game: string
+}
+
 /**
  * The config plus the feed's identity. The identity is what lets a page
  * reload tell "the CLI just fed a new file" from "same session, already
  * applied": the id names one dev-server run, the seq counts accepted feeds
  * within it, and openAs says how the latest one wanted to land.
+ *
+ * `feeds` carries every file of the latest feed — a batch bumps the seq once
+ * and reloads the page once, which is the only way N files can all arrive
+ * (N sequential switches each overwrite this single slot, and the page only
+ * ever reads it once per load). The legacy flat `file`/`exportName`/`game`
+ * always mirror `feeds[0]` so an older client keeps working.
  */
 export interface BridgeSession extends BridgeConfig {
   /** Random hex, minted once per dev-server run — a new id means a fresh CLI launch. */
@@ -27,6 +43,8 @@ export interface BridgeSession extends BridgeConfig {
   seq: number
   /** From the latest accepted switch; the launch feed always overwrites. */
   openAs: OpenAs
+  /** The latest feed's files, in the order they should open. Never empty. */
+  feeds: FeedRef[]
 }
 
 /**
@@ -36,7 +54,13 @@ export interface BridgeSession extends BridgeConfig {
  * carries the same one.
  */
 export function initialSession(cfg: BridgeConfig): BridgeSession {
-  return { ...cfg, sessionId: randomBytes(8).toString('hex'), seq: 1, openAs: 'overwrite' }
+  return {
+    ...cfg,
+    sessionId: randomBytes(8).toString('hex'),
+    seq: 1,
+    openAs: 'overwrite',
+    feeds: [{ file: cfg.file, exportName: cfg.exportName, game: cfg.game }],
+  }
 }
 
 /** Kept in sync with the tool's own DEFAULT_EXPORT_FILENAME. */

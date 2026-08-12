@@ -401,6 +401,68 @@ describe('App', () => {
     }
   })
 
+  it('applies a batch feed one tab per file, chaining through the queue', async () => {
+    saveTabsState({
+      version: 1,
+      active: 't1',
+      tabs: [{ id: 't1', name: 'Table 1', workspace: null }],
+      lastBridge: { sessionId: 's1', seq: 1 },
+    })
+    const session = {
+      dir: '/game/scenarios',
+      sourceFile: 'set-values-regular.tsv',
+      filename: 'ref-weights-regular.tsv',
+      game: 'imp',
+      tsv: '0\t2.00\tregular-row\n',
+      sessionId: 's1',
+      seq: 2,
+      openAs: 'new-tab',
+      feeds: [
+        {
+          sourceFile: 'set-values-regular.tsv',
+          filename: 'ref-weights-regular.tsv',
+          game: 'imp',
+          tsv: '0\t2.00\tregular-row\n',
+        },
+        {
+          sourceFile: 'set-values-buy.tsv',
+          filename: 'ref-weights-buy.tsv',
+          game: 'imp',
+          tsv: '0\t9.00\tbuy-row\n',
+        },
+      ],
+    }
+    vi.stubGlobal(
+      'fetch',
+      vi.fn().mockResolvedValue({
+        ok: true,
+        status: 200,
+        headers: new Headers({ 'content-type': 'application/json' }),
+        json: async () => session,
+      }),
+    )
+    try {
+      render(<App />)
+      // The queue drains head-first, so the batch is done when the LAST
+      // feed's content is on screen.
+      await waitFor(() => expect(screen.getByText('buy-row')).toBeDefined())
+      const tabs = screen.getAllByRole('tab')
+      expect(tabs.map((t) => t.textContent)).toEqual([
+        'Table 1×',
+        'imp · set-values-regular.tsv×',
+        'imp · set-values-buy.tsv×',
+      ])
+      expect(tabs[2].getAttribute('aria-selected')).toBe('true')
+
+      // The first feed landed in its own tab and survived the chain — the
+      // unmount flush persisted it before the next tab took the stage.
+      fireEvent.click(tabs[1])
+      await waitFor(() => expect(screen.getByText('regular-row')).toBeDefined())
+    } finally {
+      vi.unstubAllGlobals()
+    }
+  })
+
   it('skips a feed it has already applied, so a refresh cannot clobber tuning', async () => {
     const workspace = {
       version: 1 as const,

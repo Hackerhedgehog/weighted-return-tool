@@ -44,7 +44,7 @@ import {
   type TabsState,
   type Workspace,
 } from './lib/storage'
-import { bridgeLoadPlan, feedTabName, freshTabsState, withNewTab, withoutTab } from './lib/tabs'
+import { bridgeLoadPlan, freshTabsState, placeFeeds, withNewTab, withoutTab } from './lib/tabs'
 import { fetchSession, saveTsv, type BridgeSession } from './lib/bridge'
 import { BucketTable } from './components/BucketTable'
 import { clampHeight, clampZoom, DIST_HEIGHT, SIM_HEIGHT } from './components/chartUtils'
@@ -1107,7 +1107,15 @@ export default function App() {
   }, [])
 
   const [session, setSession] = useState<BridgeSession | null>(null)
-  const [pendingLoad, setPendingLoad] = useState<PendingLoad | null>(null)
+  // A queue, not a slot: a batch feed loads one file per tab, and only the
+  // active tab's workspace is mounted — so the head is applied, popped, and
+  // the next placement activated, until the queue drains.
+  const [pendingLoads, setPendingLoadsRaw] = useState<PendingLoad[]>([])
+  const pendingRef = useRef(pendingLoads)
+  const setPendingLoads = useCallback((next: PendingLoad[]) => {
+    pendingRef.current = next
+    setPendingLoadsRaw(next)
+  }, [])
   // useState, not useRef: the map itself is stable for the app's lifetime and
   // reading a ref's .current during render is off-limits.
   const [historyStore] = useState(() => new Map<string, HistoryState<Doc>>())
@@ -1127,25 +1135,41 @@ export default function App() {
       const plan = bridgeLoadPlan(cur.lastBridge, s)
       if (plan === 'skip') return
 
-      const lastBridge = { sessionId: s.sessionId, seq: s.seq }
-      const name = feedTabName(s)
-      if (plan === 'new-tab') {
-        const added = withNewTab(cur, name)
-        setTabs({ ...added.state, lastBridge })
-        setPendingLoad({ tabId: added.id, tsv: s.tsv, filename: s.filename })
-      } else {
-        setTabs({
-          ...cur,
-          tabs: cur.tabs.map((t) => (t.id === cur.active ? { ...t, name } : t)),
-          lastBridge,
-        })
-        setPendingLoad({ tabId: cur.active, tsv: s.tsv, filename: s.filename })
-      }
+      const placed = placeFeeds(cur, s.feeds, plan)
+      setTabs({ ...placed.state, lastBridge: { sessionId: s.sessionId, seq: s.seq } })
+      setPendingLoads(
+        placed.placements.map(({ tabId, feedIndex }) => ({
+          tabId,
+          tsv: s.feeds[feedIndex].tsv,
+          filename: s.feeds[feedIndex].filename,
+        })),
+      )
     })
     return () => {
       cancelled = true
     }
-  }, [setTabs])
+  }, [setPendingLoads, setTabs])
+
+  /**
+   * The head of the queue was applied by the workspace that owned it. Pop it
+   * and hand the stage to the next placement — activating its tab remounts
+   * WorkspaceView, whose own effect applies the new head.
+   *
+   * The activation is deferred a macrotask, not run inline: it arrives in the
+   * same synchronous block as the apply's own state updates, so switching
+   * here would batch them into one render — the applying workspace unmounts
+   * before its snapshot effect ever sees the fed data, and the unmount flush
+   * persists a pre-feed snapshot. One timeout lets that instance re-render
+   * and snapshot first.
+   */
+  const onLoadApplied = useCallback(() => {
+    const rest = pendingRef.current.slice(1)
+    setPendingLoads(rest)
+    if (rest.length === 0) return
+    window.setTimeout(() => {
+      setTabs({ ...tabsRef.current, active: rest[0].tabId })
+    }, 0)
+  }, [setPendingLoads, setTabs])
 
   const active = tabsState.tabs.find((t) => t.id === tabsState.active) ?? tabsState.tabs[0]
 
@@ -1203,8 +1227,8 @@ export default function App() {
         tabId={active.id}
         saved={active.workspace}
         session={session}
-        pendingLoad={pendingLoad}
-        onLoadApplied={() => setPendingLoad(null)}
+        pendingLoad={pendingLoads[0] ?? null}
+        onLoadApplied={onLoadApplied}
         onPersist={persistActive}
         historyStore={historyStore}
       />
