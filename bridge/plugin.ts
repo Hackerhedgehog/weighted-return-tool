@@ -1,6 +1,6 @@
 import type { Plugin } from 'vite'
 import type { IncomingMessage, ServerResponse } from 'node:http'
-import { bridgeConfigFromEnv, type BridgeConfig } from './config.ts'
+import { bridgeConfigFromEnv, initialSession, type BridgeSession } from './config.ts'
 import { sessionResult, saveResult, switchResult, type JsonResult } from './handlers.ts'
 
 function send(res: ServerResponse, result: JsonResult): void {
@@ -53,14 +53,17 @@ export function bridgePlugin(env: Record<string, string | undefined> = process.e
   // The session starts from the environment and can be re-pointed at another
   // file — or another game — while the server runs. Null still means "no
   // bridge at all": nothing is registered and `/__bridge/*` falls through.
-  let session = bridgeConfigFromEnv(env)
+  // The feed identity (sessionId, seq, openAs) is seeded here so it spans the
+  // whole dev-server run, not any one request.
+  const cfg = bridgeConfigFromEnv(env)
+  let session = cfg === null ? null : initialSession(cfg)
 
   return {
     name: 'wrt-bridge',
     apply: 'serve',
     configureServer(server) {
       if (session === null) return
-      const active = () => session as BridgeConfig
+      const active = () => session as BridgeSession
 
       console.log(`[bridge] ${active().game || 'session'} — reading ${active().file}`)
       console.log(`[bridge] saves land in ${active().dir}`)
@@ -110,7 +113,7 @@ export function bridgePlugin(env: Record<string, string | undefined> = process.e
               send(res, { status: 400, body: { error: 'Body must be JSON.' } })
               return
             }
-            const { result, next } = switchResult(parsed)
+            const { result, next } = switchResult(active(), parsed)
             if (next !== null) {
               session = next
               // Named explicitly — the startup log's "saves land in <dir>"

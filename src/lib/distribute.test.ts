@@ -13,7 +13,13 @@ import {
   weightForChance,
   weightForValue,
 } from './distribute'
-import { CURVE_PRESETS, DEFAULT_TARGETS, VOLATILITY_STEPS, type BucketRow } from './types'
+import {
+  CURVE_PRESETS,
+  DEFAULT_TARGETS,
+  VOLATILITY_STEPS,
+  type BucketRow,
+  type PriorityKey,
+} from './types'
 
 const rows = parseTsv(readFileSync('example-input-data.tsv', 'utf8')).rows
 const T = 1200350
@@ -693,6 +699,80 @@ describe('ordering against the chance targets', () => {
   it('shifts nothing, and warns about nothing, on a table that needs neither', () => {
     const r = solveWeights(rows, T, DEFAULT_TARGETS, CURVE_PRESETS.medium)
     expect(r.warnings).toHaveLength(0)
+  })
+})
+
+describe('the priority order', () => {
+  const within = (got: number, want: number, tolerance = DEFAULT_TARGETS.tolerance) =>
+    Math.abs(got - want) <= want * (tolerance / 100) + 1e-9
+
+  it('keeps hit chance and reports the unraised residual when hit outranks ordering', () => {
+    const greedy = {
+      ...DEFAULT_TARGETS,
+      hitChance: 0.9,
+      winChance: 0.85,
+      priority: ['rtp', 'hit', 'win', 'ordering', 'volatility'] as const,
+    }
+    const r = solveWeights(rows, T, { ...greedy, priority: [...greedy.priority] }, CURVE_PRESETS.medium)
+    const s = statsOf(withWeights(r.weights), T)
+    expect(within(s.hitChance, 0.9)).toBe(true)
+    expect(r.warnings.some((w) => w.includes('Hit chance yielded'))).toBe(false)
+    expect(r.warnings.some((w) => w.includes('residual 0x bucket is not the largest'))).toBe(true)
+    expect(sum(r.weights)).toBe(T)
+  })
+
+  it('keeps win chance and lets the 1x boundary stand when win outranks ordering', () => {
+    const flat = {
+      ...DEFAULT_TARGETS,
+      hitChance: 0.12,
+      winChance: 0.12,
+      priority: ['rtp', 'hit', 'win', 'ordering', 'volatility'] as PriorityKey[],
+    }
+    const r = solveWeights(rows, T, flat, CURVE_PRESETS.medium)
+    const s = statsOf(withWeights(r.weights), T)
+    expect(within(s.winChance, 0.12)).toBe(true)
+    expect(r.warnings.some((w) => w.includes('Win chance yielded'))).toBe(false)
+    expect(r.warnings.some((w) => w.includes('1x boundary'))).toBe(true)
+    expect(sum(r.weights)).toBe(T)
+  })
+
+  it('keeps the ladder and misses RTP when ordering outranks it', () => {
+    const steep = {
+      ...DEFAULT_TARGETS,
+      rtp: 700,
+      priority: ['ordering', 'volatility', 'rtp', 'hit', 'win'] as PriorityKey[],
+    }
+    const r = solveWeights(rows, T, steep, CURVE_PRESETS.medium)
+    expect(inversions(rows, r.weights)).toEqual([])
+    expect(r.warnings.some((w) => w.includes('ordering yielded'))).toBe(false)
+    expect(r.warnings.some((w) => w.includes('out of reach'))).toBe(true)
+    expect(sum(r.weights)).toBe(T)
+  })
+
+  it('keeps the curve and sacrifices the ladder when volatility outranks ordering', () => {
+    // At `very low` the default ranking flattens 0.32 to keep the ladder;
+    // with volatility ranked above ordering the ladder must give instead.
+    const t = {
+      ...DEFAULT_TARGETS,
+      priority: ['rtp', 'volatility', 'ordering', 'hit', 'win'] as PriorityKey[],
+    }
+    const r = solveWeights(rows, T, t, CURVE_PRESETS['very low'])
+    expect(r.curveUsed).toBe(CURVE_PRESETS['very low'])
+    expect(r.warnings.some((w) => w.includes('Volatility flattened'))).toBe(false)
+    expect(r.warnings.some((w) => w.includes('ordering yielded'))).toBe(true)
+    expect(Math.abs(statsOf(withWeights(r.weights), T).rtp - 0.95)).toBeLessThan(1e-3)
+  })
+
+  it('reproduces the default behavior when the priority list is absent or noise', () => {
+    const base = solveWeights(rows, T, DEFAULT_TARGETS, CURVE_PRESETS.medium)
+    const noise = solveWeights(
+      rows,
+      T,
+      { ...DEFAULT_TARGETS, priority: ['bogus', 'rtp', 'rtp'] as unknown as PriorityKey[] },
+      CURVE_PRESETS.medium,
+    )
+    expect(noise.weights).toEqual(base.weights)
+    expect(noise.warnings).toEqual(base.warnings)
   })
 })
 

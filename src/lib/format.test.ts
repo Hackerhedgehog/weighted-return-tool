@@ -2,7 +2,6 @@ import { describe, it, expect } from 'vitest'
 import {
   fmtCredits,
   fmtDecimal,
-  fmtFixed3,
   fmtPayout,
   fmtPct,
   fmtRtp,
@@ -93,12 +92,6 @@ describe('display helpers', () => {
   it('groups weights', () => {
     expect(fmtWeight(1200350)).toBe('1,200,350')
     expect(fmtWeight(0)).toBe('0')
-  })
-
-  it('formats chances to exactly three decimals', () => {
-    expect(fmtFixed3(0.49033532)).toBe('0.490')
-    expect(fmtFixed3(0.12)).toBe('0.120')
-    expect(fmtFixed3(NaN)).toBe('—')
   })
 
   it('formats RTP to four decimals', () => {

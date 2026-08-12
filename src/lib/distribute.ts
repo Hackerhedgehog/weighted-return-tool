@@ -1,10 +1,14 @@
-import type { BucketRow, Targets, WeightStep } from './types'
+import type { BucketRow, PriorityKey, Targets, WeightStep } from './types'
+import { normalizePriority } from './types'
 
 /**
  * Weight distribution solver.
  *
- * The targets are over-constrained, so they are resolved by rank — most
- * important to maintain first:
+ * The targets are over-constrained, so they are resolved by rank. Ranks 2-6
+ * below are the DEFAULT ranking (`DEFAULT_PRIORITY`); the user may reorder
+ * them via `targets.priority`, and each conflict below then reads that
+ * ranking to decide which side yields. Locks are not reorderable — rank 1 is
+ * absolute:
  *
  *  1. Locked weights are absolute — never touched and never reordered. A lock
  *     that breaks the payout ladder is reported rather than moved, though only
@@ -891,6 +895,11 @@ export function solveWeights(
   const pooled = !targets.useChances
   const warnings: string[] = []
 
+  // The user's conflict ranking. `above(a, b)` answers "does a outrank b" —
+  // when the two collide, the one that does not gets sacrificed.
+  const priority = normalizePriority(targets.priority)
+  const above = (a: PriorityKey, b: PriorityKey) => priority.indexOf(a) < priority.indexOf(b)
+
   if (ctx.freeIdx.every((g) => g.length === 0)) {
     return { ...empty, warnings: ['Every row is locked — nothing left to distribute.'] }
   }
@@ -976,34 +985,49 @@ export function solveWeights(
     return { s: 0, budgets, conflict, reachable: reaches(budgets) }
   }
 
-  // The ranking decides what gives when the target is out of ordered reach:
-  // volatility ranks below ordering, so the curve flattens first; only when
-  // even a straight line cannot reach the target does the ladder itself yield,
-  // and then the user's curvature comes back, since flattening it bought
-  // nothing.
+  // The ranking decides what gives when the target is out of ordered reach.
+  // The three dimensions that trade against each other here — RTP, ordering,
+  // volatility — are sacrificed lowest-ranked first: flattening the curve
+  // spends volatility, going unordered spends the ladder, and reaching "rtp"
+  // in the sacrifice order means accepting the miss (the RTP warning below
+  // reports it). A sacrifice is only kept when it actually brings the target
+  // into reach — giving something up for a target that is missed either way
+  // buys nothing.
   let solveCtx = ctx
   let chosen = chooseBand(ctx)
   let curveUsed = ctx.curve
   let orderYielded = false
 
   if (!chosen.reachable) {
-    const flat = fitCurve(ctx, chosen.budgets, targets.rtp, pooled)
-    const flattened = flat === null ? null : chooseBand({ ...ctx, curve: flat })
-    if (flat !== null && flattened !== null && flattened.reachable) {
-      solveCtx = { ...ctx, curve: flat }
-      chosen = flattened
-      curveUsed = flat
-    } else {
+    const sacrifices = (['volatility', 'ordering', 'rtp'] as const)
+      .slice()
+      .sort((a, b) => priority.indexOf(b) - priority.indexOf(a))
+
+    for (const dim of sacrifices) {
+      if (dim === 'rtp') break
+
+      if (dim === 'volatility') {
+        const flat = fitCurve(solveCtx, chosen.budgets, targets.rtp, pooled)
+        const flattened = flat === null ? null : chooseBand({ ...solveCtx, curve: flat })
+        if (flat !== null && flattened !== null && flattened.reachable) {
+          solveCtx = { ...solveCtx, curve: flat }
+          chosen = flattened
+          curveUsed = flat
+          break
+        }
+        continue
+      }
+
+      // Ordering yields with the user's own curvature, not a flattened one —
+      // if flattening ran before this and did not reach, it bought nothing.
       const unordered = { ...ctx, ordered: false }
       const relaxed = chooseBand(unordered)
-      // Ordering only gives way when giving way actually brings the target
-      // into reach. When it is out of reach either way, the ladder is the one
-      // constraint still worth honouring — and the RTP warning below reports
-      // the miss regardless.
       if (relaxed.reachable) {
         solveCtx = unordered
         chosen = relaxed
+        curveUsed = ctx.curve
         orderYielded = true
+        break
       }
     }
   }
@@ -1015,6 +1039,13 @@ export function solveWeights(
   let yieldedHit = false
   let settled = false
 
+  // The two mass repairs spend a chance to keep the ladder in shape, so each
+  // runs only while ordering outranks the chance it would spend. A chance
+  // ranked above ordering keeps its mass, and the shape damage is reported
+  // instead of repaired.
+  const orderAboveHit = above('ordering', 'hit')
+  const orderAboveWin = above('ordering', 'win')
+
   for (let round = 0; round < ORDER_ROUNDS; round++) {
     gamma = solveGamma(solveCtx, budgets, targets.rtp, pooled)
     cont = continuousWeights(solveCtx, budgets, gamma, pooled)
@@ -1022,11 +1053,11 @@ export function solveWeights(
       settled = true
       break
     }
-    if (raiseResidual(solveCtx, budgets, cont, step) > 0) {
+    if (orderAboveHit && raiseResidual(solveCtx, budgets, cont, step) > 0) {
       yieldedHit = true
       continue
     }
-    if (levelBoundary(solveCtx, budgets, cont, step) > 0) {
+    if (orderAboveWin && levelBoundary(solveCtx, budgets, cont, step) > 0) {
       yieldedWin = true
       continue
     }
@@ -1041,10 +1072,29 @@ export function solveWeights(
   const ladder = solveCtx.ordered ? ladderIdx(solveCtx) : []
   const weights = allocate(solveCtx, cont, step)
   if (solveCtx.ordered) {
-    enforceOrder(solveCtx, weights, step, ladder)
-    restoreResidual(solveCtx, weights, step)
+    if (orderAboveWin) {
+      enforceOrder(solveCtx, weights, step, ladder)
+    } else {
+      // A transfer across the 1x boundary moves mass between the small-win
+      // and win bands — that is win chance, which outranks ordering here, so
+      // each band is put in order on its own and the boundary stands.
+      for (const g of [1, 2] as const) {
+        enforceOrder(solveCtx, weights, step, ladder.filter((i) => groupOf(solveCtx.payouts[i]) === g))
+      }
+    }
+    // The residual's integer top-up takes its weight from the paying ladder —
+    // hit chance again — so it is gated exactly like raiseResidual above.
+    if (orderAboveHit) restoreResidual(solveCtx, weights, step)
   }
-  repairRtp(solveCtx, weights, targets.rtp, step, ladder)
+  // repairRtp only ever moves weight inside the win band, but its guard reads
+  // whatever ladder it is handed. With the 1x boundary allowed to stand
+  // inverted (win chance outranks ordering), a full-ladder guard would read
+  // that standing inversion as breakage and veto every transfer — so the
+  // guard shrinks to the band the repair actually touches.
+  const guardLadder = orderAboveWin
+    ? ladder
+    : ladder.filter((i) => groupOf(solveCtx.payouts[i]) === 2)
+  repairRtp(solveCtx, weights, targets.rtp, step, guardLadder)
 
   const achieved = statsOf(
     rows.map((r, i) => ({ ...r, weight: weights[i] })),
@@ -1080,6 +1130,25 @@ export function solveWeights(
     warnings.push(
       `Weights could not be kept in payout order at RTP ${targets.rtp} — ordering yielded to the RTP target.`,
     )
+  }
+
+  // Shape damage a higher-ranked chance forbade repairing is reported, since
+  // the repair that would normally hide it was deliberately skipped.
+  if (solveCtx.ordered && targets.useChances) {
+    if (!orderAboveHit && dominanceGap(solveCtx, weights) > 0) {
+      warnings.push(
+        'The residual 0x bucket is not the largest weight — hit chance outranks ordering, so no mass was spent raising it.',
+      )
+    }
+    if (!orderAboveWin) {
+      const a = solveCtx.freeIdx[1].map((i) => weights[i])
+      const b = solveCtx.freeIdx[2].map((i) => weights[i])
+      if (a.length > 0 && b.length > 0 && Math.max(...b) > Math.min(...a)) {
+        warnings.push(
+          'A win bucket outweighs a small-win bucket at the 1x boundary — win chance outranks ordering, so the boundary was left as the masses demand.',
+        )
+      }
+    }
   }
 
   // Reachability is a property of the continuous solve. Integer rounding

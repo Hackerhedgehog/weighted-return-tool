@@ -226,7 +226,7 @@ export function ConvergenceSim({
               if (e.key === 'Enter') commitSpins()
               if (e.key === 'Escape') setSpinsText(fmtWeight(spins))
             }}
-            title="Plain number or shorthand: 100m, 250k, 1b"
+            title="Plain number, shorthand (100m, 250k, 1b), or arithmetic like 5000*20"
           />
         </label>
 

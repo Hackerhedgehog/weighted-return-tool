@@ -12,6 +12,11 @@ import { largestRemainder } from './distribute'
  * With a step > 1, drags snap to step-sized parcels, and returns null when the
  * table's free weight cannot be partitioned on the step.
  *
+ * `poolUids` confines the whole exchange: rows outside the pool are treated
+ * exactly like locked rows, so the difference lands only on the pool's other
+ * unlocked members and the pool's own total — not just the grand total — is
+ * invariant. This is what a soft-locked group's bar drags go through.
+ *
  * `setSubsetTotal` is the absolute form (weights mode with relativity off):
  * the subset is scaled and the rest of the table never moves, so the grand
  * total drifts by exactly the requested change. With a step, the subset snaps.
@@ -26,8 +31,13 @@ interface Split {
   grand: number
 }
 
-function splitRows(rows: BucketRow[], subsetUids: Iterable<string>): Split {
+function splitRows(
+  rows: BucketRow[],
+  subsetUids: Iterable<string>,
+  poolUids?: Iterable<string>,
+): Split {
   const subset = new Set(subsetUids)
+  const pool = poolUids === undefined ? null : new Set(poolUids)
   const current = rows.map((r) => Math.max(0, Math.round(r.weight)))
   const inside: number[] = []
   const outside: number[] = []
@@ -35,10 +45,14 @@ function splitRows(rows: BucketRow[], subsetUids: Iterable<string>): Split {
   let lockedOut = 0
 
   rows.forEach((r, i) => {
+    // Outside the pool is outside the exchange — indistinguishable from a
+    // lock. Subset members are always part of the pool by construction, but
+    // an errant caller's stray uid is safer frozen than moved.
+    const frozen = r.locked || (pool !== null && !pool.has(r.uid))
     if (subset.has(r.uid)) {
-      if (r.locked) lockedIn += current[i]
+      if (frozen) lockedIn += current[i]
       else inside.push(i)
-    } else if (r.locked) {
+    } else if (frozen) {
       lockedOut += current[i]
     } else {
       outside.push(i)
@@ -61,8 +75,9 @@ export function scaleSubset(
   subsetUids: Iterable<string>,
   newSubsetTotal: number,
   step: WeightStep = 1,
+  poolUids?: Iterable<string>,
 ): number[] | null {
-  const s = splitRows(rows, subsetUids)
+  const s = splitRows(rows, subsetUids, poolUids)
   const out = s.current.slice()
 
   // With no unlocked rows on one side, the grand-total invariant pins the

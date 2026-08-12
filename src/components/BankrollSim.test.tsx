@@ -101,6 +101,14 @@ describe('BankrollSim fields', () => {
     expect(onConfig).toHaveBeenCalledWith({ ...DEFAULT_BANKROLL, bet: 0.5 })
   })
 
+  it('commits an arithmetic bet on Enter', () => {
+    const onConfig = renderSim(new FakeWorker())
+    const input = screen.getByLabelText('Bet')
+    fireEvent.change(input, { target: { value: '1/4' } })
+    fireEvent.keyDown(input, { key: 'Enter' })
+    expect(onConfig).toHaveBeenCalledWith({ ...DEFAULT_BANKROLL, bet: 0.25 })
+  })
+
   it('reverts an unreadable entry on blur', () => {
     renderSim(new FakeWorker())
     const input = screen.getByLabelText('Bet')

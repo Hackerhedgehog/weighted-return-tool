@@ -35,6 +35,7 @@ function renderChart(
   const onBlocked = vi.fn()
   const onHeight = vi.fn()
   const onGroupLock = vi.fn()
+  const onGroupSoftLock = vi.fn()
   const total = rows.reduce((a, r) => a + r.weight, 0)
   render(
     <DistributionChart
@@ -50,10 +51,12 @@ function renderChart(
       onBlocked={onBlocked}
       onHeight={onHeight}
       onGroupLock={onGroupLock}
+      softLocked={new Set()}
+      onGroupSoftLock={onGroupSoftLock}
       {...extra}
     />,
   )
-  return { onChart, onPreview, onCommit, onBlocked, onHeight, onGroupLock, rows, total }
+  return { onChart, onPreview, onCommit, onBlocked, onHeight, onGroupLock, onGroupSoftLock, rows, total }
 }
 
 const lastRows = (fn: ReturnType<typeof vi.fn>): BucketRow[] =>
@@ -186,6 +189,77 @@ describe('DistributionChart dragging', () => {
     fireEvent.pointerDown(handle, { pointerId: 1, clientY: 250 })
     fireEvent.pointerMove(handle, { pointerId: 1, clientY: 100 })
     expect(onPreview).not.toHaveBeenCalled()
+  })
+})
+
+describe('DistributionChart soft locks', () => {
+  // rows c and d form the bonus group (150k + 50k = 200k).
+  const soft = { softLocked: new Set(['bonus']) }
+
+  it('keeps a soft-locked group’s bars draggable, exchanging weight only inside it', () => {
+    const { onPreview, onCommit } = renderChart({ metric: 'weights', relative: true }, baseRows(), 340, 1, soft)
+    const hit = document.querySelectorAll('.bar-hit')[2] // payout 8 → row c
+
+    fireEvent.pointerDown(hit, { pointerId: 1, clientY: 250 })
+    fireEvent.pointerMove(hit, { pointerId: 1, clientY: 120 })
+
+    const preview = lastRows(onPreview)
+    expect(preview[2].weight).not.toBe(150_000)
+    // The group total holds, so its partner absorbed the whole change…
+    expect(preview[2].weight + preview[3].weight).toBe(200_000)
+    // …and nothing outside the group moved.
+    expect(preview[0].weight).toBe(500_000)
+    expect(preview[1].weight).toBe(300_000)
+
+    fireEvent.pointerUp(hit, { pointerId: 1, clientY: 120 })
+    expect(onCommit).toHaveBeenCalledTimes(1)
+  })
+
+  it('confines the drag even with relativity off — the total is what the lock pins', () => {
+    const { onPreview } = renderChart({ metric: 'weights', relative: false }, baseRows(), 340, 1, soft)
+    const hit = document.querySelectorAll('.bar-hit')[3] // payout 100 → row d
+
+    fireEvent.pointerDown(hit, { pointerId: 1, clientY: 250 })
+    fireEvent.pointerMove(hit, { pointerId: 1, clientY: 120 })
+
+    const preview = lastRows(onPreview)
+    expect(preview[3].weight).not.toBe(50_000)
+    expect(preview[2].weight + preview[3].weight).toBe(200_000)
+  })
+
+  it('freezes soft-locked members against drags from outside the group', () => {
+    const { onPreview } = renderChart({ metric: 'weights', relative: true }, baseRows(), 340, 1, soft)
+    const hit = document.querySelectorAll('.bar-hit')[1] // row b, not in the group
+
+    fireEvent.pointerDown(hit, { pointerId: 1, clientY: 250 })
+    fireEvent.pointerMove(hit, { pointerId: 1, clientY: 120 })
+
+    const preview = lastRows(onPreview)
+    expect(preview[1].weight).not.toBe(300_000)
+    // Only the 0x bucket may compensate — the pinned group stands whole.
+    expect(preview[2].weight).toBe(150_000)
+    expect(preview[3].weight).toBe(50_000)
+  })
+
+  it('makes the soft-locked group’s handle inert without locking its bars', () => {
+    const { onPreview } = renderChart({ metric: 'weights', relative: true }, baseRows(), 340, 1, soft)
+    const handle = screen.getByRole('slider', { name: 'bonus group' })
+    expect(handle.getAttribute('aria-disabled')).toBe('true')
+
+    fireEvent.pointerDown(handle, { pointerId: 1, clientY: 250 })
+    fireEvent.pointerMove(handle, { pointerId: 1, clientY: 100 })
+    expect(onPreview).not.toHaveBeenCalled()
+  })
+
+  it('toggles the soft lock from the Σ control, separately from the padlock', () => {
+    const { onGroupSoftLock, onGroupLock } = renderChart({ metric: 'weights' }, baseRows(), 340, 1, soft)
+
+    fireEvent.click(screen.getByRole('button', { name: 'Release the bonus group total' }))
+    expect(onGroupSoftLock).toHaveBeenCalledWith('bonus', false)
+
+    fireEvent.click(screen.getByRole('button', { name: 'Soft-lock the wins group total' }))
+    expect(onGroupSoftLock).toHaveBeenCalledWith('wins', true)
+    expect(onGroupLock).not.toHaveBeenCalled()
   })
 })
 
@@ -479,7 +553,7 @@ describe('DistributionChart group locks', () => {
   it('locks an unlocked group from its handle', () => {
     const onGroupLock = vi.fn()
     renderChart({ metric: 'weights' }, baseRows(), 340, 1, { onGroupLock })
-    fireEvent.click(screen.getByRole('button', { name: 'Lock the bonus group' }))
+    fireEvent.click(screen.getByRole('button', { name: 'Hard-lock the bonus group' }))
     expect(onGroupLock).toHaveBeenCalledWith('bonus', true)
   })
 
@@ -495,14 +569,14 @@ describe('DistributionChart group locks', () => {
     const onGroupLock = vi.fn()
     const rows = baseRows().map((r) => (r.uid === 'c' ? { ...r, locked: true } : r))
     renderChart({ metric: 'weights' }, rows, 340, 1, { onGroupLock })
-    fireEvent.click(screen.getByRole('button', { name: 'Lock the bonus group' }))
+    fireEvent.click(screen.getByRole('button', { name: 'Hard-lock the bonus group' }))
     expect(onGroupLock).toHaveBeenCalledWith('bonus', true)
   })
 
   it('locks a group when Enter is pressed on its focused padlock', () => {
     const onGroupLock = vi.fn()
     renderChart({ metric: 'weights' }, baseRows(), 340, 1, { onGroupLock })
-    fireEvent.keyDown(screen.getByRole('button', { name: 'Lock the bonus group' }), { key: 'Enter' })
+    fireEvent.keyDown(screen.getByRole('button', { name: 'Hard-lock the bonus group' }), { key: 'Enter' })
     expect(onGroupLock).toHaveBeenCalledWith('bonus', true)
   })
 
@@ -510,7 +584,7 @@ describe('DistributionChart group locks', () => {
     const { onPreview } = renderChart({ metric: 'weights' }, baseRows(), 340, 1, {
       onGroupLock: vi.fn(),
     })
-    const lock = screen.getByRole('button', { name: 'Lock the bonus group' })
+    const lock = screen.getByRole('button', { name: 'Hard-lock the bonus group' })
     fireEvent.pointerDown(lock, { pointerId: 1, clientY: 250 })
     fireEvent.pointerMove(lock, { pointerId: 1, clientY: 100 })
     expect(onPreview).not.toHaveBeenCalled()

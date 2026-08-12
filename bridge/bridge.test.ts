@@ -1,6 +1,6 @@
 import { describe, it, expect } from 'vitest'
 import { resolve } from 'node:path'
-import { bridgeConfigFromEnv } from './config'
+import { bridgeConfigFromEnv, initialSession } from './config'
 import { resolveSavePath } from './save'
 
 const DIR = resolve('/tmp', 'scenarios')
@@ -41,6 +41,29 @@ describe('bridgeConfigFromEnv', () => {
   it('falls back to a default export name', () => {
     const cfg = bridgeConfigFromEnv({ WRT_BRIDGE_DIR: '/a', WRT_BRIDGE_FILE: '/a/x.tsv' })
     expect(cfg?.exportName).toBe('ref-weights-regular.tsv')
+  })
+})
+
+describe('initialSession', () => {
+  const CFG = {
+    dir: '/a/scenarios',
+    file: '/a/scenarios/set-values-regular.tsv',
+    exportName: 'ref-weights-regular.tsv',
+    game: 'joker-stacks-magic',
+  }
+
+  it('seeds the launch feed: seq 1, overwrite, config intact', () => {
+    const s = initialSession(CFG)
+    expect(s.seq).toBe(1)
+    expect(s.openAs).toBe('overwrite')
+    expect(s).toMatchObject(CFG)
+  })
+
+  it('mints a hex id that differs between runs', () => {
+    const a = initialSession(CFG)
+    const b = initialSession(CFG)
+    expect(a.sessionId).toMatch(/^[0-9a-f]{16}$/)
+    expect(a.sessionId).not.toBe(b.sessionId)
   })
 })
 

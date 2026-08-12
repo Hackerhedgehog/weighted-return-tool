@@ -3,15 +3,23 @@ import { mkdtempSync, readFileSync, writeFileSync, rmSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import { resolve } from 'node:path'
 import { sessionResult, saveResult } from './handlers'
-import type { BridgeConfig } from './config'
+import type { BridgeSession } from './config'
 
 const made: string[] = []
-function tempCfg(): BridgeConfig {
+function tempCfg(): BridgeSession {
   const dir = mkdtempSync(resolve(tmpdir(), 'bridge-'))
   made.push(dir)
   const file = resolve(dir, 'set-values-regular.tsv')
   writeFileSync(file, '0\t1000.00\tjoker5-maxwin\n', 'utf8')
-  return { dir, file, exportName: 'ref-weights-regular.tsv', game: 'joker-stacks-magic' }
+  return {
+    dir,
+    file,
+    exportName: 'ref-weights-regular.tsv',
+    game: 'joker-stacks-magic',
+    sessionId: 'cafe0123deadbeef',
+    seq: 1,
+    openAs: 'overwrite',
+  }
 }
 
 afterEach(() => {
@@ -19,7 +27,7 @@ afterEach(() => {
 })
 
 describe('sessionResult', () => {
-  it('serves the source file and its metadata', () => {
+  it('serves the source file, its metadata and the feed identity', () => {
     const cfg = tempCfg()
     const r = sessionResult(cfg)
     expect(r.status).toBe(200)
@@ -28,6 +36,9 @@ describe('sessionResult', () => {
       sourceFile: 'set-values-regular.tsv',
       filename: 'ref-weights-regular.tsv',
       game: 'joker-stacks-magic',
+      sessionId: 'cafe0123deadbeef',
+      seq: 1,
+      openAs: 'overwrite',
       tsv: '0\t1000.00\tjoker5-maxwin\n',
     })
   })
@@ -97,7 +108,7 @@ import { switchResult } from './handlers'
 describe('switchResult', () => {
   it('accepts a real tsv in a real directory', () => {
     const cfg = tempCfg()
-    const { result, next } = switchResult({
+    const { result, next } = switchResult(cfg, {
       dir: cfg.dir,
       file: cfg.file,
       exportName: 'ref-weights-buy-bonus.tsv',
@@ -109,25 +120,60 @@ describe('switchResult', () => {
       file: cfg.file,
       exportName: 'ref-weights-buy-bonus.tsv',
       game: 'imperial-express',
+      sessionId: 'cafe0123deadbeef',
+      seq: 2,
+      openAs: 'overwrite',
     })
   })
 
   it('defaults the export name and the game', () => {
     const cfg = tempCfg()
-    const { next } = switchResult({ dir: cfg.dir, file: cfg.file })
+    const { next } = switchResult(cfg, { dir: cfg.dir, file: cfg.file })
     expect(next?.exportName).toBe('ref-weights-regular.tsv')
     expect(next?.game).toBe('')
   })
 
-  it('rejects a body that is not an object', () => {
-    expect(switchResult('nope').result.status).toBe(400)
-    expect(switchResult(null).result.status).toBe(400)
+  it('keeps the run id and bumps the seq on every acceptance', () => {
+    const cfg = tempCfg()
+    const first = switchResult(cfg, { dir: cfg.dir, file: cfg.file }).next
+    const second = switchResult(first!, { dir: cfg.dir, file: cfg.file }).next
+    expect(first?.sessionId).toBe(cfg.sessionId)
+    expect(second?.sessionId).toBe(cfg.sessionId)
+    expect(first?.seq).toBe(2)
+    expect(second?.seq).toBe(3)
   })
 
-  it('rejects a file that does not exist', () => {
+  it('applies the requested openAs, and a later switch without one falls back to overwrite', () => {
     const cfg = tempCfg()
-    const { result, next } = switchResult({ dir: cfg.dir, file: resolve(cfg.dir, 'gone.tsv') })
+    const tab = switchResult(cfg, { dir: cfg.dir, file: cfg.file, openAs: 'new-tab' }).next
+    expect(tab?.openAs).toBe('new-tab')
+    // Absent means overwrite even when the previous feed opened a tab — the
+    // choice belongs to each feed, it does not linger from the last one.
+    expect(switchResult(tab!, { dir: cfg.dir, file: cfg.file }).next?.openAs).toBe('overwrite')
+  })
+
+  it("rejects an openAs that is neither 'overwrite' nor 'new-tab'", () => {
+    const cfg = tempCfg()
+    for (const openAs of ['both', '', 'NEW-TAB', true, 1]) {
+      const { result, next } = switchResult(cfg, { dir: cfg.dir, file: cfg.file, openAs })
+      expect(result.status).toBe(400)
+      expect(result.body).toEqual({ error: "openAs must be 'overwrite' or 'new-tab'." })
+      expect(next).toBeNull()
+    }
+  })
+
+  it('rejects a body that is not an object', () => {
+    const cfg = tempCfg()
+    expect(switchResult(cfg, 'nope').result.status).toBe(400)
+    expect(switchResult(cfg, null).result.status).toBe(400)
+  })
+
+  it('rejects a file that does not exist — and a refusal never bumps the seq', () => {
+    const cfg = tempCfg()
+    const { result, next } = switchResult(cfg, { dir: cfg.dir, file: resolve(cfg.dir, 'gone.tsv') })
     expect(result.status).toBe(400)
+    // Null is the whole guarantee: the caller keeps its current session, so
+    // seq and openAs cannot move on a refused switch.
     expect(next).toBeNull()
   })
 
@@ -135,12 +181,12 @@ describe('switchResult', () => {
     const cfg = tempCfg()
     const csv = resolve(cfg.dir, 'ScenarioSet0.csv')
     writeFileSync(csv, 'x', 'utf8')
-    expect(switchResult({ dir: cfg.dir, file: csv }).result.status).toBe(400)
+    expect(switchResult(cfg, { dir: cfg.dir, file: csv }).result.status).toBe(400)
   })
 
   it('rejects a directory that is not a directory', () => {
     const cfg = tempCfg()
-    expect(switchResult({ dir: cfg.file, file: cfg.file }).result.status).toBe(400)
+    expect(switchResult(cfg, { dir: cfg.file, file: cfg.file }).result.status).toBe(400)
   })
 
   it('rejects an export name that could escape the directory', () => {
@@ -148,7 +194,7 @@ describe('switchResult', () => {
     const sub = resolve(cfg.dir, 'sub')
     mkdirSync(sub)
     expect(
-      switchResult({ dir: cfg.dir, file: cfg.file, exportName: '../out.tsv' }).result.status,
+      switchResult(cfg, { dir: cfg.dir, file: cfg.file, exportName: '../out.tsv' }).result.status,
     ).toBe(400)
   })
 })

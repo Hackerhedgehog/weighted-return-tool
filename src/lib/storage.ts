@@ -45,6 +45,8 @@ export interface Workspace {
   /** Optional — absent in workspaces saved before the y-axis could be zoomed. */
   simChartYZoom?: number
   bankrollChartYZoom?: number
+  /** Optional — absent in workspaces saved before table groups could collapse. */
+  tableCollapsed?: string[]
 }
 
 const isObject = (v: unknown): v is Record<string, unknown> =>
@@ -70,7 +72,15 @@ function isRow(v: unknown): v is BucketRow {
 
 function isGroup(v: unknown): v is GroupDef {
   return (
-    isObject(v) && typeof v.id === 'string' && typeof v.name === 'string' && isHexColor(v.color)
+    isObject(v) &&
+    typeof v.id === 'string' &&
+    typeof v.name === 'string' &&
+    isHexColor(v.color) &&
+    // All optional on disk: a workspace saved before group demands existed
+    // simply has no demands.
+    (v.totalLocked === undefined || typeof v.totalLocked === 'boolean') &&
+    (v.prefChance === undefined || isFiniteNumber(v.prefChance)) &&
+    (v.prefRtp === undefined || isFiniteNumber(v.prefRtp))
   )
 }
 
@@ -80,7 +90,11 @@ function isTargets(v: unknown): v is Targets {
     isFiniteNumber(v.rtp) &&
     isFiniteNumber(v.hitChance) &&
     isFiniteNumber(v.winChance) &&
-    isFiniteNumber(v.tolerance)
+    isFiniteNumber(v.tolerance) &&
+    // Optional: absent before the solver priority became configurable. Only
+    // the shape is checked — unknown keys are normalized away on use.
+    (v.priority === undefined ||
+      (Array.isArray(v.priority) && v.priority.every((s) => typeof s === 'string')))
   )
 }
 
@@ -133,8 +147,99 @@ function isWorkspace(v: unknown): v is Workspace {
     (v.bankroll === undefined || isBankroll(v.bankroll)) &&
     (v.chartHeightAuto === undefined || typeof v.chartHeightAuto === 'boolean') &&
     (v.simChartYZoom === undefined || isFiniteNumber(v.simChartYZoom)) &&
-    (v.bankrollChartYZoom === undefined || isFiniteNumber(v.bankrollChartYZoom))
+    (v.bankrollChartYZoom === undefined || isFiniteNumber(v.bankrollChartYZoom)) &&
+    (v.tableCollapsed === undefined ||
+      (Array.isArray(v.tableCollapsed) && v.tableCollapsed.every((s) => typeof s === 'string')))
   )
+}
+
+/**
+ * The multi-tab record. One entry per tab, each carrying a full Workspace (or
+ * null for a tab that has not held data yet), plus which tab is active and
+ * the identity of the last bridge feed already applied — so a page reload can
+ * tell a fresh feed from one it has already loaded, instead of clobbering
+ * in-progress tuning on every refresh.
+ */
+export const TABS_KEY = 'weighted-return-tool:tabs:v1'
+
+export interface TabRecord {
+  id: string
+  name: string
+  workspace: Workspace | null
+}
+
+export interface TabsState {
+  version: 1
+  active: string
+  tabs: TabRecord[]
+  lastBridge?: { sessionId: string; seq: number }
+}
+
+function isTab(v: unknown): v is TabRecord {
+  return (
+    isObject(v) &&
+    typeof v.id === 'string' &&
+    typeof v.name === 'string' &&
+    (v.workspace === null || isWorkspace(v.workspace))
+  )
+}
+
+function isTabsState(v: unknown): v is TabsState {
+  return (
+    isObject(v) &&
+    v.version === 1 &&
+    typeof v.active === 'string' &&
+    Array.isArray(v.tabs) &&
+    v.tabs.length > 0 &&
+    v.tabs.every(isTab) &&
+    v.tabs.some((t) => (t as TabRecord).id === v.active) &&
+    (v.lastBridge === undefined ||
+      (isObject(v.lastBridge) &&
+        typeof v.lastBridge.sessionId === 'string' &&
+        isFiniteNumber(v.lastBridge.seq)))
+  )
+}
+
+export function saveTabsState(s: TabsState): void {
+  try {
+    localStorage.setItem(TABS_KEY, JSON.stringify(s))
+  } catch {
+    // ignore — persistence is a convenience, not a guarantee
+  }
+}
+
+/**
+ * The stored tabs, or a single tab migrated from the legacy one-workspace
+ * record, or null for a genuinely fresh start. The legacy record is left in
+ * place: it costs nothing, and deleting user data on a migration that might
+ * be running inside a broken build is not worth the tidiness.
+ */
+export function loadTabsState(): TabsState | null {
+  let raw: string | null
+  try {
+    raw = localStorage.getItem(TABS_KEY)
+  } catch {
+    return null
+  }
+
+  if (raw !== null) {
+    let parsed: unknown
+    try {
+      parsed = JSON.parse(raw)
+    } catch {
+      parsed = null
+    }
+    if (isTabsState(parsed)) return parsed
+    try {
+      localStorage.removeItem(TABS_KEY)
+    } catch {
+      // ignore
+    }
+  }
+
+  const legacy = loadWorkspace()
+  if (legacy === null) return null
+  return { version: 1, active: 't1', tabs: [{ id: 't1', name: 'Table 1', workspace: legacy }] }
 }
 
 /** Best-effort: a full disk or a blocked storage API must not break editing. */

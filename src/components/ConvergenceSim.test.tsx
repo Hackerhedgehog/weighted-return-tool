@@ -72,6 +72,14 @@ describe('ConvergenceSim', () => {
     expect(onSpins).toHaveBeenCalledWith(50_000_000)
   })
 
+  it('commits an arithmetic spin count on Enter', () => {
+    const onSpins = renderPanel(new FakeWorker())
+    const input = screen.getByLabelText('Spins')
+    fireEvent.change(input, { target: { value: '5000*20' } })
+    fireEvent.keyDown(input, { key: 'Enter' })
+    expect(onSpins).toHaveBeenCalledWith(100_000)
+  })
+
   it('disables Run when workers are unavailable', () => {
     renderPanel(undefined)
     expect((screen.getByRole('button', { name: 'Run' }) as HTMLButtonElement).disabled).toBe(true)

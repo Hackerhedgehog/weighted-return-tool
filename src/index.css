@@ -449,6 +449,26 @@ body {
   border: 1px solid #e6d27a;
 }
 
+/* The fold line above the warnings: styled like a warning so the collapsed
+   state still reads as "something is up", but a button so it can fold. */
+.notice-toggle {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  margin: 10px 0 0;
+  font-size: 12px;
+  border-radius: 5px;
+  padding: 4px 10px;
+  background: var(--warn-soft);
+  color: var(--warn);
+  border: 1px solid #e6d27a;
+  cursor: pointer;
+}
+
+.notice-toggle .chev {
+  font-size: 10px;
+}
+
 /* ---------- RTP gauge ---------- */
 
 .rtp-gauge {
@@ -1593,6 +1613,178 @@ input.gcell.editing {
   opacity: 0.2;
 }
 
+/* The Σ total-lock reads as text, not emoji, so it gets the accent treatment
+   the padlock's own glyphs provide for free. */
+.group-total-lock {
+  font-weight: 700;
+}
+
+.group-total-lock.on {
+  border-color: var(--line);
+  background: var(--surface-2, rgba(31, 35, 40, 0.06));
+}
+
+.group-pref {
+  display: inline-flex;
+  align-items: center;
+  gap: 2px;
+}
+
+.group-pref-num {
+  width: 64px;
+}
+
+.group-pref-unit {
+  font-size: 11px;
+  opacity: 0.6;
+}
+
+/* The workspace tab strip. Browser-shaped: active tab joins the surface
+   below it, inactive tabs recede. */
+.tab-strip {
+  display: flex;
+  align-items: flex-end;
+  gap: 2px;
+  padding: 6px 10px 0;
+  background: var(--bg, #eef0f2);
+  border-bottom: 1px solid var(--line);
+}
+
+.tab {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  max-width: 260px;
+  padding: 5px 8px;
+  font-size: 12px;
+  border: 1px solid var(--line);
+  border-bottom: none;
+  border-radius: 6px 6px 0 0;
+  background: transparent;
+  cursor: pointer;
+  opacity: 0.7;
+}
+
+.tab.active {
+  background: var(--surface);
+  opacity: 1;
+  /* Sits on the strip's border so the active tab visually joins the page. */
+  margin-bottom: -1px;
+  padding-bottom: 6px;
+}
+
+.tab-name {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.tab-close {
+  flex: none;
+  width: 14px;
+  height: 14px;
+  line-height: 13px;
+  text-align: center;
+  border-radius: 3px;
+  opacity: 0.5;
+}
+
+.tab-close:hover {
+  opacity: 1;
+  background: rgba(31, 35, 40, 0.12);
+}
+
+.tab-add {
+  flex: none;
+  width: 24px;
+  padding: 4px 0 5px;
+  font-size: 13px;
+  border: 1px solid transparent;
+  border-radius: 6px 6px 0 0;
+  background: transparent;
+  cursor: pointer;
+  opacity: 0.6;
+}
+
+.tab-add:hover {
+  opacity: 1;
+  border-color: var(--line);
+}
+
+/* The solver-settings drawer. A fixed right panel above a click-away
+   backdrop, so the table stays visible while the solver is being configured. */
+.settings-backdrop {
+  position: fixed;
+  inset: 0;
+  background: rgba(31, 35, 40, 0.25);
+  z-index: 40;
+}
+
+.settings-drawer {
+  position: fixed;
+  top: 0;
+  right: 0;
+  bottom: 0;
+  /* Wide enough for a group row — name, demand fields and the swatch palette
+     wrap into two comfortable lines at this width. */
+  width: 480px;
+  max-width: 95vw;
+  background: var(--surface);
+  border-left: 1px solid var(--line);
+  box-shadow: -8px 0 24px rgba(31, 35, 40, 0.15);
+  padding: 14px 16px;
+  overflow-y: auto;
+  z-index: 41;
+}
+
+.settings-head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  margin-bottom: 12px;
+}
+
+.settings-head h2 {
+  font-size: 15px;
+  margin: 0;
+}
+
+.settings-section {
+  margin-bottom: 18px;
+}
+
+.settings-section h3 {
+  font-size: 13px;
+  margin: 0 0 6px;
+}
+
+.priority-list {
+  list-style: none;
+  margin: 8px 0;
+  padding: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+}
+
+.priority-row {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+}
+
+.priority-rank {
+  width: 16px;
+  font-size: 11px;
+  opacity: 0.6;
+  text-align: right;
+}
+
+.priority-label {
+  flex: 1;
+  font-size: 13px;
+}
+
 .handle-lock {
   cursor: pointer;
   font-size: 11px;
@@ -1612,6 +1804,18 @@ input.gcell.editing {
 
 .handle-lock.partial {
   opacity: 0.65;
+}
+
+/* The Σ soft lock renders as text, so it needs the color the padlock's emoji
+   glyph carries for free — and a bolder face when it is holding the total. */
+.handle-soft-glyph {
+  font-size: 12px;
+  fill: var(--text);
+}
+
+.handle-soft.on .handle-soft-glyph {
+  font-weight: 700;
+  fill: var(--accent);
 }
 
 /* ---------- bankroll chart ---------- */

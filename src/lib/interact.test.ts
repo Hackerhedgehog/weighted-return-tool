@@ -133,6 +133,56 @@ describe('setSubsetTotal (non-relative — the rest never moves)', () => {
   })
 })
 
+describe('scaleSubset with a pool (soft-locked group)', () => {
+  it('compensates only within the pool, holding the pool total', () => {
+    const rows = [row(500), row(200), row(300)]
+    const pool = [rows[1].uid, rows[2].uid]
+    const w = scaleSubset(rows, [rows[1].uid], 350, 1, pool)!
+
+    expect(w[1]).toBe(350)
+    expect(w[2]).toBe(150)
+    // The row outside the pool never moves, so the pool's own total holds.
+    expect(w[0]).toBe(500)
+    expect(w[1] + w[2]).toBe(500)
+  })
+
+  it('clamps at the pool total — the subset cannot take weight from outside', () => {
+    const rows = [row(500), row(200), row(300)]
+    const pool = [rows[1].uid, rows[2].uid]
+    const w = scaleSubset(rows, [rows[1].uid], 5000, 1, pool)!
+
+    expect(w[1]).toBe(500)
+    expect(w[2]).toBe(0)
+    expect(w[0]).toBe(500)
+  })
+
+  it('respects locks inside the pool', () => {
+    const rows = [row(500), row(200), row(300, true), row(100)]
+    const pool = [rows[1].uid, rows[2].uid, rows[3].uid]
+    const w = scaleSubset(rows, [rows[1].uid], 250, 1, pool)!
+
+    expect(w[1]).toBe(250)
+    expect(w[2]).toBe(300)
+    expect(w[3]).toBe(50)
+    expect(w[0]).toBe(500)
+  })
+
+  it('is a no-op when the subset is the pool’s only unlocked row', () => {
+    const rows = [row(500), row(200), row(300, true)]
+    const pool = [rows[1].uid, rows[2].uid]
+    const w = scaleSubset(rows, [rows[1].uid], 400, 1, pool)!
+    expect(w).toEqual([500, 200, 300])
+  })
+
+  it('checks the step against the pool’s free weight, not the table’s', () => {
+    // Table free weight 1050 is off the step, but the pool's 1000 is fine.
+    const rows = [row(50), row(400), row(600)]
+    const pool = [rows[1].uid, rows[2].uid]
+    const w = scaleSubset(rows, [rows[1].uid], 340, 100, pool)!
+    expect(w).toEqual([50, 300, 700])
+  })
+})
+
 describe('weight steps', () => {
   it('scaleSubset snaps the drag and keeps every unlocked row on the step', () => {
     const rows = [row(100), row(300), row(600)]

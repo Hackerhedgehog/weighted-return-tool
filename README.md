@@ -70,14 +70,28 @@ When `tools/auto-scenarios` launches the dev server, it sets four environment
 variables (`WRT_BRIDGE_DIR`, `WRT_BRIDGE_FILE`, `WRT_BRIDGE_EXPORT_NAME`,
 `WRT_BRIDGE_GAME`) and a Vite plugin (`bridge/`) serves three routes:
 
-- `GET /__bridge/session` → the TSV plus its metadata
+- `GET /__bridge/session` → the TSV plus its metadata and the feed identity
+  (below)
 - `POST /__bridge/save` → writes one `.tsv` into the bridge directory; `409`
   if it exists and `overwrite` was not `true`
 - `POST /__bridge/switch` → re-points the session at another file — or
-  another game's directory entirely — and pushes a full page reload
+  another game's directory entirely — and pushes a full page reload. An
+  optional `openAs` (`overwrite`, the default, or `new-tab`; anything else is
+  a `400`) says whether the tool should replace the current tab or open the
+  file in a new one
 
 Without those variables the plugin registers nothing, and the tool behaves
 exactly as it does when started with a plain `npm run dev`.
+
+Every session response carries three identity fields alongside the file data,
+so a page reload can tell "the CLI just fed a new file" from "same session,
+already applied":
+
+| Field | Meaning |
+|---|---|
+| `sessionId` | Random hex string, minted once per dev-server run — a new id means a fresh CLI launch |
+| `seq` | `1` for the launch feed, `+1` on every **accepted** switch — a refused switch changes nothing |
+| `openAs` | How the latest feed asked to land: `overwrite` (always the case at launch) or `new-tab` |
 
 The two routes are guarded differently, because they do different things. A
 **save** writes, so its filename can only ever name a single `.tsv` directly
@@ -150,8 +164,10 @@ How the tool turns targets into weights, and the knobs that shape the result.
 ### The solver
 
 `Auto-Distribute` assigns weights to every unlocked bucket. The targets are
-over-constrained, so they are resolved by rank — most important to maintain
-first:
+over-constrained, so they are resolved by rank. Ranks 2–6 below are the
+**default** order — the `⚙ Settings` drawer lets you rearrange them, and each
+conflict then reads that ranking to decide which side yields. Rank 1 is not
+reorderable:
 
 1. **Locked rows** are absolute — never touched and never reordered. A lock
    that breaks the payout ladder is reported rather than moved, though only
@@ -197,11 +213,18 @@ step of 100 needs 3,000 — the solve is refused and the notice names a total
 that works.
 
 Weights also come out ordered: walking up the payout ladder, weight never
-rises. Ordering outranks both chance targets, so a table whose targets cannot
-be met in order has its chances moved instead, and the notice says which one
-gave way. It does *not* outrank RTP — but it is only given up when giving it up
-actually helps: an RTP target that is unreachable either way keeps the ladder
-and simply reports the miss.
+rises. At the default ranking, ordering outranks both chance targets, so a
+table whose targets cannot be met in order has its chances moved instead, and
+the notice says which one gave way. It does *not* outrank RTP — but it is only
+given up when giving it up actually helps: an RTP target that is unreachable
+either way keeps the ladder and simply reports the miss.
+
+Reordering the priority changes exactly these outcomes. A chance ranked above
+ordering keeps its mass and the shape damage is reported instead of repaired
+(the residual left below the ladder, or a rising step at the 1x boundary).
+Ordering ranked above RTP keeps the ladder intact and reports the RTP miss.
+Volatility ranked above ordering keeps the user's curvature and sacrifices the
+ladder instead of flattening. Whatever is sacrificed, the notices name it.
 
 Zero-payout buckets are exempt from ordering against each other, which is what
 lets a tease bucket sit below the top paying bucket. The residual — the bucket
@@ -287,19 +310,25 @@ and the panel names the nearest totals that would work.
 ### The targets panel
 
 Everything sits on one wrapping row — Target RTP, Preferred Hit Chance,
-Preferred Win Chance, Chance tolerance, Volatility, Curve c, the weight step,
-then `Auto-Distribute`, `Group settings` and undo/redo.
+Preferred Win Chance, Chance tolerance, Volatility, Curve c, then
+`Auto-Distribute`, `⚙ Settings` and undo/redo. The `⚙ Settings` drawer holds
+the bucket groups, the solver's priority order and the weight step.
 
 The panel **sticks to the top of the viewport** as you scroll, and
 **collapses**: the ▾ toggle at its left folds the inputs away, leaving a slim
 bar that reads every setting back as `name: value` — RTP, hit, win,
 tolerance, volatility, curve and step — alongside the `Auto-Distribute`,
-`Group settings`, `Undo` and `Redo` buttons, so you can still act on the
+`⚙ Settings`, `Undo` and `Redo` buttons, so you can still act on the
 table from the bottom of a long page; only editing the targets needs an
-expand. `Group settings` appears in exactly one of the two rows at a time,
+expand. The action buttons appear in exactly one of the two rows at a time,
 never both. The collapsed state is remembered with the workspace. The table
 header and the chart panel offset themselves by the panel's measured height,
 so nothing slides underneath it.
+
+Solver warnings collect under a count line — `3 warnings ▾` — that folds and
+unfolds on click, so a hard solve's pile of notices does not push the table
+down the page. The invalid-targets error never folds: it blocks
+Auto-Distribute, so it stays in sight until fixed.
 
 A target that is switched off greys out and its badge stops being flagged; it
 is a readout, not a goal. Every other target shows its achieved value beside it
@@ -376,11 +405,32 @@ deepens a shade, so the grouping stays readable while rows are pinned.
 #### Group locks
 
 Whole groups lock too. A group is locked when every bucket in it is, and the
-padlock — in **Group settings** beside each group's name, and on the group's
+padlock — in the **⚙ Settings** drawer beside each group's name, and on the group's
 handle at the chart's right edge — locks or unlocks all of them in one
 undoable step. A group with some buckets locked shows a half-lit padlock;
-clicking it locks the rest. There is no separate group-level lock: row locks
-stay the single thing the solver, the export and the chart all read.
+clicking it locks the rest.
+
+The **Σ soft lock** beside the padlock is different: it pins the group's
+*total* weight while the weights inside stay editable. Fix "bonus triggers 10%
+of the time", then play with the individual bonus buckets — a member edit in
+the table moves the difference onto the group's other unlocked members, and on
+the chart the group's bars stay draggable but exchange weight only against
+each other, so the group total (and its chance) never moves. The group's
+handle goes inert — the total is exactly what it drags — and drags from
+outside the group cannot pull weight across the pinned boundary. Both locks
+sit on the chart handle too: 🔒 hard-locks every bucket, Σ soft-locks the
+total. Auto-Distribute holds a soft-locked group where it is.
+
+#### Group preferences
+
+Each group also carries two optional Auto-Distribute preferences, edited in
+the **⚙ Settings** drawer on the percent scale: a **chance** (the group's share of
+total weight — set it and the solve lands the group's mass on it exactly) and
+an **RTP share** (the group's contribution to RTP — the solve tilts the
+group's members toward it at whatever mass the group has). Blank means no
+preference. Both are decided before the main solve and handed to it as locked
+mass, so the rest of the table is steered around them; a preference the group
+cannot meet is reported in the notices rather than silently missed.
 
 ### Bucket groups
 
@@ -402,7 +452,7 @@ are yours. The detector's rules, in priority order:
 
 After the import the heuristics never run again, so nothing you do can be
 silently undone by them. Change a bucket's group from the **Group** column's
-dropdown, and manage the groups themselves from **Group settings** in the
+dropdown, and manage the groups themselves from the **⚙ Settings** drawer in the
 targets panel: add, rename, recolor from a palette of 20 pastels, lock, or
 delete. Deleting a group never deletes buckets — they move to the first
 remaining group. All of it is undoable and saved with the workspace.
@@ -444,7 +494,10 @@ and it lands as one undo step. Enter sets, Escape and click-away cancel.
 With **Relative drag** on — the default — the grand total is preserved: other
 unlocked buckets absorb the change, and chances keep summing to 1. Switch it
 off (weights mode only) to move a single bar and let the total drift. Chance
-mode is always relative.
+mode is always relative. Inside a **soft-locked group** (the Σ on its handle)
+a bar drag is always relative and always confined: the group's other unlocked
+buckets absorb the whole change, whatever the toggle says, because the group
+total is the thing the lock pins.
 
 The view has its own controls: **Weights / % Chance** switches the metric,
 **Log Y** and **Log X** flip the axes to log scale, and **Aggregate equal
@@ -629,16 +682,29 @@ The top bar carries two blocks. **Import** holds `Load sample` and
 `Clear workspace` sits outside both, at the far right, since it destroys the
 table.
 
+### Tabs
+
+The strip above the top bar holds one **workspace per tab** — its own table,
+targets, groups, view state and undo stack — so weights from different files
+or different games sit side by side without a second browser profile. `+`
+opens an empty tab, `×` closes one (after confirming when it holds data;
+closing the last tab leaves a fresh empty one). When the CLI feeds a file to a
+running tool it asks whether to overwrite the current tab or open a new one;
+the feed carries an identity, so a plain page refresh never re-imports the
+source file over in-progress tuning.
+
 ### Persistence
 
-The table, targets, volatility, weight step, column widths, chart settings,
-which groups are collapsed into bars, both chart heights, the groups and
-their colors, whether the targets panel is collapsed, export filename and
-simulation spin count autosave to `localStorage` and come back on reload.
-A workspace saved before groups became data is migrated on load — the
-detector seeds it once, exactly as an import would. `Clear workspace`, at the
-right of the top bar, wipes it after confirming. Undo history and simulation
-results are not persisted.
+Every tab's table, targets, volatility, weight step, column widths, chart
+settings, which groups are collapsed into bars, both chart heights, the
+groups and their colors, whether the targets panel is collapsed, export
+filename and simulation spin count autosave to `localStorage` and come back
+on reload — along with which tabs exist and which is active. A workspace
+saved before tabs existed comes back as the first tab; one saved before
+groups became data is migrated on load — the detector seeds it once, exactly
+as an import would. `Clear workspace`, at the right of the top bar, wipes the
+current tab after confirming. Undo history and simulation results are not
+persisted.
 
 ## Project layout
 

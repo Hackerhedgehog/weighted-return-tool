@@ -20,8 +20,10 @@ import { DIST_HEIGHT, linearBarWidth, logBarWidth, niceCeil, useContainerWidth }
  *    its buckets;
  *  - each group gets a handle on the right edge at the height of its total
  *    (in the current metric and axis mode), draggable like a bar, and
- *    carrying a padlock that locks or unlocks every bucket in the group at
- *    once;
+ *    carrying two locks: the padlock hard-locks every bucket in the group at
+ *    once, while Σ soft-locks only the group's total — its bars stay
+ *    draggable, compensating against each other inside the group, so the
+ *    group's chance holds while its internal shape is played with;
  *  - drags are relative by default — other unlocked buckets absorb the
  *    change so the grand total (and Σchance == 1) holds. Weights mode can
  *    switch that off; chance mode cannot;
@@ -53,6 +55,9 @@ interface DistributionChartProps {
   /** 'off-step' when the table can't be partitioned on the step, 'pinned' when locks leave nothing free to move. */
   onBlocked: (reason: 'off-step' | 'pinned') => void
   onGroupLock: (id: string, locked: boolean) => void
+  /** Group ids whose total weight is soft-locked (GroupDef.totalLocked). */
+  softLocked: ReadonlySet<string>
+  onGroupSoftLock: (id: string, locked: boolean) => void
 }
 
 interface Scale {
@@ -141,6 +146,8 @@ export function DistributionChart({
   onCommit,
   onBlocked,
   onGroupLock,
+  softLocked,
+  onGroupSoftLock,
 }: DistributionChartProps) {
   const [containerRef, width] = useContainerWidth()
   const [hover, setHover] = useState<number | null>(null)
@@ -250,6 +257,33 @@ export function DistributionChart({
 
   // ---- dragging ----
 
+  /** uid → soft-locked group id, for every member of a soft-locked group. */
+  const softByUid = useMemo(() => {
+    const m = new Map<string, string>()
+    if (softLocked.size === 0) return m
+    for (const g of grouping.groups) {
+      if (!softLocked.has(g.id)) continue
+      for (const uid of g.uids) m.set(uid, g.id)
+    }
+    return m
+  }, [grouping, softLocked])
+
+  /**
+   * The soft-locked group that contains every dragged uid, as a pool for
+   * `scaleSubset` — or null when the drag is not confined. A drag confined to
+   * one soft-locked group exchanges weight only inside it; anything else
+   * (a plain bar, another group's handle, an aggregated bar spanning groups)
+   * must not touch a soft-locked group's members at all, which
+   * `weightsForValue` handles by freezing them.
+   */
+  const poolFor = (uids: string[]): string[] | null => {
+    if (uids.length === 0) return null
+    const gid = softByUid.get(uids[0])
+    if (gid === undefined) return null
+    if (!uids.every((u) => softByUid.get(u) === gid)) return null
+    return grouping.groups.find((g) => g.id === gid)?.uids ?? null
+  }
+
   /**
    * The three-way rule that turns a value into a subset's weights: chance
    * mode scales to a fraction of the frozen total, weights mode scales
@@ -259,6 +293,13 @@ export function DistributionChart({
    * caller supplies the row set and its total rather than this closing over
    * `rows`, since a drag operates on the rows frozen at pointer-down while the
    * popover operates on whatever is current.
+   *
+   * Soft locks refine it twice. A drag confined to one soft-locked group is
+   * always the pool form, whatever the relativity toggle says — the absolute
+   * form would move the group total, the very thing the lock pins. And in any
+   * other drag, soft-locked members are frozen like locked rows, so neither a
+   * dragged aggregate nor the relative compensation can leak weight across a
+   * pinned group boundary.
    */
   const weightsForValue = (
     baseRows: BucketRow[],
@@ -266,9 +307,19 @@ export function DistributionChart({
     baseTotal: number,
     value: number,
   ): number[] | null => {
-    if (metric === 'chance') return scaleSubset(baseRows, uids, clamp(value, 0, 1) * baseTotal, weightStep)
-    if (relative) return scaleSubset(baseRows, uids, value, weightStep)
-    return setSubsetTotal(baseRows, uids, value, weightStep)
+    const pool = poolFor(uids)
+    if (pool !== null) {
+      const target = metric === 'chance' ? clamp(value, 0, 1) * baseTotal : value
+      return scaleSubset(baseRows, uids, target, weightStep, pool)
+    }
+
+    const eff =
+      softByUid.size === 0
+        ? baseRows
+        : baseRows.map((r) => (softByUid.has(r.uid) && !r.locked ? { ...r, locked: true } : r))
+    if (metric === 'chance') return scaleSubset(eff, uids, clamp(value, 0, 1) * baseTotal, weightStep)
+    if (relative) return scaleSubset(eff, uids, value, weightStep)
+    return setSubsetTotal(eff, uids, value, weightStep)
   }
 
   /**
@@ -606,23 +657,27 @@ export function DistributionChart({
               {groupStats.map((s, gi) => {
                 const yExact = handleYs.raw[gi]
                 const yLabel = handleYs.spread[gi]
+                // A soft lock pins exactly what the handle drags — the group
+                // total — so the handle is inert while the bars stay live.
+                const soft = softLocked.has(s.group.id)
+                const pinned = s.allLocked || soft
                 return (
                   <g
                     key={s.group.id}
-                    className={`group-handle ${s.allLocked ? 'disabled' : ''}`}
+                    className={`group-handle ${pinned ? 'disabled' : ''}`}
                     role="slider"
                     aria-label={`${s.group.name} group`}
-                    aria-disabled={s.allLocked || undefined}
+                    aria-disabled={pinned || undefined}
                     aria-valuemin={0}
                     aria-valuemax={metric === 'weights' ? Math.round(totalWeight) : 100}
                     aria-valuenow={
                       metric === 'weights' ? Math.round(s.weight) : Math.round(s.chance * 1000) / 10
                     }
-                    onPointerDown={(e) => beginDrag(e, s.group.uids, s.allLocked, s.value)}
+                    onPointerDown={(e) => beginDrag(e, s.group.uids, pinned, s.value)}
                     onPointerMove={moveDrag}
                     onPointerUp={endDrag}
                     onPointerCancel={endDrag}
-                    onContextMenu={(e) => openEntry(e, s.group.name, s.group.uids, s.value, s.allLocked)}
+                    onContextMenu={(e) => openEntry(e, s.group.name, s.group.uids, s.value, pinned)}
                   >
                     <line
                       className="handle-connector"
@@ -658,7 +713,7 @@ export function DistributionChart({
                       role="button"
                       tabIndex={0}
                       className={`handle-lock ${s.allLocked ? 'on' : ''} ${!s.allLocked && s.anyLocked ? 'partial' : ''}`}
-                      aria-label={`${s.allLocked ? 'Unlock' : 'Lock'} the ${s.group.name} group`}
+                      aria-label={`${s.allLocked ? 'Unlock' : 'Hard-lock'} the ${s.group.name} group`}
                       // The padlock sits inside the handle's drag target, so
                       // its press must not also start a drag, and its own
                       // context menu must not also open the handle's popover.
@@ -673,6 +728,11 @@ export function DistributionChart({
                         }
                       }}
                     >
+                      <title>
+                        {s.allLocked
+                          ? 'Unlock every bucket in this group'
+                          : 'Hard lock: freeze every bucket in this group'}
+                      </title>
                       <rect
                         x={plotRight + MARGIN.right - 26}
                         y={yLabel - 10}
@@ -683,6 +743,44 @@ export function DistributionChart({
                       />
                       <text x={plotRight + MARGIN.right - 16} y={yLabel + 4} textAnchor="middle">
                         {s.allLocked ? '🔒' : '🔓'}
+                      </text>
+                    </g>
+                    <g
+                      role="button"
+                      tabIndex={0}
+                      className={`handle-lock handle-soft ${soft ? 'on' : ''}`}
+                      aria-label={`${soft ? 'Release' : 'Soft-lock'} the ${s.group.name} group total`}
+                      onPointerDown={(e) => e.stopPropagation()}
+                      onContextMenu={(e) => e.stopPropagation()}
+                      onClick={() => onGroupSoftLock(s.group.id, !soft)}
+                      onKeyDown={(e) => {
+                        if (e.key === 'Enter') onGroupSoftLock(s.group.id, !soft)
+                        else if (e.key === ' ') {
+                          e.preventDefault()
+                          onGroupSoftLock(s.group.id, !soft)
+                        }
+                      }}
+                    >
+                      <title>
+                        {soft
+                          ? 'Release the group total — the handle drags again'
+                          : 'Soft lock: pin the group total, keep its buckets draggable against each other'}
+                      </title>
+                      <rect
+                        x={plotRight + MARGIN.right - 48}
+                        y={yLabel - 10}
+                        width={20}
+                        height={20}
+                        rx={3}
+                        fill="transparent"
+                      />
+                      <text
+                        className="handle-soft-glyph"
+                        x={plotRight + MARGIN.right - 38}
+                        y={yLabel + 4}
+                        textAnchor="middle"
+                      >
+                        Σ
                       </text>
                     </g>
                   </g>

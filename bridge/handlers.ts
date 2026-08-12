@@ -1,6 +1,6 @@
 import { existsSync, readFileSync, statSync, writeFileSync } from 'node:fs'
 import { basename } from 'node:path'
-import type { BridgeConfig } from './config.ts'
+import type { BridgeConfig, BridgeSession } from './config.ts'
 import { resolveSavePath } from './save.ts'
 
 export interface JsonResult {
@@ -12,7 +12,7 @@ export interface JsonResult {
  * Read the source fresh on every request rather than caching it at startup —
  * a re-run of the generator should be one browser refresh away.
  */
-export function sessionResult(cfg: BridgeConfig): JsonResult {
+export function sessionResult(cfg: BridgeSession): JsonResult {
   try {
     return {
       status: 200,
@@ -21,6 +21,9 @@ export function sessionResult(cfg: BridgeConfig): JsonResult {
         sourceFile: basename(cfg.file),
         filename: cfg.exportName,
         game: cfg.game,
+        sessionId: cfg.sessionId,
+        seq: cfg.seq,
+        openAs: cfg.openAs,
         tsv: readFileSync(cfg.file, 'utf8'),
       },
     }
@@ -70,10 +73,24 @@ const FALLBACK_EXPORT_NAME = 'ref-weights-regular.tsv'
  * the only intended client, but this is an open port on the dev machine.
  * `resolveSavePath` is reused for the export name so a switch can never widen
  * what a later save is allowed to write.
+ *
+ * The current session comes in so the feed identity can carry across: the id
+ * names the dev-server run and survives every switch — the bumped seq is what
+ * marks the feed as new. Every refusal returns no next session, so a refused
+ * switch can never bump the seq or change how the tab opens.
  */
-export function switchResult(body: unknown): { result: JsonResult; next: BridgeConfig | null } {
+export function switchResult(
+  session: BridgeSession,
+  body: unknown,
+): { result: JsonResult; next: BridgeSession | null } {
   const bad = (error: string) => ({ result: { status: 400, body: { error } }, next: null })
-  const b = body as { dir?: unknown; file?: unknown; exportName?: unknown; game?: unknown } | null
+  const b = body as {
+    dir?: unknown
+    file?: unknown
+    exportName?: unknown
+    game?: unknown
+    openAs?: unknown
+  } | null
 
   if (b === null || typeof b !== 'object') return bad('Body must be a JSON object.')
   if (typeof b.dir !== 'string' || b.dir === '') return bad('dir must be a non-empty string.')
@@ -82,6 +99,9 @@ export function switchResult(body: unknown): { result: JsonResult; next: BridgeC
     return bad('exportName must be a string.')
   }
   if (b.game !== undefined && typeof b.game !== 'string') return bad('game must be a string.')
+  if (b.openAs !== undefined && b.openAs !== 'overwrite' && b.openAs !== 'new-tab') {
+    return bad("openAs must be 'overwrite' or 'new-tab'.")
+  }
 
   if (!existsSync(b.dir) || !statSync(b.dir).isDirectory()) return bad(`Not a directory: ${b.dir}`)
   if (!existsSync(b.file) || !statSync(b.file).isFile()) return bad(`Not a file: ${b.file}`)
@@ -91,6 +111,14 @@ export function switchResult(body: unknown): { result: JsonResult; next: BridgeC
   const save = resolveSavePath(b.dir, exportName)
   if (!save.ok) return bad(save.error)
 
-  const next: BridgeConfig = { dir: b.dir, file: b.file, exportName, game: b.game ?? '' }
+  const next: BridgeSession = {
+    dir: b.dir,
+    file: b.file,
+    exportName,
+    game: b.game ?? '',
+    sessionId: session.sessionId,
+    seq: session.seq + 1,
+    openAs: b.openAs ?? 'overwrite',
+  }
   return { result: { status: 200, body: { ok: true, dir: next.dir, file: next.file } }, next }
 }

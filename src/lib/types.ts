@@ -26,6 +26,19 @@ export interface GroupDef {
   name: string
   /** 6-digit hex from `PASTEL_COLORS`. */
   color: string
+  /**
+   * The group's total weight is held where it is: Auto-Distribute pins the
+   * members' combined mass, and a member's weight edit rebalances the other
+   * unlocked members instead of moving the total. Unlike locking every row,
+   * the weights *inside* the group stay editable — fix "bonus triggers 10% of
+   * the time", then play with the individual bonus buckets. Optional — absent
+   * in workspaces saved before group demands existed.
+   */
+  totalLocked?: boolean
+  /** Preferred share of total weight (fraction). Auto-Distribute sets the group's mass to it. */
+  prefChance?: number
+  /** Preferred RTP contribution (fraction of bet). Auto-Distribute tilts the group's members to land it. */
+  prefRtp?: number
 }
 
 /**
@@ -77,12 +90,53 @@ export type WeightStep = 1 | 10 | 100
 export const WEIGHT_STEPS: WeightStep[] = [1, 10, 100]
 export const DEFAULT_WEIGHT_STEP: WeightStep = 1
 
+/**
+ * The solver's over-constrained dimensions, ranked by the user. When two
+ * cannot both hold, the one ranked lower yields — see distribute.ts's header
+ * for what "yielding" means per dimension. Row locks are not listed: they are
+ * absolute and outrank everything by design.
+ */
+export type PriorityKey = 'rtp' | 'ordering' | 'volatility' | 'hit' | 'win'
+
+/** The solver's long-standing fixed ranking, now merely the default. */
+export const DEFAULT_PRIORITY: PriorityKey[] = ['rtp', 'ordering', 'volatility', 'hit', 'win']
+
+export const PRIORITY_LABELS: Record<PriorityKey, string> = {
+  rtp: 'Target RTP',
+  ordering: 'Ordering / weighted value',
+  volatility: 'Volatility curve',
+  hit: 'Pref hit chance',
+  win: 'Pref win chance',
+}
+
+/**
+ * A priority list from storage or an older workspace, made safe to rank by:
+ * unknown keys dropped, duplicates collapsed, missing keys appended in default
+ * order. Total by construction, so `indexOf` on the result never misses.
+ */
+export function normalizePriority(p: readonly string[] | undefined): PriorityKey[] {
+  const seen = new Set<PriorityKey>()
+  const out: PriorityKey[] = []
+  for (const k of p ?? []) {
+    if ((DEFAULT_PRIORITY as string[]).includes(k) && !seen.has(k as PriorityKey)) {
+      seen.add(k as PriorityKey)
+      out.push(k as PriorityKey)
+    }
+  }
+  for (const k of DEFAULT_PRIORITY) if (!seen.has(k)) out.push(k)
+  return out
+}
+
 export interface Targets {
   /** Hard target. Fraction, so 0.95 means 95%. */
   rtp: number
-  /** Preferred, satisfied within `tolerance`. Fraction of total weight. */
+  /**
+   * Preferred, satisfied within `tolerance`. Fraction of total weight — the
+   * targets panel edits it in percent, converting at the input boundary only,
+   * so saved workspaces and the solver always see the fraction.
+   */
   hitChance: number
-  /** Preferred, satisfied within `tolerance`. Buckets with payout > 1. */
+  /** Preferred, satisfied within `tolerance`. Buckets with payout > 1; a fraction like `hitChance`. */
   winChance: number
   /** Relative tolerance on the two chances, in percent. */
   tolerance: number
@@ -94,6 +148,8 @@ export interface Targets {
   useChances: boolean
   /** Off: the tail shape is left as a pure power law, c = 0. */
   useVolatility: boolean
+  /** Conflict-resolution ranking. Optional — absent in older workspaces, meaning the default. */
+  priority?: PriorityKey[]
 }
 
 export const DEFAULT_TARGETS: Targets = {
@@ -103,6 +159,7 @@ export const DEFAULT_TARGETS: Targets = {
   tolerance: 3.5,
   useChances: true,
   useVolatility: true,
+  priority: DEFAULT_PRIORITY,
 }
 
 export type ColumnKey =

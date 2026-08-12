@@ -28,8 +28,18 @@ afterEach(() => {
 
 describe('fetchSession', () => {
   it('returns the session when the bridge answers', async () => {
+    stubFetch(jsonRes(200, { ...SESSION, sessionId: 'abc123', seq: 3, openAs: 'new-tab' }))
+    expect(await fetchSession()).toEqual({
+      ...SESSION,
+      sessionId: 'abc123',
+      seq: 3,
+      openAs: 'new-tab',
+    })
+  })
+
+  it('defaults the feed identity when an older bridge omits it', async () => {
     stubFetch(jsonRes(200, SESSION))
-    expect(await fetchSession()).toEqual(SESSION)
+    expect(await fetchSession()).toEqual({ ...SESSION, sessionId: '', seq: 1, openAs: 'overwrite' })
   })
 
   it('returns null on 404', async () => {

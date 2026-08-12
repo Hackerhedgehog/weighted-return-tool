@@ -8,6 +8,8 @@
  * double precision. Per-spin cost is O(1) via the alias method.
  */
 
+import { evaluateExpression } from './expr'
+
 /** Tiny seedable PRNG — plenty for simulation, cheap enough for 100M draws. */
 export function mulberry32(seed: number): () => number {
   let a = seed >>> 0
@@ -182,17 +184,21 @@ export interface AmountOptions {
 
 /**
  * Numeric field parser: plain numbers with , or space or _ separators, plus
- * k / m / b shorthand ("100m" → 100,000,000). Null when unreadable; clamped to
- * the caller's range. The regex admits no sign, so a negative is unreadable
- * rather than clamped — typing "-5" is a mistake, not a request for the floor.
+ * k / m / b shorthand ("100m" → 100,000,000). Text that reads as neither
+ * falls back to arithmetic (`evaluateExpression`, e.g. "5000*20") — the
+ * expression grammar knows nothing of the shorthand, so "100k+1" is
+ * unreadable, not 100,001. Null when unreadable; clamped to the caller's
+ * range. A negative is unreadable rather than clamped — whether typed ("-5")
+ * or computed ("5-10"), it is a mistake, not a request for the floor.
  */
 export function parseAmount(text: string, opts: AmountOptions): number | null {
   const cleaned = text.replace(/[,\s_]/g, '')
   const m = /^(\d+(?:\.\d+)?)([kmb])?$/i.exec(cleaned)
-  if (m === null) return null
-  const mult = { k: 1e3, m: 1e6, b: 1e9 }[m[2]?.toLowerCase() as 'k' | 'm' | 'b'] ?? 1
-  const raw = Number(m[1]) * mult
-  if (!Number.isFinite(raw)) return null
+  const mult = { k: 1e3, m: 1e6, b: 1e9 }[m?.[2]?.toLowerCase() as 'k' | 'm' | 'b'] ?? 1
+  // Fallback only when the plain form does not read, so every input the regex
+  // accepts behaves exactly as it always has.
+  const raw = m !== null ? Number(m[1]) * mult : evaluateExpression(text)
+  if (raw === null || !Number.isFinite(raw) || raw < 0) return null
   const n = opts.integer ? Math.round(raw) : raw
   return Math.min(Math.max(n, opts.min), opts.max)
 }

@@ -3,7 +3,7 @@ import { describe, it, expect, beforeEach, afterEach, vi } from 'vitest'
 import { act, cleanup, fireEvent, render, screen, waitFor, within } from '@testing-library/react'
 import App from './App'
 import { readFileSync } from 'node:fs'
-import { saveWorkspace } from './lib/storage'
+import { saveTabsState, saveWorkspace } from './lib/storage'
 import { DEFAULT_CHART, DEFAULT_TARGETS } from './lib/types'
 
 const INPUT = readFileSync('example-input-data.tsv', 'utf8')
@@ -361,6 +361,95 @@ describe('App', () => {
     }
   })
 
+  it('feeds with openAs new-tab into a fresh tab, keeping the old one', async () => {
+    saveTabsState({
+      version: 1,
+      active: 't1',
+      tabs: [{ id: 't1', name: 'Table 1', workspace: null }],
+      lastBridge: { sessionId: 's1', seq: 1 },
+    })
+    const session = {
+      dir: '/game/scenarios',
+      sourceFile: 'set-values-buy.tsv',
+      filename: 'ref-weights-buy.tsv',
+      game: 'joker',
+      tsv: '0\t2.00\talpha-win\n1\t0.00\t0x\n',
+      sessionId: 's1',
+      seq: 2,
+      openAs: 'new-tab',
+    }
+    vi.stubGlobal(
+      'fetch',
+      vi.fn().mockResolvedValue({
+        ok: true,
+        status: 200,
+        headers: new Headers({ 'content-type': 'application/json' }),
+        json: async () => session,
+      }),
+    )
+    try {
+      render(<App />)
+      await waitFor(() => expect(screen.getByText('alpha-win')).toBeDefined())
+      const tabs = screen.getAllByRole('tab')
+      expect(tabs.map((t) => t.textContent)).toEqual([
+        'Table 1×',
+        'joker · set-values-buy.tsv×',
+      ])
+      expect(tabs[1].getAttribute('aria-selected')).toBe('true')
+    } finally {
+      vi.unstubAllGlobals()
+    }
+  })
+
+  it('skips a feed it has already applied, so a refresh cannot clobber tuning', async () => {
+    const workspace = {
+      version: 1 as const,
+      rows: [
+        { uid: 'b1', bucketId: 0, payout: 2, label: 'tuned-row', weight: 500, locked: false, groupId: 'other', weightId: '' },
+      ],
+      groups: [{ id: 'other', name: 'other', color: '#a8d8ea' }],
+      targets: DEFAULT_TARGETS,
+      volatility: 'medium' as const,
+      curve: 0.09,
+      columnWidths: {},
+      chart: DEFAULT_CHART,
+      exportFilename: 'f.tsv',
+    }
+    saveTabsState({
+      version: 1,
+      active: 't1',
+      tabs: [{ id: 't1', name: 'Table 1', workspace }],
+      lastBridge: { sessionId: 's1', seq: 2 },
+    })
+    const session = {
+      dir: '/game/scenarios',
+      sourceFile: 'set-values-regular.tsv',
+      filename: 'ref-weights-regular.tsv',
+      game: 'joker',
+      tsv: '0\t9.00\tfed-row\n',
+      sessionId: 's1',
+      seq: 2,
+      openAs: 'overwrite',
+    }
+    const fetchMock = vi.fn().mockResolvedValue({
+      ok: true,
+      status: 200,
+      headers: new Headers({ 'content-type': 'application/json' }),
+      json: async () => session,
+    })
+    vi.stubGlobal('fetch', fetchMock)
+    try {
+      render(<App />)
+      await waitFor(() => expect(fetchMock).toHaveBeenCalled())
+      // The tuned table stands; the already-applied feed was not re-imported.
+      expect(screen.getByText('tuned-row')).toBeDefined()
+      expect(screen.queryByText('fed-row')).toBeNull()
+      expect(screen.getAllByRole('tab')).toHaveLength(1)
+    } finally {
+      vi.unstubAllGlobals()
+    }
+  })
+
   it('never probes the bridge outside a dev server', async () => {
     const fetchMock = vi.fn()
     vi.stubGlobal('fetch', fetchMock)
@@ -379,9 +468,69 @@ describe('App', () => {
   })
 })
 
+describe('tabs', () => {
+  const SECOND = '0\t2.00\tsecond-tab-row\n1\t0.00\t0x\n'
+
+  it('keeps each tab its own table across switches', () => {
+    loadRealData()
+    fireEvent.click(screen.getByRole('button', { name: 'New tab' }))
+
+    // A fresh tab starts on the paste screen, exactly like a fresh app.
+    expect(screen.getByText('Paste bucket data')).toBeDefined()
+    fireEvent.change(screen.getByPlaceholderText(/joker5-maxwin/), { target: { value: SECOND } })
+    fireEvent.click(screen.getByRole('button', { name: 'Build table' }))
+    expect(screen.getByText('second-tab-row')).toBeDefined()
+    expect(screen.queryByText('joker5-maxwin')).toBeNull()
+
+    const [first, second] = screen.getAllByRole('tab')
+    fireEvent.click(first)
+    expect(screen.getByText('joker5-maxwin')).toBeDefined()
+    expect(screen.queryByText('second-tab-row')).toBeNull()
+
+    fireEvent.click(second)
+    expect(screen.getByText('second-tab-row')).toBeDefined()
+  })
+
+  it('confirms before closing a tab that holds data, and never empties the strip', () => {
+    const confirm = vi.spyOn(window, 'confirm').mockReturnValue(true)
+    try {
+      loadRealData()
+      expect(screen.getAllByRole('tab')).toHaveLength(1)
+      fireEvent.click(screen.getByLabelText(/^Close /))
+      expect(confirm).toHaveBeenCalled()
+      // The last tab closing leaves a fresh empty one, not an empty strip.
+      expect(screen.getAllByRole('tab')).toHaveLength(1)
+      expect(screen.getByText('Paste bucket data')).toBeDefined()
+    } finally {
+      confirm.mockRestore()
+    }
+  })
+
+  it('closes an empty tab without asking', () => {
+    const confirm = vi.spyOn(window, 'confirm')
+    try {
+      loadRealData()
+      fireEvent.click(screen.getByRole('button', { name: 'New tab' }))
+      expect(screen.getAllByRole('tab')).toHaveLength(2)
+
+      const closes = screen.getAllByLabelText(/^Close /)
+      fireEvent.click(closes[1])
+      expect(confirm).not.toHaveBeenCalled()
+      expect(screen.getAllByRole('tab')).toHaveLength(1)
+      expect(screen.getByText('joker5-maxwin')).toBeDefined()
+    } finally {
+      confirm.mockRestore()
+    }
+  })
+})
+
 describe('weight step', () => {
+  // The step control lives in the settings drawer now.
+  const openSettings = () => fireEvent.click(screen.getByRole('button', { name: /Settings/ }))
+
   it('snaps Auto-Distribute to the chosen step', () => {
     loadRealData()
+    openSettings()
     fireEvent.click(screen.getByRole('button', { name: '×100' }))
     fireEvent.click(screen.getByRole('button', { name: 'Auto-Distribute' }))
 
@@ -394,6 +543,7 @@ describe('weight step', () => {
 
   it('is undoable', () => {
     loadRealData()
+    openSettings()
     fireEvent.click(screen.getByRole('button', { name: '×100' }))
     expect(screen.getByRole('button', { name: '×100' }).className).toContain('active')
     fireEvent.click(screen.getByRole('button', { name: /Undo/ }))
@@ -413,12 +563,15 @@ describe('weight step', () => {
       weightStep: 100,
     })
     render(<App />)
+    fireEvent.click(screen.getByRole('button', { name: /Settings/ }))
     expect(screen.getByRole('button', { name: '×100' }).className).toContain('active')
   })
 
   it('never snaps a typed weight, even at step 100', () => {
     loadRealData()
+    openSettings()
     fireEvent.click(screen.getByRole('button', { name: '×100' }))
+    fireEvent.click(screen.getByRole('button', { name: 'Close settings' }))
 
     const cell = document.querySelector('.grid-row .col-weight .gcell') as HTMLElement
     fireEvent.mouseDown(cell)
@@ -432,6 +585,7 @@ describe('weight step', () => {
 
   it('restores the step on redo after undoing it', () => {
     loadRealData()
+    openSettings()
     fireEvent.click(screen.getByRole('button', { name: '×100' }))
 
     fireEvent.click(screen.getByRole('button', { name: /Undo/ }))
@@ -530,7 +684,7 @@ describe('page layout', () => {
 })
 
 describe('targets panel layout', () => {
-  it('keeps every setting, the weight step and the actions on one row', () => {
+  it('keeps every setting and the actions on one row', () => {
     loadRealData()
     const rows = document.querySelectorAll('.targets-row')
     expect(rows).toHaveLength(1)
@@ -543,7 +697,6 @@ describe('targets panel layout', () => {
       'Chance tolerance',
       'Volatility',
       'Curve c',
-      'Weight step',
     ]) {
       expect(within(row).getByText(label)).toBeDefined()
     }
@@ -553,13 +706,42 @@ describe('targets panel layout', () => {
     expect(within(row).getByRole('button', { name: /Redo/ })).toBeDefined()
   })
 
-  it('labels the weight steps as multipliers', () => {
+  it('labels the weight steps as multipliers, in the settings drawer', () => {
     loadRealData()
-    const step = [...document.querySelectorAll('.target-field')].find(
-      (f) => f.querySelector('.field-label')?.textContent === 'Weight step',
-    )!
-    const names = [...step.querySelectorAll('.seg-btn')].map((b) => b.textContent)
+    fireEvent.click(screen.getByRole('button', { name: /Settings/ }))
+    const drawer = document.querySelector('.settings-drawer') as HTMLElement
+    const names = [...drawer.querySelectorAll('.seg-btn')].map((b) => b.textContent)
     expect(names).toEqual(['free', '×10', '×100'])
+  })
+})
+
+describe('solver settings drawer', () => {
+  it('reorders the priority list, undoably', () => {
+    loadRealData()
+    fireEvent.click(screen.getByRole('button', { name: /Settings/ }))
+
+    const labels = () =>
+      [...document.querySelectorAll('.priority-label')].map((el) => el.textContent)
+    expect(labels()[0]).toBe('Target RTP')
+
+    fireEvent.click(screen.getByRole('button', { name: 'Lower Target RTP' }))
+    expect(labels()[0]).toBe('Ordering / weighted value')
+    expect(labels()[1]).toBe('Target RTP')
+
+    fireEvent.click(screen.getByRole('button', { name: /Undo/ }))
+    expect(labels()[0]).toBe('Target RTP')
+  })
+
+  it('closes on the backdrop and keeps the chosen order', () => {
+    loadRealData()
+    fireEvent.click(screen.getByRole('button', { name: /Settings/ }))
+    fireEvent.click(screen.getByRole('button', { name: 'Raise Pref hit chance' }))
+    fireEvent.click(document.querySelector('.settings-backdrop')!)
+    expect(document.querySelector('.settings-drawer')).toBeNull()
+
+    fireEvent.click(screen.getByRole('button', { name: /Settings/ }))
+    const labels = [...document.querySelectorAll('.priority-label')].map((el) => el.textContent)
+    expect(labels[2]).toBe('Pref hit chance')
   })
 })
 
@@ -649,7 +831,8 @@ describe('header actions', () => {
 })
 
 describe('groups', () => {
-  const openSettings = () => fireEvent.click(screen.getByRole('button', { name: 'Group settings' }))
+  // Group settings live in the settings drawer now.
+  const openSettings = () => fireEvent.click(screen.getByRole('button', { name: /Settings/ }))
 
   it('detects families named by a bare prefix, not just alpha+digits', () => {
     render(<App />)
@@ -752,7 +935,7 @@ describe('groups', () => {
   it('locks every bucket in a group and undoes it in one step', () => {
     render(<App />)
     fireEvent.click(screen.getByRole('button', { name: 'Load sample' }))
-    fireEvent.click(screen.getByRole('button', { name: 'Group settings' }))
+    fireEvent.click(screen.getByRole('button', { name: /Settings/ }))
 
     const lockedRows = () => document.querySelectorAll('.gcell.lock.on').length
     const before = lockedRows()
@@ -764,6 +947,30 @@ describe('groups', () => {
 
     fireEvent.click(screen.getByRole('button', { name: '↶ Undo' }))
     expect(lockedRows()).toBe(before)
+  })
+
+  it('drives one soft lock from both the chart handle and the drawer', () => {
+    render(<App />)
+    fireEvent.click(screen.getByRole('button', { name: 'Load sample' }))
+
+    // Toggle from the chart's Σ control…
+    fireEvent.click(screen.getByRole('button', { name: 'Soft-lock the bonus group total' }))
+    // …the handle goes inert…
+    expect(
+      screen.getByRole('slider', { name: 'bonus group' }).getAttribute('aria-disabled'),
+    ).toBe('true')
+    // …no row gained a hard lock…
+    expect(document.querySelectorAll('.gcell.lock.on')).toHaveLength(0)
+
+    // …and the drawer's Σ shows the same state and can release it.
+    fireEvent.click(screen.getByRole('button', { name: /Settings/ }))
+    const settings = within(document.querySelector('.group-settings') as HTMLElement)
+    const sigma = settings.getByRole('button', { name: "Unlock the bonus group's total weight" })
+    expect(sigma.getAttribute('aria-pressed')).toBe('true')
+    fireEvent.click(sigma)
+    expect(
+      screen.getByRole('slider', { name: 'bonus group' }).getAttribute('aria-disabled'),
+    ).toBeNull()
   })
 })
 
@@ -821,11 +1028,13 @@ describe('group bars', () => {
     render(<App />)
     fireEvent.click(screen.getByRole('button', { name: 'Load sample' }))
 
+    // The table's Collapse row renders a chip named "bonus" too, so the
+    // chart's chip is picked out by its title rather than its name.
     const before = document.querySelectorAll('.bar').length
-    fireEvent.click(screen.getByRole('button', { name: 'bonus' }))
+    fireEvent.click(screen.getByTitle('Draw bonus as one bar'))
 
     expect(document.querySelectorAll('.bar').length).toBeLessThan(before)
-    expect(screen.getByRole('button', { name: 'bonus', pressed: true })).toBeDefined()
+    expect(screen.getByTitle("Show bonus's buckets").getAttribute('aria-pressed')).toBe('true')
   })
 
   it('restores collapsed groups from a saved workspace', () => {
@@ -850,21 +1059,22 @@ describe('group bars', () => {
 })
 
 describe('chrome layout', () => {
-  it('opens group settings from the targets panel', () => {
+  it('opens group settings inside the settings drawer', () => {
     render(<App />)
     fireEvent.click(screen.getByRole('button', { name: 'Load sample' }))
     const targets = document.querySelector('.targets')!
-    const btn = screen.getByRole('button', { name: 'Group settings' })
+    const btn = screen.getByRole('button', { name: /Settings/ })
     expect(targets.contains(btn)).toBe(true)
     fireEvent.click(btn)
     expect(screen.getByRole('heading', { name: 'Groups' })).toBeDefined()
+    expect(document.querySelector('.settings-drawer .group-settings')).not.toBeNull()
   })
 
-  it('keeps group settings reachable when the targets panel is collapsed', () => {
+  it('keeps the settings drawer reachable when the targets panel is collapsed', () => {
     render(<App />)
     fireEvent.click(screen.getByRole('button', { name: 'Load sample' }))
     fireEvent.click(screen.getByRole('button', { name: /Targets/ }))
-    expect(screen.getByRole('button', { name: 'Group settings' })).toBeDefined()
+    expect(screen.getByRole('button', { name: /Settings/ })).toBeDefined()
   })
 
   it('separates import from export in the top bar', () => {

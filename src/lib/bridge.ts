@@ -1,3 +1,6 @@
+/** How the latest feed asked to be applied to a running tool. */
+export type BridgeOpenAs = 'overwrite' | 'new-tab'
+
 export interface BridgeSession {
   /** Directory the data came from — also the only place a save can land. */
   dir: string
@@ -6,6 +9,15 @@ export interface BridgeSession {
   filename: string
   game: string
   tsv: string
+  /**
+   * Identifies one dev-server run, so a page reload can tell "the CLI fed a
+   * new file" from "the same session, already applied". A fresh id means a
+   * fresh CLI launch, whatever the seq says.
+   */
+  sessionId: string
+  /** Bumped on every accepted /__bridge/switch; 1 for the launch feed. */
+  seq: number
+  openAs: BridgeOpenAs
 }
 
 export type SaveOutcome =
@@ -31,7 +43,15 @@ export async function fetchSession(): Promise<BridgeSession | null> {
     if (typeof data.tsv !== 'string' || typeof data.dir !== 'string') return null
     if (typeof data.filename !== 'string') return null
 
-    return data as BridgeSession
+    return {
+      ...(data as BridgeSession),
+      // Defaulted rather than required: a bridge built before feeds carried
+      // identity still yields a working session — it just reads as one fresh
+      // launch, which is exactly what it is.
+      sessionId: typeof data.sessionId === 'string' ? data.sessionId : '',
+      seq: typeof data.seq === 'number' && Number.isFinite(data.seq) ? data.seq : 1,
+      openAs: data.openAs === 'new-tab' ? 'new-tab' : 'overwrite',
+    }
   } catch {
     return null
   }

@@ -229,7 +229,7 @@ export function BankrollSim({
           format={fmtWeight}
           opts={CREDITS_RANGE}
           onCommit={(credits) => onConfig({ ...config, credits })}
-          title="Plain number or shorthand: 1m, 250k"
+          title="Plain number, shorthand (1m, 250k), or arithmetic like 5000*20"
         />
         <AmountField
           label="Bet"
@@ -238,7 +238,7 @@ export function BankrollSim({
           format={(n) => fmtDecimal(n, 6)}
           opts={BET_RANGE}
           onCommit={(bet) => onConfig({ ...config, bet })}
-          title="Credits staked per spin"
+          title="Credits staked per spin — plain number, shorthand, or arithmetic like 10/4"
         />
         <AmountField
           label="RTP×"
@@ -247,7 +247,7 @@ export function BankrollSim({
           format={(n) => fmtDecimal(n, 6)}
           opts={RTP_MULTIPLIER_RANGE}
           onCommit={(rtpMultiplier) => onConfig({ ...config, rtpMultiplier })}
-          title="Scales every payout — the table itself is not changed"
+          title="Scales every payout — the table itself is not changed. Accepts arithmetic like 0.9/0.95"
         />
 
         {running ? (

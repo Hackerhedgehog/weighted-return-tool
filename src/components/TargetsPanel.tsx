@@ -1,10 +1,9 @@
 import { useState } from 'react'
 import { evaluateExpression } from '../lib/expr'
-import { fmtFixed3, fmtPct, fmtRtp } from '../lib/format'
+import { fmtPct, fmtRtp } from '../lib/format'
 import {
   CURVE_PRESETS,
   VOLATILITY_STEPS,
-  WEIGHT_STEPS,
   type Targets,
   type Volatility,
   type WeightStep,
@@ -25,18 +24,17 @@ interface TargetsPanelProps {
   canUndo: boolean
   canRedo: boolean
   collapsed: boolean
-  groupsOpen: boolean
   /** App measures the panel to keep the other sticky offsets clear of it. */
   panelRef: (el: HTMLElement | null) => void
   onCollapsed: (c: boolean) => void
   onTargets: (t: Targets) => void
   onVolatility: (v: Exclude<Volatility, 'custom'>) => void
   onCurve: (c: number) => void
-  onWeightStep: (s: WeightStep) => void
   onAutoDistribute: () => void
   onUndo: () => void
   onRedo: () => void
-  onGroupSettings: () => void
+  onSettings: () => void
+  settingsOpen: boolean
 }
 
 /** Small numeric field that also accepts arithmetic, like the grid cells do. */
@@ -97,6 +95,15 @@ function PanelNumber({
   )
 }
 
+/**
+ * The chance fields edit in percent while everything stored stays a fraction.
+ * toPrecision absorbs the ×100 float noise, so a stored 0.3 reads back as 30,
+ * never 30.000000000000004.
+ */
+function asPercent(fraction: number): number {
+  return Number((fraction * 100).toPrecision(12))
+}
+
 /** Shared by the expanded fields and the collapsed summary badges. */
 function withinBand(achieved: number, preferred: number, tolerance: number): boolean {
   const tau = tolerance / 100
@@ -133,11 +140,11 @@ function ChanceTarget({
       <label className="field-label">{label}</label>
       <PanelNumber
         disabled={disabled}
-        display={String(preferred)}
-        raw={String(preferred)}
+        display={`${asPercent(preferred)}%`}
+        raw={String(asPercent(preferred))}
         ariaLabel={label}
-        validate={(n) => n >= 0 && n <= 1}
-        onCommit={onChange}
+        validate={(n) => n >= 0 && n <= 100}
+        onCommit={(n) => onChange(n / 100)}
       />
       {/* The band lives in the badge's tooltip: the row has six fields to fit
           now, and it is reference detail rather than something to watch. */}
@@ -147,10 +154,10 @@ function ChanceTarget({
           title={
             disabled
               ? `Not steered — the table currently sits at ${fmtPct(achieved, 2)}`
-              : `${inBand ? 'Within' : 'Outside'} tolerance · ${fmtPct(achieved, 2)} · band ${fmtFixed3(lo)}–${fmtFixed3(hi)}`
+              : `${inBand ? 'Within' : 'Outside'} tolerance · band ${fmtPct(lo, 2)}–${fmtPct(hi, 2)}`
           }
         >
-          {fmtFixed3(achieved)}
+          {fmtPct(achieved, 2)}
         </span>
         <button type="button" className="link-btn" onClick={onUseCurrent} title="Copy the achieved value into the target">
           = current
@@ -161,6 +168,12 @@ function ChanceTarget({
 }
 
 export function TargetsPanel(props: TargetsPanelProps) {
+  // A hard solve can produce half a dozen notices at once; the count line
+  // stays, the details fold. The choice survives re-solves — new warnings
+  // change the count, not the fold — but not a reload: hidden-by-default
+  // warnings after a restore would be warnings nobody reads.
+  const [warningsOpen, setWarningsOpen] = useState(true)
+
   const {
     targets,
     volatility,
@@ -173,17 +186,16 @@ export function TargetsPanel(props: TargetsPanelProps) {
     canUndo,
     canRedo,
     collapsed,
-    groupsOpen,
     panelRef,
     onCollapsed,
     onTargets,
     onVolatility,
     onCurve,
-    onWeightStep,
     onAutoDistribute,
     onUndo,
     onRedo,
-    onGroupSettings,
+    onSettings,
+    settingsOpen,
   } = props
 
   // Only the chance constraints can be invalid, and only while they are being
@@ -219,12 +231,12 @@ export function TargetsPanel(props: TargetsPanelProps) {
       </button>
       <button
         type="button"
-        className={`btn ${groupsOpen ? 'primary' : ''}`}
-        aria-expanded={groupsOpen}
-        onClick={onGroupSettings}
-        title="Add, rename, recolor, lock or delete bucket groups"
+        className={`btn ${settingsOpen ? 'primary' : ''}`}
+        aria-expanded={settingsOpen}
+        onClick={onSettings}
+        title="Bucket groups, solver priority order and weight step"
       >
-        Group settings
+        ⚙ Settings
       </button>
       <div className="btn-row">
         <button type="button" className="btn" onClick={onUndo} disabled={!canUndo} title="Ctrl+Z">
@@ -270,7 +282,7 @@ export function TargetsPanel(props: TargetsPanelProps) {
                   <span
                     className={`badge ${withinBand(achieved.hitChance, targets.hitChance, targets.tolerance) ? 'ok' : 'warn'}`}
                   >
-                    {fmtFixed3(achieved.hitChance)}
+                    {fmtPct(achieved.hitChance, 2)}
                   </span>
                 </dd>
               </div>
@@ -280,7 +292,7 @@ export function TargetsPanel(props: TargetsPanelProps) {
                   <span
                     className={`badge ${withinBand(achieved.winChance, targets.winChance, targets.tolerance) ? 'ok' : 'warn'}`}
                   >
-                    {fmtFixed3(achieved.winChance)}
+                    {fmtPct(achieved.winChance, 2)}
                   </span>
                 </dd>
               </div>
@@ -427,26 +439,6 @@ export function TargetsPanel(props: TargetsPanelProps) {
           </label>
         </div>
 
-        <div className="target-field">
-          <label className="field-label">Weight step</label>
-          <div className="seg small">
-            {WEIGHT_STEPS.map((s) => (
-              <button
-                key={s}
-                type="button"
-                className={`seg-btn ${weightStep === s ? 'active' : ''}`}
-                onClick={() => onWeightStep(s)}
-                title={s === 1 ? 'Weights land on any integer' : `Distributed weights land on multiples of ${s}`}
-              >
-                {s === 1 ? 'free' : `×${s}`}
-              </button>
-            ))}
-          </div>
-          <div className="field-meta">
-            <span className="field-hint">typed cells are never snapped</span>
-          </div>
-        </div>
-
         <div className="target-field actions">
           {actions}
           <span className="field-hint">
@@ -458,16 +450,33 @@ export function TargetsPanel(props: TargetsPanelProps) {
 
       {invalid && (
         <p className="notice error">
-          Targets must satisfy RTP &gt; 0 and 0 ≤ win chance ≤ hit chance ≤ 1, with tolerance
+          Targets must satisfy RTP &gt; 0 and 0 ≤ win chance ≤ hit chance ≤ 100%, with tolerance
           between 0 and 50%.
         </p>
       )}
 
-      {warnings.map((w) => (
-        <p className="notice warn" key={w}>
-          {w}
-        </p>
-      ))}
+      {warnings.length > 0 && (
+        <div className="notices">
+          <button
+            type="button"
+            className="notice-toggle"
+            aria-expanded={warningsOpen}
+            onClick={() => setWarningsOpen((v) => !v)}
+            title={warningsOpen ? 'Hide the warnings' : 'Show the warnings'}
+          >
+            <span className="chev" aria-hidden="true">
+              {warningsOpen ? '▾' : '▸'}
+            </span>
+            {warnings.length} warning{warnings.length === 1 ? '' : 's'}
+          </button>
+          {warningsOpen &&
+            warnings.map((w) => (
+              <p className="notice warn" key={w}>
+                {w}
+              </p>
+            ))}
+        </div>
+      )}
     </section>
   )
 }

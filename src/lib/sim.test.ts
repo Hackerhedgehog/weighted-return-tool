@@ -165,6 +165,24 @@ describe('parseSpinsInput', () => {
     expect(parseSpinsInput('spin')).toBeNull()
     expect(parseSpinsInput('-5')).toBeNull()
   })
+
+  it('falls back to arithmetic when the plain form does not read', () => {
+    expect(parseSpinsInput('5000*20')).toBe(100_000)
+    expect(parseSpinsInput('(1+3)*250,000')).toBe(1_000_000)
+    expect(parseSpinsInput('=2*3')).toBe(6)
+  })
+
+  it('applies the plain-number range rules to computed results', () => {
+    expect(parseSpinsInput('2*1000000000')).toBe(1_000_000_000)
+    // 0 clamps to the floor exactly like a typed "0"…
+    expect(parseSpinsInput('1-1')).toBe(1)
+    // …but a negative is rejected exactly like a typed "-5".
+    expect(parseSpinsInput('5-10')).toBeNull()
+  })
+
+  it('does not mix shorthand into expressions', () => {
+    expect(parseSpinsInput('100k+1')).toBeNull()
+  })
 })
 
 describe('parseAmount', () => {
@@ -196,5 +214,16 @@ describe('parseAmount', () => {
     expect(parseAmount('abc', { min: 0, max: 10, integer: false })).toBeNull()
     expect(parseAmount('-5', { min: 0, max: 10, integer: false })).toBeNull()
     expect(parseAmount('', { min: 0, max: 10, integer: false })).toBeNull()
+  })
+
+  it('evaluates arithmetic with the same rounding and range as plain numbers', () => {
+    expect(parseAmount('10/4', { min: 0, max: 10, integer: false })).toBe(2.5)
+    expect(parseAmount('10/4', { min: 0, max: 10, integer: true })).toBe(3)
+    expect(parseAmount('(2+3)*4', { min: 0, max: 10, integer: true })).toBe(10)
+  })
+
+  it('rejects computed negatives and division by zero', () => {
+    expect(parseAmount('5-10', { min: 0, max: 10, integer: false })).toBeNull()
+    expect(parseAmount('5/0', { min: 0, max: 10, integer: false })).toBeNull()
   })
 })

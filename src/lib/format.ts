@@ -92,16 +92,11 @@ export function fmtCredits(n: number): string {
   return Math.abs(n) >= 1000 ? Math.round(n).toLocaleString('en-US') : fmtDecimal(n, 2)
 }
 
-/** Hit and win chance in the targets panel. */
-export function fmtFixed3(n: number): string {
-  return Number.isFinite(n) ? n.toFixed(3) : EM_DASH
-}
-
 export function fmtRtp(n: number): string {
   return Number.isFinite(n) ? n.toFixed(4) : EM_DASH
 }
 
-/** Percentages appear only on the chart and in targets-panel hints. */
+/** Percentages: the chart, and the targets panel's chance readouts and hints. */
 export function fmtPct(fraction: number, dp = 4): string {
   if (!Number.isFinite(fraction)) return EM_DASH
   return `${trimZeros((fraction * 100).toFixed(dp))}%`
