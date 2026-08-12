@@ -80,6 +80,13 @@ export interface YZoomRange {
 
 export const Y_ZOOM_RANGE: YZoomRange = { min: 0.15, max: 6 }
 
+/**
+ * The x-axis domain (0..requestedSpins) is exact, not a percentile estimate
+ * like autoYMax — so, unlike Y_ZOOM_RANGE, there is nothing to gain by
+ * zooming out past the full domain. Zooming in has effectively no floor.
+ */
+export const X_ZOOM_RANGE: YZoomRange = { min: 0.02, max: 1 }
+
 export function clampZoom(z: number, range: YZoomRange = Y_ZOOM_RANGE): number {
   if (!Number.isFinite(z)) return 1
   return Math.min(Math.max(z, range.min), range.max)

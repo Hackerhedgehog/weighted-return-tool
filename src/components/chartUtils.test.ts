@@ -1,5 +1,5 @@
 import { describe, it, expect } from 'vitest'
-import { clampHeight, clampZoom, DIST_HEIGHT, linearBarWidth, logBarWidth, SIM_HEIGHT, Y_ZOOM_RANGE } from './chartUtils'
+import { clampHeight, clampZoom, DIST_HEIGHT, linearBarWidth, logBarWidth, SIM_HEIGHT, X_ZOOM_RANGE, Y_ZOOM_RANGE } from './chartUtils'
 
 describe('bar widths', () => {
   it('caps a linear bar at 16px however much room there is', () => {
@@ -62,5 +62,14 @@ describe('clampZoom', () => {
   it('falls back to 1 when the stored value is not a number', () => {
     expect(clampZoom(NaN)).toBe(1)
     expect(clampZoom(Infinity)).toBe(1)
+  })
+})
+
+describe('X_ZOOM_RANGE', () => {
+  it('allows zooming in close to nothing but not zooming out past the full domain', () => {
+    expect(clampZoom(0.5, X_ZOOM_RANGE)).toBe(0.5)
+    expect(clampZoom(0.001, X_ZOOM_RANGE)).toBe(X_ZOOM_RANGE.min)
+    expect(clampZoom(5, X_ZOOM_RANGE)).toBe(X_ZOOM_RANGE.max)
+    expect(X_ZOOM_RANGE.max).toBe(1)
   })
 })
