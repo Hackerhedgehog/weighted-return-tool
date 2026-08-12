@@ -50,8 +50,15 @@ export interface ChartAxes {
 const FULL_SIZE_EPSILON = 0.999
 
 export function useChartAxes(cfg: ChartAxesConfig): ChartAxes {
-  const viewX = viewRange(cfg.xExtent, cfg.xZoom, cfg.xPan)
-  const viewY = viewRange(cfg.autoYMax, cfg.yZoom, cfg.yPan)
+  const xPan = clampPanToExtent(cfg.xExtent, cfg.xZoom, cfg.xPan, cfg.xExtent)
+  const yPanExtentClamped = clampPanToExtent(cfg.autoYMax, cfg.yZoom, cfg.yPan, cfg.trueYMax)
+  const yPan =
+    cfg.keepZeroVisible === true
+      ? clampPanKeepZeroVisible(cfg.autoYMax, cfg.yZoom, yPanExtentClamped)
+      : yPanExtentClamped
+
+  const viewX = viewRange(cfg.xExtent, cfg.xZoom, xPan)
+  const viewY = viewRange(cfg.autoYMax, cfg.yZoom, yPan)
 
   const setXPan = (p: number) => {
     cfg.onXPan(clampPanToExtent(cfg.xExtent, cfg.xZoom, p, cfg.xExtent))
@@ -75,8 +82,8 @@ export function useChartAxes(cfg: ChartAxesConfig): ChartAxes {
     cfg.onYPan(yFit.pan)
   }
 
-  const xGeom = scrollbarGeometry(cfg.xExtent, cfg.xZoom, cfg.xPan, 0, cfg.xExtent)
-  const yGeom = scrollbarGeometry(cfg.autoYMax, cfg.yZoom, cfg.yPan, 0, cfg.trueYMax)
+  const xGeom = scrollbarGeometry(cfg.xExtent, cfg.xZoom, xPan, 0, cfg.xExtent)
+  const yGeom = scrollbarGeometry(cfg.autoYMax, cfg.yZoom, yPan, 0, cfg.trueYMax)
 
   const xScrollbar: ScrollbarState | null =
     xGeom.size >= FULL_SIZE_EPSILON

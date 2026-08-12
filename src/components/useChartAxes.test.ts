@@ -66,6 +66,16 @@ describe('useChartAxes', () => {
     expect(view.max).toBeGreaterThanOrEqual(0)
   })
 
+  it('keeps 0 visible at pan=0 once zoomed in, even without any explicit pan action', () => {
+    const { result } = renderHook(() =>
+      useChartAxes(
+        baseConfig({ yZoom: 0.5, autoYMax: 100, trueYMax: 100, yPan: 0, keepZeroVisible: true }),
+      ),
+    )
+    expect(result.current.viewY.min).toBeLessThanOrEqual(0)
+    expect(result.current.viewY.max).toBeGreaterThanOrEqual(0)
+  })
+
   it('resetView fits the true extent on both axes, centered', () => {
     const onXZoom = vi.fn()
     const onXPan = vi.fn()
