@@ -6,6 +6,7 @@ import { ChartXAxisZoom } from './ChartXAxisZoom'
 import { ChartYAxisZoom } from './ChartYAxisZoom'
 import { fmtCompact, niceCeil, SIM_HEIGHT, useContainerWidth } from './chartUtils'
 import { useChartAxes } from './useChartAxes'
+import { useCombinedWheelZoom } from './useCombinedWheelZoom'
 import { useMiddleDragPan } from './useMiddleDragPan'
 import { fmtRtp, fmtWeight } from '../lib/format'
 
@@ -141,6 +142,11 @@ export function SimChart({
     plotW,
     plotH,
   })
+
+  // Scrolling on the plot itself zooms both axes together; scrolling on
+  // either axis's own margin (ChartXAxisZoom/ChartYAxisZoom below) still
+  // zooms just that one axis.
+  const wheelZoomRef = useCombinedWheelZoom<SVGRectElement>({ xZoom, onXZoom, yZoom, onYZoom })
 
   // Recomputed against the *effective* (zoomed+panned) ceiling: a block that
   // only clips once the user zooms/pans should count.
@@ -287,6 +293,7 @@ export function SimChart({
         </text>
 
         <rect
+          ref={wheelZoomRef}
           className="sim-hit"
           x={MARGIN.left}
           y={MARGIN.top}

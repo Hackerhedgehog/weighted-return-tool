@@ -201,6 +201,10 @@ function WorkspaceView({
   const [bankrollChartXZoom, setBankrollChartXZoom] = useState(saved?.bankrollChartXZoom ?? 1)
   const [bankrollChartXPan, setBankrollChartXPan] = useState(saved?.bankrollChartXPan ?? 0)
   const [bankrollChartYPan, setBankrollChartYPan] = useState(saved?.bankrollChartYPan ?? 0)
+  const [distChartXZoom, setDistChartXZoom] = useState(saved?.distChartXZoom ?? 1)
+  const [distChartXPan, setDistChartXPan] = useState(saved?.distChartXPan ?? 0)
+  const [distChartYZoom, setDistChartYZoom] = useState(saved?.distChartYZoom ?? 1)
+  const [distChartYPan, setDistChartYPan] = useState(saved?.distChartYPan ?? 0)
   const [exportFilename, setExportFilename] = useState(
     saved?.exportFilename ?? DEFAULT_EXPORT_FILENAME,
   )
@@ -385,6 +389,10 @@ function WorkspaceView({
       bankrollChartXZoom,
       bankrollChartXPan,
       bankrollChartYPan,
+      distChartXZoom,
+      distChartXPan,
+      distChartYZoom,
+      distChartYPan,
       targetsCollapsed,
       tableCollapsed: collapsedGroups,
     }
@@ -410,6 +418,10 @@ function WorkspaceView({
     bankrollChartXZoom,
     bankrollChartXPan,
     bankrollChartYPan,
+    distChartXZoom,
+    distChartXPan,
+    distChartYZoom,
+    distChartYPan,
     targetsCollapsed,
     collapsedGroups,
   ])
@@ -1030,6 +1042,14 @@ function WorkspaceView({
                   onGroupLock={setGroupLocked}
                   softLocked={softLockedGroups}
                   onGroupSoftLock={(id, locked) => patchGroup(id, { totalLocked: locked })}
+                  yZoom={distChartYZoom}
+                  onYZoom={setDistChartYZoom}
+                  yPan={distChartYPan}
+                  onYPan={setDistChartYPan}
+                  xZoom={distChartXZoom}
+                  onXZoom={setDistChartXZoom}
+                  xPan={distChartXPan}
+                  onXPan={setDistChartXPan}
                 />
               </section>
             )

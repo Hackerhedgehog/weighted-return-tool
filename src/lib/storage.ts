@@ -54,6 +54,11 @@ export interface Workspace {
   bankrollChartYPan?: number
   /** Optional — absent in workspaces saved before table groups could collapse. */
   tableCollapsed?: string[]
+  /** Optional — absent in workspaces saved before the distribution chart could be zoomed/panned. */
+  distChartXZoom?: number
+  distChartXPan?: number
+  distChartYZoom?: number
+  distChartYPan?: number
 }
 
 const isObject = (v: unknown): v is Record<string, unknown> =>
@@ -164,7 +169,11 @@ function isWorkspace(v: unknown): v is Workspace {
     (v.bankrollChartXPan === undefined || isFiniteNumber(v.bankrollChartXPan)) &&
     (v.bankrollChartYPan === undefined || isFiniteNumber(v.bankrollChartYPan)) &&
     (v.tableCollapsed === undefined ||
-      (Array.isArray(v.tableCollapsed) && v.tableCollapsed.every((s) => typeof s === 'string')))
+      (Array.isArray(v.tableCollapsed) && v.tableCollapsed.every((s) => typeof s === 'string'))) &&
+    (v.distChartXZoom === undefined || isFiniteNumber(v.distChartXZoom)) &&
+    (v.distChartXPan === undefined || isFiniteNumber(v.distChartXPan)) &&
+    (v.distChartYZoom === undefined || isFiniteNumber(v.distChartYZoom)) &&
+    (v.distChartYPan === undefined || isFiniteNumber(v.distChartYPan))
   )
 }
 

@@ -163,6 +163,17 @@ describe('BankrollChart pan and x-zoom', () => {
     expect(screen.getByRole('slider', { name: "Zoom the bankroll chart's x-axis" })).toBeDefined()
   })
 
+  it('zooms both axes together when scrolling on the plot itself', () => {
+    const onXZoom = vi.fn()
+    const onYZoom = vi.fn()
+    renderChart({ onXZoom, onYZoom })
+    fireEvent.wheel(document.querySelector('.sim-hit')!, { deltaY: -100 })
+    expect(onXZoom).toHaveBeenCalled()
+    expect(onYZoom).toHaveBeenCalled()
+    expect(onXZoom.mock.calls[0][0]).toBeLessThan(1)
+    expect(onYZoom.mock.calls[0][0]).toBeLessThan(1)
+  })
+
   it('keeps 0 visible however far the y-axis is panned', () => {
     // Zoomed tight (yZoom 0.2), then middle-drag far down — per
     // useMiddleDragPan's convention, dragging down raises the visible

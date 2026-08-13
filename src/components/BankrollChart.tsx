@@ -6,6 +6,7 @@ import { ChartXAxisZoom } from './ChartXAxisZoom'
 import { ChartYAxisZoom } from './ChartYAxisZoom'
 import { fmtCompact, niceCeil, SIM_HEIGHT, useContainerWidth } from './chartUtils'
 import { useChartAxes } from './useChartAxes'
+import { useCombinedWheelZoom } from './useCombinedWheelZoom'
 import { useMiddleDragPan } from './useMiddleDragPan'
 import { fmtCredits, fmtWeight } from '../lib/format'
 import type { BankrollPoint, BankrollState } from '../lib/bankroll'
@@ -110,6 +111,11 @@ export function BankrollChart({
     plotW,
     plotH,
   })
+
+  // Scrolling on the plot itself zooms both axes together; scrolling on
+  // either axis's own margin (ChartXAxisZoom/ChartYAxisZoom below) still
+  // zooms just that one axis.
+  const wheelZoomRef = useCombinedWheelZoom<SVGRectElement>({ xZoom, onXZoom, yZoom, onYZoom })
 
   const x = (spins: number) =>
     MARGIN.left + ((spins - viewX.min) / Math.max(1e-9, viewX.max - viewX.min)) * plotW
@@ -249,6 +255,7 @@ export function BankrollChart({
         </text>
 
         <rect
+          ref={wheelZoomRef}
           className="sim-hit"
           x={MARGIN.left}
           y={MARGIN.top}

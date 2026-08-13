@@ -157,6 +157,15 @@ describe('SimChart pan and x-zoom', () => {
     expect(screen.getByRole('button', { name: /reset/i })).toBeDefined()
   })
 
+  it('zooms both axes together when scrolling on the plot itself', () => {
+    const { onXZoom, onYZoom } = renderSim()
+    fireEvent.wheel(document.querySelector('.sim-hit')!, { deltaY: -100 })
+    expect(onXZoom).toHaveBeenCalled()
+    expect(onYZoom).toHaveBeenCalled()
+    expect(onXZoom.mock.calls[0][0]).toBeLessThan(1)
+    expect(onYZoom.mock.calls[0][0]).toBeLessThan(1)
+  })
+
   it('reset view fits the true max, including a spike above the p95 ceiling', () => {
     const { onYZoom } = (() => {
       const onHeight = vi.fn()

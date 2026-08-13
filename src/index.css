@@ -990,6 +990,18 @@ input.gcell.editing {
   filter: brightness(0.82);
 }
 
+/* shift+click selection — dashed outline, marching-ant style, so a selected
+   bar reads clearly against any group color it's filled with */
+.bar.selected {
+  stroke: var(--accent);
+  stroke-width: 2;
+  stroke-dasharray: 4 3;
+}
+
+.bar-hit.selected {
+  cursor: grab;
+}
+
 /* ---------- group handles (right edge of the distribution chart) ---------- */
 
 .group-handle {
@@ -1000,6 +1012,15 @@ input.gcell.editing {
 .group-handle.disabled {
   cursor: not-allowed;
   opacity: 0.55;
+}
+
+.group-handle.selected .handle-chip {
+  stroke: var(--accent);
+  stroke-width: 2;
+}
+
+.group-handle.selected .handle-name {
+  fill: var(--accent);
 }
 
 .handle-connector {

@@ -36,6 +36,10 @@ function renderChart(
   const onHeight = vi.fn()
   const onGroupLock = vi.fn()
   const onGroupSoftLock = vi.fn()
+  const onYZoom = vi.fn()
+  const onYPan = vi.fn()
+  const onXZoom = vi.fn()
+  const onXPan = vi.fn()
   const total = rows.reduce((a, r) => a + r.weight, 0)
   render(
     <DistributionChart
@@ -53,10 +57,32 @@ function renderChart(
       onGroupLock={onGroupLock}
       softLocked={new Set()}
       onGroupSoftLock={onGroupSoftLock}
+      yZoom={1}
+      onYZoom={onYZoom}
+      yPan={0}
+      onYPan={onYPan}
+      xZoom={1}
+      onXZoom={onXZoom}
+      xPan={0}
+      onXPan={onXPan}
       {...extra}
     />,
   )
-  return { onChart, onPreview, onCommit, onBlocked, onHeight, onGroupLock, onGroupSoftLock, rows, total }
+  return {
+    onChart,
+    onPreview,
+    onCommit,
+    onBlocked,
+    onHeight,
+    onGroupLock,
+    onGroupSoftLock,
+    onYZoom,
+    onYPan,
+    onXZoom,
+    onXPan,
+    rows,
+    total,
+  }
 }
 
 const lastRows = (fn: ReturnType<typeof vi.fn>): BucketRow[] =>
@@ -94,7 +120,8 @@ describe('DistributionChart grouping', () => {
 
   it('renders one handle per group, in group order', () => {
     renderChart({ metric: 'weights' })
-    const handles = screen.getAllByRole('slider')
+    // Excludes the axis-zoom sliders, which are also role="slider".
+    const handles = screen.getAllByRole('slider', { name: /group$/ })
     expect(handles.map((h) => h.getAttribute('aria-label'))).toEqual([
       'wins group',
       'bonus group',
@@ -546,6 +573,99 @@ describe('DistributionChart value entry', () => {
       clientY: 100,
     })
     expect(screen.queryByRole('dialog')).toBeNull()
+  })
+})
+
+describe('DistributionChart zoom and pan', () => {
+  it('renders x and y axis zoom handles', () => {
+    renderChart({ metric: 'weights' })
+    expect(screen.getByRole('slider', { name: "Zoom the distribution chart's y-axis" })).toBeDefined()
+    expect(screen.getByRole('slider', { name: "Zoom the distribution chart's x-axis" })).toBeDefined()
+  })
+
+  it('renders a reset view button', () => {
+    renderChart({ metric: 'weights' })
+    expect(screen.getByRole('button', { name: /reset/i })).toBeDefined()
+  })
+
+  it('zooms both axes together when scrolling the plot itself', () => {
+    const { onXZoom, onYZoom } = renderChart({ metric: 'weights' })
+    fireEvent.wheel(document.querySelector('.dist-plot-bg')!, { deltaY: -100 })
+    expect(onXZoom).toHaveBeenCalled()
+    expect(onYZoom).toHaveBeenCalled()
+    expect(onXZoom.mock.calls[0][0]).toBeLessThan(1)
+    expect(onYZoom.mock.calls[0][0]).toBeLessThan(1)
+  })
+
+  it('pans both axes on a middle-button drag once zoomed in', () => {
+    const { onXPan, onYPan } = renderChart({ metric: 'weights' }, baseRows(), 340, 1, {
+      xZoom: 0.5,
+      yZoom: 0.5,
+    })
+    const bg = document.querySelector('.dist-plot-bg')!
+    fireEvent.pointerDown(bg, { pointerId: 1, button: 1, clientX: 0, clientY: 0 })
+    fireEvent.pointerMove(bg, { pointerId: 1, clientX: 50, clientY: 50 })
+    expect(onXPan).toHaveBeenCalled()
+    expect(onYPan).toHaveBeenCalled()
+  })
+})
+
+describe('DistributionChart multi-select', () => {
+  it('toggles selection on shift+click', () => {
+    renderChart({ metric: 'weights' })
+    const hit = document.querySelectorAll('.bar-hit')[1]
+    fireEvent.pointerDown(hit, { pointerId: 1, button: 0, shiftKey: true, clientY: 200 })
+    expect(hit.classList.contains('selected')).toBe(true)
+    fireEvent.pointerDown(hit, { pointerId: 1, button: 0, shiftKey: true, clientY: 200 })
+    expect(hit.classList.contains('selected')).toBe(false)
+  })
+
+  it('does not start a drag on a shift+click', () => {
+    const { onPreview } = renderChart({ metric: 'weights' })
+    const hit = document.querySelectorAll('.bar-hit')[1]
+    fireEvent.pointerDown(hit, { pointerId: 1, button: 0, shiftKey: true, clientY: 200 })
+    fireEvent.pointerMove(hit, { pointerId: 1, clientY: 100 })
+    expect(onPreview).not.toHaveBeenCalled()
+  })
+
+  it('moves every selected bar by the same absolute delta when one of them is dragged', () => {
+    const { onPreview } = renderChart({ metric: 'weights', relative: false })
+    const hits = document.querySelectorAll('.bar-hit')
+
+    fireEvent.pointerDown(hits[1], { pointerId: 1, button: 0, shiftKey: true, clientY: 200 })
+    fireEvent.pointerDown(hits[2], { pointerId: 1, button: 0, shiftKey: true, clientY: 200 })
+
+    fireEvent.pointerDown(hits[1], { pointerId: 1, clientY: 200 })
+    fireEvent.pointerMove(hits[1], { pointerId: 1, clientY: 100 })
+
+    const preview = lastRows(onPreview)
+    const deltaB = preview[1].weight - 300_000
+    const deltaC = preview[2].weight - 150_000
+    expect(deltaB).toBeGreaterThan(0)
+    expect(deltaC).toBeCloseTo(deltaB, 5)
+    // bars outside the selection hold still — relative drag is off.
+    expect(preview[0].weight).toBe(500_000)
+    expect(preview[3].weight).toBe(50_000)
+  })
+
+  it('clears the selection on a plain click on empty plot space', () => {
+    renderChart({ metric: 'weights' })
+    const hit = document.querySelectorAll('.bar-hit')[1]
+    fireEvent.pointerDown(hit, { pointerId: 1, button: 0, shiftKey: true, clientY: 200 })
+    expect(hit.classList.contains('selected')).toBe(true)
+
+    fireEvent.pointerDown(document.querySelector('.dist-plot-bg')!, { pointerId: 2, button: 0 })
+    expect(hit.classList.contains('selected')).toBe(false)
+  })
+
+  it('clears the selection on a click outside the chart', () => {
+    renderChart({ metric: 'weights' })
+    const hit = document.querySelectorAll('.bar-hit')[1]
+    fireEvent.pointerDown(hit, { pointerId: 1, button: 0, shiftKey: true, clientY: 200 })
+    expect(hit.classList.contains('selected')).toBe(true)
+
+    fireEvent.pointerDown(document.body, { pointerId: 2, button: 0 })
+    expect(hit.classList.contains('selected')).toBe(false)
   })
 })
 

@@ -1,5 +1,5 @@
 import { useEffect, useMemo, useRef, useState } from 'react'
-import type { BucketRow, ChartSettings, WeightStep } from '../lib/types'
+import type { BucketRow, ChartSettings, GroupDef, WeightStep } from '../lib/types'
 import type { Grouping } from '../lib/groups'
 import { buildBars, type ChartBar, type Segment } from '../lib/bars'
 import { scaleSubset, setSubsetTotal } from '../lib/interact'
@@ -7,8 +7,14 @@ import { fmtPayout, fmtPct, fmtRtp, fmtWeight } from '../lib/format'
 import { ChartReadout, type ReadoutStat, type ReadoutTitle } from './ChartReadout'
 import { ChartValueEntry, type ValueEntryTarget } from './ChartValueEntry'
 import { ChartResizeGrip } from './ChartResizeGrip'
+import { ChartScrollbar } from './ChartScrollbar'
+import { ChartXAxisZoom } from './ChartXAxisZoom'
+import { ChartYAxisZoom } from './ChartYAxisZoom'
 import { GroupChips } from './GroupChips'
 import { DIST_HEIGHT, linearBarWidth, logBarWidth, niceCeil, useContainerWidth } from './chartUtils'
+import { useChartAxes } from './useChartAxes'
+import { useCombinedWheelZoom } from './useCombinedWheelZoom'
+import { useMiddleDragPan } from './useMiddleDragPan'
 
 /**
  * The distribution chart is now a control surface as well as a picture:
@@ -30,13 +36,27 @@ import { DIST_HEIGHT, linearBarWidth, logBarWidth, niceCeil, useContainerWidth }
  *  - right-clicking a bar or a handle opens `ChartValueEntry`, a popover for
  *    typing an exact weight or chance. It commits through the same
  *    `scaleSubset` / `setSubsetTotal` path a drag commits through, so the two
- *    ways of setting a value can never disagree.
+ *    ways of setting a value can never disagree;
+ *  - shift+left-click toggles a bar or handle into a selection (a dashed
+ *    outline marks a selected bar, a highlighted chip marks a selected
+ *    handle); dragging any selected item then moves every selected item by
+ *    the same absolute amount in the current metric, each keeping its own
+ *    value, just shifted by the same delta. A plain click elsewhere, or
+ *    outside the chart entirely, clears the selection.
  *
  * During a drag the pointer math and the rendered axis both use the scale
  * captured at pointer-down: recomputing the scale per move would rescale the
  * axis under the pointer and feed back into the drag. Previews stream
  * through onPreview; one onCommit fires at pointer-up (or from the popover's
  * Set) so undo sees a single step. Escape cancels a live drag.
+ *
+ * X and Y both support the same zoom/pan the simulation charts have — an
+ * axis-margin drag/scroll zooms just that axis, scrolling the plot itself
+ * zooms both together, middle-drag pans, and Reset View returns to the
+ * auto-fit. X's domain is the bar ladder itself (bar index, or log payout
+ * position when Log X is on); Y's domain is the current metric's value, with
+ * zero always kept in view on a linear axis the way BankrollChart keeps its
+ * zero line in view.
  */
 
 interface DistributionChartProps {
@@ -58,6 +78,16 @@ interface DistributionChartProps {
   /** Group ids whose total weight is soft-locked (GroupDef.totalLocked). */
   softLocked: ReadonlySet<string>
   onGroupSoftLock: (id: string, locked: boolean) => void
+  /** Multiplies the auto-fit ceiling; 1 is auto, <1 zooms in, >1 zooms out. */
+  yZoom: number
+  onYZoom: (z: number) => void
+  /** Fraction of the auto-fit ceiling the view is centered away from default; see chartView.ts. */
+  yPan: number
+  onYPan: (p: number) => void
+  xZoom: number
+  onXZoom: (z: number) => void
+  xPan: number
+  onXPan: (p: number) => void
 }
 
 interface Scale {
@@ -66,12 +96,19 @@ interface Scale {
   ticks: { frac: number; label: string }[]
 }
 
+/** One selected or dragged item, in the shape weightsForValue needs. */
+interface DragItem {
+  uids: string[]
+  value: number
+}
+
 interface DragState {
   baseRows: BucketRow[]
   baseTotal: number
-  uids: string[]
+  /** The dragged item first, any other selected items after it. */
+  items: DragItem[]
   scale: Scale
-  /** Pointer y at press, and the subset's own position on the frozen axis. */
+  /** Pointer y at press, and the anchor item's own position on the frozen axis. */
   startY: number
   startFrac: number
   moved: boolean
@@ -85,32 +122,28 @@ const SEGMENT_GAP = 2
 
 const clamp = (v: number, lo: number, hi: number) => Math.min(Math.max(v, lo), hi)
 
-function buildScale(values: number[], logY: boolean, label: (v: number) => string): Scale {
-  const positive = values.filter((v) => v > 0)
-  const maxVal = positive.length > 0 ? Math.max(...positive) : 1
-
-  if (logY) {
-    const minVal = positive.length > 0 ? Math.min(...positive) : 1e-6
-    const maxE = Math.ceil(Math.log10(maxVal))
-    const minE = Math.min(Math.floor(Math.log10(minVal)), maxE - 1)
-    const span = maxE - minE + 0.35
-    const ticks: { frac: number; label: string }[] = []
-    for (let e = minE; e <= maxE; e++) {
-      ticks.push({ frac: (e - minE + 0.35) / span, label: label(Math.pow(10, e)) })
-    }
-    return {
-      frac: (v) => (v <= 0 ? 0 : clamp((Math.log10(v) - minE + 0.35) / span, 0.015, 1)),
-      // Below the axis floor there is nothing to point at but zero.
-      invert: (f) => (f <= 0.02 ? 0 : Math.pow(10, f * span + minE - 0.35)),
-      ticks,
-    }
-  }
-
-  const niceMax = niceCeil(maxVal)
+/** A scale over a plain linear window `[viewMin, viewMax]` — used for the linear metric axis. */
+function buildLinearScale(viewMin: number, viewMax: number, label: (v: number) => string): Scale {
+  const span = Math.max(1e-9, viewMax - viewMin)
   return {
-    frac: (v) => (niceMax > 0 ? clamp(v / niceMax, 0, 1) : 0),
-    invert: (f) => Math.max(0, f) * niceMax,
-    ticks: [0, 0.25, 0.5, 0.75, 1].map((t) => ({ frac: t, label: label(t * niceMax) })),
+    frac: (v) => clamp((v - viewMin) / span, 0, 1),
+    invert: (f) => viewMin + Math.max(0, f) * span,
+    ticks: [0, 0.25, 0.5, 0.75, 1].map((t) => ({ frac: t, label: label(viewMin + t * span) })),
+  }
+}
+
+/** A scale over a window of decades `[uLo, uHi]` (both log10 exponents) — used for the log metric axis. */
+function buildLogScale(uLo: number, uHi: number, label: (v: number) => string): Scale {
+  const span = Math.max(1e-9, uHi - uLo)
+  const ticks: { frac: number; label: string }[] = []
+  for (let e = Math.ceil(uLo); e <= Math.floor(uHi); e++) {
+    ticks.push({ frac: (e - uLo) / span, label: label(Math.pow(10, e)) })
+  }
+  return {
+    frac: (v) => (v <= 0 ? 0 : clamp((Math.log10(v) - uLo) / span, 0.015, 1)),
+    // Below the axis floor there is nothing to point at but zero.
+    invert: (f) => (f <= 0.02 ? 0 : Math.pow(10, uLo + f * span)),
+    ticks,
   }
 }
 
@@ -148,6 +181,14 @@ export function DistributionChart({
   onGroupLock,
   softLocked,
   onGroupSoftLock,
+  yZoom,
+  onYZoom,
+  yPan,
+  onYPan,
+  xZoom,
+  onXZoom,
+  xPan,
+  onXPan,
 }: DistributionChartProps) {
   const [containerRef, width] = useContainerWidth()
   const [hover, setHover] = useState<number | null>(null)
@@ -163,9 +204,20 @@ export function DistributionChart({
   const [entry, setEntry] = useState<
     { target: ValueEntryTarget; x: number; y: number; containerHeight: number } | null
   >(null)
+  /** Bars/handles toggled on with shift+click; a drag on any of them moves them all. */
+  const [selected, setSelected] = useState<Set<string>>(() => new Set())
 
   const { metric, logY, logX, aggregate, relative, groupBars } = chart
   const set = (patch: Partial<ChartSettings>) => onChart({ ...chart, ...patch })
+
+  const clearSelection = () => setSelected((prev) => (prev.size === 0 ? prev : new Set()))
+  const toggleSelected = (key: string) =>
+    setSelected((prev) => {
+      const next = new Set(prev)
+      if (next.has(key)) next.delete(key)
+      else next.add(key)
+      return next
+    })
 
   useEffect(() => {
     const onKey = (e: KeyboardEvent) => {
@@ -178,6 +230,21 @@ export function DistributionChart({
     window.addEventListener('keydown', onKey)
     return () => window.removeEventListener('keydown', onKey)
   }, [onPreview])
+
+  // "Left clicking outside of the chart" clears the selection, wherever
+  // outside the chart that click lands — not just clicks the plot itself
+  // catches. A plain click on the plot's own empty space is handled by the
+  // background rect below; this is the wider net.
+  useEffect(() => {
+    const onPointerDownWindow = (e: PointerEvent) => {
+      if (e.button !== 0) return
+      const el = containerRef.current
+      if (el !== null && !el.contains(e.target as Node)) clearSelection()
+    }
+    window.addEventListener('pointerdown', onPointerDownWindow)
+    return () => window.removeEventListener('pointerdown', onPointerDownWindow)
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [])
 
   const { bars, droppedZero } = useMemo(
     () => buildBars(rows, grouping, totalWeight, { aggregate, groupBars, logX }),
@@ -219,41 +286,122 @@ export function DistributionChart({
     })
   }, [rows, grouping, totalWeight, metric])
 
-  const liveScale = useMemo(() => {
-    const label = (v: number) => (metric === 'weights' ? fmtWeight(v) : fmtPct(v, 3))
-    return buildScale(
-      [...bars.map(valueOf), ...groupStats.map((s) => s.value)],
-      logY,
-      label,
-    )
+  /**
+   * The un-zoomed baseline for the Y axis: a nice linear ceiling, or (Log Y)
+   * the decade span the data needs. `useChartAxes` multiplies/pans around
+   * this exactly like SimChart/BankrollChart multiply/pan around autoYMax —
+   * zoom=1, pan=0 reproduces it exactly, so the chart's default view is
+   * unchanged from before zoom/pan existed.
+   */
+  const yBaseline = useMemo(() => {
+    const values = [...bars.map(valueOf), ...groupStats.map((s) => s.value)]
+    const positive = values.filter((v) => v > 0)
+    const maxVal = positive.length > 0 ? Math.max(...positive) : 1
+    if (logY) {
+      const minVal = positive.length > 0 ? Math.min(...positive) : 1e-6
+      const maxE = Math.ceil(Math.log10(maxVal))
+      const minE = Math.min(Math.floor(Math.log10(minVal)), maxE - 1)
+      const span = maxE - minE + 0.35
+      return { kind: 'log' as const, span, baseMin: minE - 0.35 }
+    }
+    return { kind: 'linear' as const, niceMax: niceCeil(maxVal) }
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [bars, groupStats, logY, metric])
+
+  const n = bars.length
+
+  /** Natural-log payout of every bar, for Log X placement — computed once regardless of logX. */
+  const logsArr = useMemo(() => bars.map((b) => Math.log(b.payout)), [bars])
+
+  /**
+   * The un-zoomed baseline for the X axis: bar count on a linear ladder, or
+   * (Log X) the natural-log payout span the bars occupy. Shifted to start at
+   * 0 either way, so `useChartAxes`'s zero-based extent math applies exactly
+   * as it does to SimChart/BankrollChart's spins domain.
+   */
+  const xBaseline = useMemo(() => {
+    if (!logX) return { lo: 0, extent: Math.max(1, n) }
+    const lo = logsArr.length > 0 ? Math.min(...logsArr) : 0
+    const hi = logsArr.length > 0 ? Math.max(...logsArr) : 0
+    return { lo, extent: Math.max(1e-9, hi - lo) }
+  }, [logX, n, logsArr])
+
+  const yAutoMax = yBaseline.kind === 'log' ? yBaseline.span : yBaseline.niceMax
+
+  const axes = useChartAxes({
+    xExtent: xBaseline.extent,
+    xZoom,
+    onXZoom,
+    xPan,
+    onXPan,
+    autoYMax: yAutoMax,
+    trueYMax: yAutoMax,
+    yZoom,
+    onYZoom,
+    yPan,
+    onYPan,
+    // Zero is always somewhere on a linear metric axis (weight/chance can't
+    // go negative) — keep it in view like BankrollChart does. A log axis has
+    // no zero to keep visible; it just pans/zooms across decades.
+    keepZeroVisible: yBaseline.kind === 'linear',
+  })
+
+  const liveScale = useMemo(() => {
+    const label = (v: number) => (metric === 'weights' ? fmtWeight(v) : fmtPct(v, 3))
+    if (yBaseline.kind === 'log') {
+      return buildLogScale(yBaseline.baseMin + axes.viewY.min, yBaseline.baseMin + axes.viewY.max, label)
+    }
+    return buildLinearScale(axes.viewY.min, axes.viewY.max, label)
+  }, [yBaseline, axes.viewY.min, axes.viewY.max, metric])
 
   // While dragging, both the pointer math and the picture use the scale
   // captured at pointer-down.
   const scale = dragScale ?? liveScale
   const dragging = dragScale !== null
 
-  const n = bars.length
-  const step = n > 0 ? plotW / n : plotW
+  const yOf = (v: number) => MARGIN.top + plotH * (1 - scale.frac(v))
 
-  /** Bar centres: evenly spaced, or placed by log payout. */
-  const centres = useMemo(() => {
-    if (!logX) return bars.map((_, i) => MARGIN.left + i * step + step / 2)
-    const logs = bars.map((b) => Math.log(b.payout))
-    const lo = Math.min(...logs)
-    const hi = Math.max(...logs)
-    const spread = hi - lo || 1
-    return logs.map((l) => MARGIN.left + ((l - lo) / spread) * plotW)
-  }, [bars, logX, step, plotW])
+  /** Bar centres: evenly spaced across the visible index window, or placed by log payout. */
+  const domainValue = (i: number) => (logX ? logsArr[i] - xBaseline.lo : i + 0.5)
+  const xSpan = Math.max(1e-9, axes.viewX.max - axes.viewX.min)
+  const xOf = (dv: number) => MARGIN.left + ((dv - axes.viewX.min) / xSpan) * plotW
+
+  const centres = useMemo(
+    () => bars.map((_, i) => xOf(domainValue(i))),
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+    [bars, logX, axes.viewX.min, axes.viewX.max, plotW, xBaseline, logsArr],
+  )
+
+  const pixelsPerUnit = plotW / xSpan
 
   const barW = useMemo(() => {
-    if (!logX) return linearBarWidth(step)
+    if (!logX) return linearBarWidth(pixelsPerUnit)
     let gap = plotW
     for (let i = 1; i < centres.length; i++) gap = Math.min(gap, centres[i] - centres[i - 1])
     // A single bar leaves no gap to measure; logBarWidth falls back for 0.
     return logBarWidth(gap === plotW ? 0 : gap)
-  }, [logX, step, centres, plotW])
+  }, [logX, pixelsPerUnit, centres, plotW])
+
+  /** Bars fully outside the visible window are skipped, not just clipped — otherwise their hit-rects would still catch clicks meant for the margins. */
+  const inView = (i: number) => centres[i] + barW / 2 >= MARGIN.left && centres[i] - barW / 2 <= plotRight
+
+  // ---- pan / zoom ----
+
+  const middleDragPan = useMiddleDragPan({
+    xZoom,
+    xPan: axes.xPan,
+    onXPan: axes.setXPan,
+    yZoom,
+    yPan: axes.yPan,
+    onYPan: axes.setYPan,
+    plotW,
+    plotH,
+  })
+
+  // Scrolling on the plot itself zooms both axes together; scrolling on
+  // either axis's own margin (ChartXAxisZoom/ChartYAxisZoom below) still
+  // zooms just that one axis — those are separate elements outside this ref.
+  const wheelZoomRef = useCombinedWheelZoom<SVGGElement>({ xZoom, onXZoom, yZoom, onYZoom })
 
   // ---- dragging ----
 
@@ -322,24 +470,46 @@ export function DistributionChart({
     return setSubsetTotal(eff, uids, value, weightStep)
   }
 
+  const barKey = (b: ChartBar) => `bar:${b.uids.join('|')}`
+  const handleKey = (g: GroupDef) => `handle:${g.id}`
+
+  /** Every selectable item's current uids/value/disabled state, keyed the same way selection is. */
+  const itemsByKey = useMemo(() => {
+    const m = new Map<string, { uids: string[]; value: number; disabled: boolean }>()
+    for (const b of bars) m.set(barKey(b), { uids: b.uids, value: valueOf(b), disabled: b.allLocked })
+    for (const s of groupStats) {
+      const soft = softLocked.has(s.group.id)
+      m.set(handleKey(s.group), { uids: s.group.uids, value: s.value, disabled: s.allLocked || soft })
+    }
+    return m
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [bars, groupStats, metric, softLocked])
+
   /**
-   * `currentValue` is the subset's value in the chart's current metric. It is
+   * `currentValue` is the anchor's value in the chart's current metric. It is
    * what makes the drag relative: the value moves by the pointer's delta from
    * where it started, so pressing on a bar never changes it and a bar can be
-   * grabbed anywhere along its length.
+   * grabbed anywhere along its length. `extraKeys` are the rest of a live
+   * multi-selection — every other selected item moves by the same delta the
+   * anchor does, each keeping its own starting value.
    */
   const beginDrag = (
     e: React.PointerEvent,
     uids: string[],
     disabled: boolean,
     currentValue: number,
+    extraKeys: string[] = [],
   ) => {
     if (disabled || e.button !== 0) return
     ;(e.currentTarget as Element).setPointerCapture?.(e.pointerId)
+    const extraItems: DragItem[] = extraKeys
+      .map((k) => itemsByKey.get(k))
+      .filter((it): it is { uids: string[]; value: number; disabled: boolean } => it !== undefined && !it.disabled)
+      .map((it) => ({ uids: it.uids, value: it.value }))
     dragRef.current = {
       baseRows: rows,
       baseTotal: rows.reduce((a, r) => a + Math.max(0, Math.round(r.weight)), 0),
-      uids,
+      items: [{ uids, value: currentValue }, ...extraItems],
       scale: liveScale,
       startY: e.clientY,
       startFrac: liveScale.frac(currentValue),
@@ -357,19 +527,31 @@ export function DistributionChart({
     // already showing: a constant multiplier per pixel on a log axis, a
     // constant amount on a linear one.
     const f = clamp(d.startFrac + (d.startY - e.clientY) / plotH, 0, 1)
-    const value = d.scale.invert(f)
-    const weights = weightsForValue(d.baseRows, d.uids, d.baseTotal, value)
+    const anchorNewValue = d.scale.invert(f)
+    // Every selected item (the anchor included) shifts by the same delta the
+    // anchor moved, so each keeps whatever difference it started with.
+    const delta = anchorNewValue - d.items[0].value
 
-    if (weights === null) {
-      // Off-step table: the drag has nowhere legal to move. Say so once.
-      if (!d.blockedNotified) {
-        d.blockedNotified = true
-        onBlocked('off-step')
+    let next = d.baseRows
+    let anyBlocked = false
+    for (const item of d.items) {
+      const weights = weightsForValue(next, item.uids, d.baseTotal, item.value + delta)
+      if (weights === null) {
+        anyBlocked = true
+        continue
       }
-      return
+      next = next.map((r, i) => (r.weight === weights[i] ? r : { ...r, weight: weights[i] }))
     }
 
-    const next = d.baseRows.map((r, i) => (r.weight === weights[i] ? r : { ...r, weight: weights[i] }))
+    if (anyBlocked && !d.blockedNotified) {
+      d.blockedNotified = true
+      onBlocked('off-step')
+    }
+    // A lone dragged item that cannot move leaves nothing to preview — the
+    // same behaviour a single-item drag always had. A multi-selection
+    // previews whatever subset of it could move.
+    if (anyBlocked && d.items.length === 1) return
+
     d.moved = true
     d.lastRows = next
     onPreview(next)
@@ -432,6 +614,30 @@ export function DistributionChart({
       y: e.clientY - (rect?.top ?? 0),
       containerHeight: rect?.height ?? 0,
     })
+  }
+
+  /** Plain click (no shift) on a bar/handle: drag the whole selection if this item is in it, else start a fresh single drag and drop the old selection. */
+  const onItemPointerDown = (
+    e: React.PointerEvent,
+    key: string,
+    uids: string[],
+    disabled: boolean,
+    value: number,
+  ) => {
+    if (e.button !== 0) return
+    if (e.shiftKey) {
+      if (!disabled) {
+        e.preventDefault()
+        toggleSelected(key)
+      }
+      return
+    }
+    if (!disabled && selected.has(key) && selected.size > 0) {
+      beginDrag(e, uids, false, value, [...selected].filter((k) => k !== key))
+      return
+    }
+    if (selected.size > 0) clearSelection()
+    beginDrag(e, uids, disabled, value)
   }
 
   // ---- handle layout ----
@@ -534,7 +740,12 @@ export function DistributionChart({
             <span>Relative drag</span>
           </label>
         )}
-        <span className="panel-hint">drag a bar or a group handle to reshape</span>
+        <button type="button" className="btn chart-reset" onClick={axes.resetView} title="Zoom out to fit all data, centered">
+          Reset view
+        </button>
+        <span className="panel-hint">
+          drag a bar or a group handle to reshape · shift+click to select several
+        </span>
       </div>
 
       <GroupChips
@@ -564,83 +775,260 @@ export function DistributionChart({
                 )
               })}
 
-              <line
-                className="axis-line"
-                x1={MARGIN.left}
-                x2={plotRight}
-                y1={MARGIN.top + plotH}
-                y2={MARGIN.top + plotH}
-              />
+              <line className="axis-line" x1={MARGIN.left} x2={plotRight} y1={yOf(0)} y2={yOf(0)} />
 
-              {bars.map((b, i) => {
-                const v = valueOf(b)
-                const h = plotH * scale.frac(v)
-                const x0 = centres[i] - barW / 2
-                const bottom = MARGIN.top + plotH
-                // v > 0 keeps at least a sliver, so tiny buckets stay visible
-                const height = Math.max(h, v > 0 ? 1.5 : 0)
+              {/* everything that reacts to pointer/wheel input over the plot, so a
+                  middle-drag or a plot-wheel started anywhere in here (including
+                  over a bar or handle) still reaches the pan/zoom handlers below */}
+              <g ref={wheelZoomRef} {...middleDragPan}>
+                {/* empty plot background — catches a plain click that lands on
+                    nothing, to clear the selection */}
+                <rect
+                  className="dist-plot-bg"
+                  x={MARGIN.left}
+                  y={MARGIN.top}
+                  width={Math.max(0, plotW)}
+                  height={Math.max(0, plotH)}
+                  fill="transparent"
+                  onPointerDown={(e) => {
+                    if (e.button === 0 && !e.shiftKey) clearSelection()
+                  }}
+                />
 
-                if (b.segments.length <= 1) {
+                {bars.map((b, i) => {
+                  if (!inView(i)) return null
+                  const v = valueOf(b)
+                  const x0 = centres[i] - barW / 2
+                  const y0 = yOf(0)
+                  const rawHeight = y0 - yOf(v)
+                  // v > 0 keeps at least a sliver, so tiny buckets stay visible
+                  const barHeight = Math.max(rawHeight, v > 0 ? 1.5 : 0)
+                  const selectedCls = selected.has(barKey(b)) ? 'selected' : ''
+
+                  if (b.segments.length <= 1) {
+                    return (
+                      <rect
+                        key={i}
+                        className={`bar ${hover === i ? 'hover' : ''} ${selectedCls}`}
+                        x={x0}
+                        y={y0 - barHeight}
+                        width={barW}
+                        height={barHeight}
+                        rx={1.5}
+                        style={{ fill: b.segments[0]?.color ?? 'var(--bar)' }}
+                      />
+                    )
+                  }
+
+                  // Stacked segments: the bar's height shows the (possibly log)
+                  // total; the interior split shows linear composition shares.
+                  const segValue = (s: Segment) => (metric === 'weights' ? s.weight : s.chance)
+                  const totalV = b.segments.reduce((a, s) => a + segValue(s), 0)
+                  const gaps = SEGMENT_GAP * (b.segments.length - 1)
+                  const avail = Math.max(0, barHeight - gaps)
+                  let yCursor = y0
+                  return (
+                    <g key={i}>
+                      {b.segments.map((s, k) => {
+                        const hk = totalV > 0 ? (segValue(s) / totalV) * avail : 0
+                        yCursor -= hk
+                        const rect = (
+                          <rect
+                            key={k}
+                            className={`bar ${hover === i ? 'hover' : ''} ${selectedCls}`}
+                            x={x0}
+                            y={yCursor}
+                            width={barW}
+                            height={Math.max(hk, 0)}
+                            rx={1.5}
+                            style={{ fill: s.color }}
+                          />
+                        )
+                        yCursor -= SEGMENT_GAP
+                        return rect
+                      })}
+                    </g>
+                  )
+                })}
+
+                {bars.map((b, i) =>
+                  // Group bars are the coarse landmarks of the view and there are
+                  // few of them, so they are never thinned out.
+                  inView(i) && (b.kind === 'group' || i % labelEvery === 0) ? (
+                    <text
+                      key={i}
+                      className="axis-label"
+                      x={centres[i]}
+                      y={height - MARGIN.bottom + 18}
+                      textAnchor="middle"
+                    >
+                      {b.kind === 'group' ? b.name : `×${fmtPayout(b.payout)}`}
+                    </text>
+                  ) : null,
+                )}
+
+                {/* group handles, right edge */}
+                {groupStats.map((s, gi) => {
+                  const yExact = handleYs.raw[gi]
+                  const yLabel = handleYs.spread[gi]
+                  // A soft lock pins exactly what the handle drags — the group
+                  // total — so the handle is inert while the bars stay live.
+                  const soft = softLocked.has(s.group.id)
+                  const pinned = s.allLocked || soft
+                  const key = handleKey(s.group)
+                  return (
+                    <g
+                      key={s.group.id}
+                      className={`group-handle ${pinned ? 'disabled' : ''} ${selected.has(key) ? 'selected' : ''}`}
+                      role="slider"
+                      aria-label={`${s.group.name} group`}
+                      aria-disabled={pinned || undefined}
+                      aria-valuemin={0}
+                      aria-valuemax={metric === 'weights' ? Math.round(totalWeight) : 100}
+                      aria-valuenow={
+                        metric === 'weights' ? Math.round(s.weight) : Math.round(s.chance * 1000) / 10
+                      }
+                      onPointerDown={(e) => onItemPointerDown(e, key, s.group.uids, pinned, s.value)}
+                      onPointerMove={moveDrag}
+                      onPointerUp={endDrag}
+                      onPointerCancel={endDrag}
+                      onContextMenu={(e) => openEntry(e, s.group.name, s.group.uids, s.value, pinned)}
+                    >
+                      <line
+                        className="handle-connector"
+                        x1={plotRight}
+                        y1={yExact}
+                        x2={plotRight + 10}
+                        y2={yLabel}
+                      />
+                      <rect
+                        className="handle-chip"
+                        x={plotRight + 10}
+                        y={yLabel - 11}
+                        width={8}
+                        height={22}
+                        rx={2}
+                        style={{ fill: s.group.color }}
+                      />
+                      <text className="handle-name" x={plotRight + 24} y={yLabel - 1}>
+                        {s.group.name} · {metric === 'weights' ? fmtWeight(s.weight) : fmtPct(s.chance, 2)}
+                      </text>
+                      <text className="handle-sub" x={plotRight + 24} y={yLabel + 11}>
+                        wv {fmtRtp(s.weightedValue)}
+                      </text>
+                      <rect
+                        className="handle-hit"
+                        x={plotRight + 6}
+                        y={yLabel - 15}
+                        width={MARGIN.right - 10}
+                        height={30}
+                        fill="transparent"
+                      />
+                      <g
+                        role="button"
+                        tabIndex={0}
+                        className={`handle-lock ${s.allLocked ? 'on' : ''} ${!s.allLocked && s.anyLocked ? 'partial' : ''}`}
+                        aria-label={`${s.allLocked ? 'Unlock' : 'Hard-lock'} the ${s.group.name} group`}
+                        // The padlock sits inside the handle's drag target, so
+                        // its press must not also start a drag, and its own
+                        // context menu must not also open the handle's popover.
+                        onPointerDown={(e) => e.stopPropagation()}
+                        onContextMenu={(e) => e.stopPropagation()}
+                        onClick={() => onGroupLock(s.group.id, !s.allLocked)}
+                        onKeyDown={(e) => {
+                          if (e.key === 'Enter') onGroupLock(s.group.id, !s.allLocked)
+                          else if (e.key === ' ') {
+                            e.preventDefault()
+                            onGroupLock(s.group.id, !s.allLocked)
+                          }
+                        }}
+                      >
+                        <title>
+                          {s.allLocked
+                            ? 'Unlock every bucket in this group'
+                            : 'Hard lock: freeze every bucket in this group'}
+                        </title>
+                        <rect
+                          x={plotRight + MARGIN.right - 26}
+                          y={yLabel - 10}
+                          width={20}
+                          height={20}
+                          rx={3}
+                          fill="transparent"
+                        />
+                        <text x={plotRight + MARGIN.right - 16} y={yLabel + 4} textAnchor="middle">
+                          {s.allLocked ? '🔒' : '🔓'}
+                        </text>
+                      </g>
+                      <g
+                        role="button"
+                        tabIndex={0}
+                        className={`handle-lock handle-soft ${soft ? 'on' : ''}`}
+                        aria-label={`${soft ? 'Release' : 'Soft-lock'} the ${s.group.name} group total`}
+                        onPointerDown={(e) => e.stopPropagation()}
+                        onContextMenu={(e) => e.stopPropagation()}
+                        onClick={() => onGroupSoftLock(s.group.id, !soft)}
+                        onKeyDown={(e) => {
+                          if (e.key === 'Enter') onGroupSoftLock(s.group.id, !soft)
+                          else if (e.key === ' ') {
+                            e.preventDefault()
+                            onGroupSoftLock(s.group.id, !soft)
+                          }
+                        }}
+                      >
+                        <title>
+                          {soft
+                            ? 'Release the group total — the handle drags again'
+                            : 'Soft lock: pin the group total, keep its buckets draggable against each other'}
+                        </title>
+                        <rect
+                          x={plotRight + MARGIN.right - 48}
+                          y={yLabel - 10}
+                          width={20}
+                          height={20}
+                          rx={3}
+                          fill="transparent"
+                        />
+                        <text
+                          className="handle-soft-glyph"
+                          x={plotRight + MARGIN.right - 38}
+                          y={yLabel + 4}
+                          textAnchor="middle"
+                        >
+                          Σ
+                        </text>
+                      </g>
+                    </g>
+                  )
+                })}
+
+                {/* hover + drag targets over the bars */}
+                {bars.map((b, i) => {
+                  if (!inView(i)) return null
+                  const key = barKey(b)
                   return (
                     <rect
                       key={i}
-                      className={`bar ${hover === i ? 'hover' : ''}`}
-                      x={x0}
-                      y={bottom - height}
-                      width={barW}
-                      height={height}
-                      rx={1.5}
-                      style={{ fill: b.segments[0]?.color ?? 'var(--bar)' }}
+                      className={`bar-hit ${selected.has(key) ? 'selected' : ''}`}
+                      x={centres[i] - Math.max(barW, logX ? barW : pixelsPerUnit) / 2}
+                      y={MARGIN.top}
+                      width={Math.max(barW, logX ? barW : pixelsPerUnit)}
+                      height={plotH}
+                      fill="transparent"
+                      style={{ cursor: b.allLocked ? 'default' : 'ns-resize' }}
+                      onMouseEnter={() => {
+                        if (!dragging) setHover(i)
+                      }}
+                      onMouseLeave={() => setHover(null)}
+                      onPointerDown={(e) => onItemPointerDown(e, key, b.uids, b.allLocked, valueOf(b))}
+                      onPointerMove={moveDrag}
+                      onPointerUp={endDrag}
+                      onPointerCancel={endDrag}
+                      onContextMenu={(e) => openEntry(e, barTitle(b), b.uids, valueOf(b), b.allLocked)}
                     />
                   )
-                }
-
-                // Stacked segments: the bar's height shows the (possibly log)
-                // total; the interior split shows linear composition shares.
-                const segValue = (s: Segment) => (metric === 'weights' ? s.weight : s.chance)
-                const totalV = b.segments.reduce((a, s) => a + segValue(s), 0)
-                const gaps = SEGMENT_GAP * (b.segments.length - 1)
-                const avail = Math.max(0, height - gaps)
-                let yCursor = bottom
-                return (
-                  <g key={i}>
-                    {b.segments.map((s, k) => {
-                      const hk = totalV > 0 ? (segValue(s) / totalV) * avail : 0
-                      yCursor -= hk
-                      const rect = (
-                        <rect
-                          key={k}
-                          className={`bar ${hover === i ? 'hover' : ''}`}
-                          x={x0}
-                          y={yCursor}
-                          width={barW}
-                          height={Math.max(hk, 0)}
-                          rx={1.5}
-                          style={{ fill: s.color }}
-                        />
-                      )
-                      yCursor -= SEGMENT_GAP
-                      return rect
-                    })}
-                  </g>
-                )
-              })}
-
-              {bars.map((b, i) =>
-                // Group bars are the coarse landmarks of the view and there are
-                // few of them, so they are never thinned out.
-                b.kind === 'group' || i % labelEvery === 0 ? (
-                  <text
-                    key={i}
-                    className="axis-label"
-                    x={centres[i]}
-                    y={height - MARGIN.bottom + 18}
-                    textAnchor="middle"
-                  >
-                    {b.kind === 'group' ? b.name : `×${fmtPayout(b.payout)}`}
-                  </text>
-                ) : null,
-              )}
+                })}
+              </g>
 
               <text
                 className="axis-title"
@@ -653,162 +1041,50 @@ export function DistributionChart({
                   ` — ${droppedZero} zero-payout bucket${droppedZero > 1 ? 's' : ''} omitted`}
               </text>
 
-              {/* group handles, right edge */}
-              {groupStats.map((s, gi) => {
-                const yExact = handleYs.raw[gi]
-                const yLabel = handleYs.spread[gi]
-                // A soft lock pins exactly what the handle drags — the group
-                // total — so the handle is inert while the bars stay live.
-                const soft = softLocked.has(s.group.id)
-                const pinned = s.allLocked || soft
-                return (
-                  <g
-                    key={s.group.id}
-                    className={`group-handle ${pinned ? 'disabled' : ''}`}
-                    role="slider"
-                    aria-label={`${s.group.name} group`}
-                    aria-disabled={pinned || undefined}
-                    aria-valuemin={0}
-                    aria-valuemax={metric === 'weights' ? Math.round(totalWeight) : 100}
-                    aria-valuenow={
-                      metric === 'weights' ? Math.round(s.weight) : Math.round(s.chance * 1000) / 10
-                    }
-                    onPointerDown={(e) => beginDrag(e, s.group.uids, pinned, s.value)}
-                    onPointerMove={moveDrag}
-                    onPointerUp={endDrag}
-                    onPointerCancel={endDrag}
-                    onContextMenu={(e) => openEntry(e, s.group.name, s.group.uids, s.value, pinned)}
-                  >
-                    <line
-                      className="handle-connector"
-                      x1={plotRight}
-                      y1={yExact}
-                      x2={plotRight + 10}
-                      y2={yLabel}
-                    />
-                    <rect
-                      className="handle-chip"
-                      x={plotRight + 10}
-                      y={yLabel - 11}
-                      width={8}
-                      height={22}
-                      rx={2}
-                      style={{ fill: s.group.color }}
-                    />
-                    <text className="handle-name" x={plotRight + 24} y={yLabel - 1}>
-                      {s.group.name} · {metric === 'weights' ? fmtWeight(s.weight) : fmtPct(s.chance, 2)}
-                    </text>
-                    <text className="handle-sub" x={plotRight + 24} y={yLabel + 11}>
-                      wv {fmtRtp(s.weightedValue)}
-                    </text>
-                    <rect
-                      className="handle-hit"
-                      x={plotRight + 6}
-                      y={yLabel - 15}
-                      width={MARGIN.right - 10}
-                      height={30}
-                      fill="transparent"
-                    />
-                    <g
-                      role="button"
-                      tabIndex={0}
-                      className={`handle-lock ${s.allLocked ? 'on' : ''} ${!s.allLocked && s.anyLocked ? 'partial' : ''}`}
-                      aria-label={`${s.allLocked ? 'Unlock' : 'Hard-lock'} the ${s.group.name} group`}
-                      // The padlock sits inside the handle's drag target, so
-                      // its press must not also start a drag, and its own
-                      // context menu must not also open the handle's popover.
-                      onPointerDown={(e) => e.stopPropagation()}
-                      onContextMenu={(e) => e.stopPropagation()}
-                      onClick={() => onGroupLock(s.group.id, !s.allLocked)}
-                      onKeyDown={(e) => {
-                        if (e.key === 'Enter') onGroupLock(s.group.id, !s.allLocked)
-                        else if (e.key === ' ') {
-                          e.preventDefault()
-                          onGroupLock(s.group.id, !s.allLocked)
-                        }
-                      }}
-                    >
-                      <title>
-                        {s.allLocked
-                          ? 'Unlock every bucket in this group'
-                          : 'Hard lock: freeze every bucket in this group'}
-                      </title>
-                      <rect
-                        x={plotRight + MARGIN.right - 26}
-                        y={yLabel - 10}
-                        width={20}
-                        height={20}
-                        rx={3}
-                        fill="transparent"
-                      />
-                      <text x={plotRight + MARGIN.right - 16} y={yLabel + 4} textAnchor="middle">
-                        {s.allLocked ? '🔒' : '🔓'}
-                      </text>
-                    </g>
-                    <g
-                      role="button"
-                      tabIndex={0}
-                      className={`handle-lock handle-soft ${soft ? 'on' : ''}`}
-                      aria-label={`${soft ? 'Release' : 'Soft-lock'} the ${s.group.name} group total`}
-                      onPointerDown={(e) => e.stopPropagation()}
-                      onContextMenu={(e) => e.stopPropagation()}
-                      onClick={() => onGroupSoftLock(s.group.id, !soft)}
-                      onKeyDown={(e) => {
-                        if (e.key === 'Enter') onGroupSoftLock(s.group.id, !soft)
-                        else if (e.key === ' ') {
-                          e.preventDefault()
-                          onGroupSoftLock(s.group.id, !soft)
-                        }
-                      }}
-                    >
-                      <title>
-                        {soft
-                          ? 'Release the group total — the handle drags again'
-                          : 'Soft lock: pin the group total, keep its buckets draggable against each other'}
-                      </title>
-                      <rect
-                        x={plotRight + MARGIN.right - 48}
-                        y={yLabel - 10}
-                        width={20}
-                        height={20}
-                        rx={3}
-                        fill="transparent"
-                      />
-                      <text
-                        className="handle-soft-glyph"
-                        x={plotRight + MARGIN.right - 38}
-                        y={yLabel + 4}
-                        textAnchor="middle"
-                      >
-                        Σ
-                      </text>
-                    </g>
-                  </g>
-                )
-              })}
-
-              {/* hover + drag targets over the bars */}
-              {bars.map((b, i) => (
-                <rect
-                  key={i}
-                  className="bar-hit"
-                  x={centres[i] - Math.max(barW, logX ? barW : step) / 2}
-                  y={MARGIN.top}
-                  width={Math.max(barW, logX ? barW : step)}
-                  height={plotH}
-                  fill="transparent"
-                  style={{ cursor: b.allLocked ? 'default' : 'ns-resize' }}
-                  onMouseEnter={() => {
-                    if (!dragging) setHover(i)
-                  }}
-                  onMouseLeave={() => setHover(null)}
-                  onPointerDown={(e) => beginDrag(e, b.uids, b.allLocked, valueOf(b))}
-                  onPointerMove={moveDrag}
-                  onPointerUp={endDrag}
-                  onPointerCancel={endDrag}
-                  onContextMenu={(e) => openEntry(e, barTitle(b), b.uids, valueOf(b), b.allLocked)}
+              <ChartYAxisZoom
+                zoom={yZoom}
+                onZoom={onYZoom}
+                x={0}
+                y={MARGIN.top}
+                width={MARGIN.left}
+                height={plotH}
+                label="Zoom the distribution chart's y-axis"
+              />
+              <ChartXAxisZoom
+                zoom={xZoom}
+                onZoom={onXZoom}
+                x={MARGIN.left}
+                y={height - MARGIN.bottom}
+                width={plotW}
+                height={MARGIN.bottom}
+                label="Zoom the distribution chart's x-axis"
+              />
+              {axes.xScrollbar !== null && (
+                <ChartScrollbar
+                  orientation="x"
+                  x={MARGIN.left}
+                  y={height - 24}
+                  width={plotW}
+                  height={6}
+                  size={axes.xScrollbar.size}
+                  start={axes.xScrollbar.start}
+                  onScroll={axes.xScrollbar.onScroll}
+                  label="Scroll the distribution chart horizontally"
                 />
-              ))}
+              )}
+              {axes.yScrollbar !== null && (
+                <ChartScrollbar
+                  orientation="y"
+                  x={plotRight + 2}
+                  y={MARGIN.top}
+                  width={6}
+                  height={plotH}
+                  size={axes.yScrollbar.size}
+                  start={axes.yScrollbar.start}
+                  onScroll={axes.yScrollbar.onScroll}
+                  label="Scroll the distribution chart vertically"
+                />
+              )}
             </svg>
 
             <ChartReadout
