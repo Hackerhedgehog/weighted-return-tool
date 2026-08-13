@@ -236,8 +236,9 @@ function WorkspaceView({
   const rowRef = useCallback((el: HTMLDivElement | null) => {
     if (el === null) return
     const check = () => {
-      const [table, chartPanel] = [...el.children] as HTMLElement[]
-      if (table === undefined || chartPanel === undefined) return
+      const table = el.querySelector<HTMLElement>('.panel.buckets')
+      const chartPanel = el.querySelector<HTMLElement>('.panel.chart')
+      if (table === null || chartPanel === null) return
       const stacked = table.offsetTop !== chartPanel.offsetTop
       if (el.classList.contains('stacked') !== stacked) el.classList.toggle('stacked', stacked)
 
