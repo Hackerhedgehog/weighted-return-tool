@@ -187,6 +187,7 @@ function WorkspaceView({
    */
   const [chartHeightAuto, setChartHeightAuto] = useState(saved?.chartHeightAuto ?? true)
   const [tableHeight, setTableHeight] = useState<number | null>(null)
+  const [stacked, setStacked] = useState(false)
   /** The chart panel's own chrome (everything besides its SVG) — see rowRef. */
   const [chartChrome, setChartChrome] = useState(0)
   const [simChartHeight, setSimChartHeight] = useState(() =>
@@ -239,8 +240,8 @@ function WorkspaceView({
       const table = el.querySelector<HTMLElement>('.panel.buckets')
       const chartPanel = el.querySelector<HTMLElement>('.panel.chart')
       if (table === null || chartPanel === null) return
-      const stacked = table.offsetTop !== chartPanel.offsetTop
-      if (el.classList.contains('stacked') !== stacked) el.classList.toggle('stacked', stacked)
+      const isStacked = table.offsetTop !== chartPanel.offsetTop
+      setStacked((prev) => (prev === isStacked ? prev : isStacked))
 
       // The chart defaults to the table's height. Safe against a feedback loop:
       // the two panels are independent flex items under align-items: flex-start,
@@ -1034,7 +1035,7 @@ function WorkspaceView({
             )
             return (
               <div
-                className={`content-row${chart.forceStack ? ' force-stack' : ''}${chart.swapped ? ' swapped' : ''}`}
+                className={`content-row${stacked ? ' stacked' : ''}${chart.forceStack ? ' force-stack' : ''}${chart.swapped ? ' swapped' : ''}`}
                 ref={rowRef}
               >
                 {chart.swapped ? (

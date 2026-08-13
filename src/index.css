@@ -604,6 +604,13 @@ body {
   margin: 0;
 }
 
+/* Distribution panel head has three children (h2 + two buttons); push both
+   buttons to the right edge instead of letting space-between spread them
+   across the middle. */
+.panel.chart .panel-head .btn:first-of-type {
+  margin-left: auto;
+}
+
 .panel-hint {
   font-size: 11px;
   color: var(--text-faint);
@@ -645,6 +652,13 @@ body {
 .content-row.stacked .grid-table {
   margin-left: auto;
   margin-right: auto;
+}
+
+/* Swapped puts the chart first, so when the row wraps it sits *above* the
+   table — sticky would then pin it over the scrolling table beneath it. */
+.content-row.swapped.stacked > .panel.chart,
+.content-row.swapped.force-stack > .panel.chart {
+  position: static;
 }
 
 .grid-table th,
