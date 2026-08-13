@@ -1,6 +1,15 @@
 /** How the latest feed asked to be applied to a running tool. */
 export type BridgeOpenAs = 'overwrite' | 'new-tab'
 
+/** One file of a feed; a batch switch delivers several, one tab each. */
+export interface BridgeFeed {
+  sourceFile: string
+  /** Default export filename, derived by the CLI from the source file. */
+  filename: string
+  game: string
+  tsv: string
+}
+
 export interface BridgeSession {
   /** Directory the data came from — also the only place a save can land. */
   dir: string
@@ -18,6 +27,25 @@ export interface BridgeSession {
   /** Bumped on every accepted /__bridge/switch; 1 for the launch feed. */
   seq: number
   openAs: BridgeOpenAs
+  /** Every file of the latest feed, in opening order. Never empty. */
+  feeds: BridgeFeed[]
+}
+
+function parseFeeds(data: Partial<BridgeSession>): BridgeFeed[] | null {
+  if (!Array.isArray(data.feeds)) return null
+  const feeds: BridgeFeed[] = []
+  for (const f of data.feeds as Partial<BridgeFeed>[]) {
+    if (f === null || typeof f !== 'object') return null
+    if (typeof f.tsv !== 'string' || typeof f.filename !== 'string') return null
+    if (typeof f.sourceFile !== 'string') return null
+    feeds.push({
+      sourceFile: f.sourceFile,
+      filename: f.filename,
+      game: typeof f.game === 'string' ? f.game : '',
+      tsv: f.tsv,
+    })
+  }
+  return feeds.length === 0 ? null : feeds
 }
 
 export type SaveOutcome =
@@ -51,6 +79,15 @@ export async function fetchSession(): Promise<BridgeSession | null> {
       sessionId: typeof data.sessionId === 'string' ? data.sessionId : '',
       seq: typeof data.seq === 'number' && Number.isFinite(data.seq) ? data.seq : 1,
       openAs: data.openAs === 'new-tab' ? 'new-tab' : 'overwrite',
+      // A bridge built before batches serves only the flat fields — one feed.
+      feeds: parseFeeds(data) ?? [
+        {
+          sourceFile: typeof data.sourceFile === 'string' ? data.sourceFile : '',
+          filename: data.filename,
+          game: typeof data.game === 'string' ? data.game : '',
+          tsv: data.tsv,
+        },
+      ],
     }
   } catch {
     return null

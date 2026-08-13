@@ -9,6 +9,16 @@ const SESSION = {
   tsv: '0\t1000.00\tjoker5-maxwin\n',
 }
 
+/** What the flat fields synthesize when the payload carries no feeds array. */
+const SELF_FEED = [
+  {
+    sourceFile: 'set-values-regular.tsv',
+    filename: 'ref-weights-regular.tsv',
+    game: 'joker-stacks-magic',
+    tsv: '0\t1000.00\tjoker5-maxwin\n',
+  },
+]
+
 function stubFetch(res: unknown): void {
   vi.stubGlobal('fetch', vi.fn().mockResolvedValue(res))
 }
@@ -34,12 +44,40 @@ describe('fetchSession', () => {
       sessionId: 'abc123',
       seq: 3,
       openAs: 'new-tab',
+      feeds: SELF_FEED,
     })
   })
 
   it('defaults the feed identity when an older bridge omits it', async () => {
     stubFetch(jsonRes(200, SESSION))
-    expect(await fetchSession()).toEqual({ ...SESSION, sessionId: '', seq: 1, openAs: 'overwrite' })
+    expect(await fetchSession()).toEqual({
+      ...SESSION,
+      sessionId: '',
+      seq: 1,
+      openAs: 'overwrite',
+      feeds: SELF_FEED,
+    })
+  })
+
+  it('keeps every feed of a batch payload, in order', async () => {
+    const feeds = [
+      ...SELF_FEED,
+      {
+        sourceFile: 'set-values-buy-bonus.tsv',
+        filename: 'ref-weights-buy-bonus.tsv',
+        game: 'joker-stacks-magic',
+        tsv: '1\t50.00\tbonus\n',
+      },
+    ]
+    stubFetch(jsonRes(200, { ...SESSION, sessionId: 'abc', seq: 2, openAs: 'new-tab', feeds }))
+    const s = await fetchSession()
+    expect(s?.feeds).toEqual(feeds)
+  })
+
+  it('falls back to the flat fields when the feeds array is malformed', async () => {
+    stubFetch(jsonRes(200, { ...SESSION, feeds: [{ nope: true }] }))
+    const s = await fetchSession()
+    expect(s?.feeds).toEqual(SELF_FEED)
   })
 
   it('returns null on 404', async () => {

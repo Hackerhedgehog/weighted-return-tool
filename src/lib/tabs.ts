@@ -61,6 +61,46 @@ export function withoutTab(state: TabsState, id: string): TabsState {
 
 export type LoadPlan = 'skip' | 'overwrite' | 'new-tab'
 
+/** One feed's destination: which tab record it loads into. */
+export interface FeedPlacement {
+  tabId: string
+  feedIndex: number
+}
+
+/**
+ * Where each feed of a batch lands. `overwrite` reuses the active tab for the
+ * first feed (the long-standing single-feed behaviour) and opens the rest in
+ * new tabs; `new-tab` opens every feed in a new tab. The returned state's
+ * active tab is the first placement, because feeds are applied head-first —
+ * only the active tab's workspace is mounted, so the app walks the queue by
+ * activating each placement in turn.
+ */
+export function placeFeeds(
+  state: TabsState,
+  feeds: Pick<BridgeSession, 'game' | 'sourceFile'>[],
+  plan: 'overwrite' | 'new-tab',
+): { state: TabsState; placements: FeedPlacement[] } {
+  let cur = state
+  const placements: FeedPlacement[] = []
+
+  feeds.forEach((feed, feedIndex) => {
+    const name = feedTabName(feed)
+    if (feedIndex === 0 && plan === 'overwrite') {
+      cur = {
+        ...cur,
+        tabs: cur.tabs.map((t) => (t.id === cur.active ? { ...t, name } : t)),
+      }
+      placements.push({ tabId: cur.active, feedIndex })
+      return
+    }
+    const added = withNewTab(cur, name)
+    cur = added.state
+    placements.push({ tabId: added.id, feedIndex })
+  })
+
+  return { state: { ...cur, active: placements[0].tabId }, placements }
+}
+
 /**
  * What to do with the session a page load fetched.
  *

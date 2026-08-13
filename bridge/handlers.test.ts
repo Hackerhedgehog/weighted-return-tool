@@ -19,7 +19,15 @@ function tempCfg(): BridgeSession {
     sessionId: 'cafe0123deadbeef',
     seq: 1,
     openAs: 'overwrite',
+    feeds: [{ file, exportName: 'ref-weights-regular.tsv', game: 'joker-stacks-magic' }],
   }
+}
+
+/** A second source beside the first, for batch cases. */
+function secondFile(cfg: BridgeSession): string {
+  const file = resolve(cfg.dir, 'set-values-buy-bonus.tsv')
+  writeFileSync(file, '1\t50.00\tbonus\n', 'utf8')
+  return file
 }
 
 afterEach(() => {
@@ -40,13 +48,59 @@ describe('sessionResult', () => {
       seq: 1,
       openAs: 'overwrite',
       tsv: '0\t1000.00\tjoker5-maxwin\n',
+      feeds: [
+        {
+          sourceFile: 'set-values-regular.tsv',
+          filename: 'ref-weights-regular.tsv',
+          game: 'joker-stacks-magic',
+          tsv: '0\t1000.00\tjoker5-maxwin\n',
+        },
+      ],
     })
+  })
+
+  it('serves every feed of a batch, the flat fields mirroring the first', () => {
+    const cfg = tempCfg()
+    const buy = secondFile(cfg)
+    const batch: BridgeSession = {
+      ...cfg,
+      feeds: [
+        ...cfg.feeds,
+        { file: buy, exportName: 'ref-weights-buy-bonus.tsv', game: 'joker-stacks-magic' },
+      ],
+    }
+    const body = sessionResult(batch).body as {
+      sourceFile: string
+      tsv: string
+      feeds: { sourceFile: string; tsv: string }[]
+    }
+    expect(body.feeds.map((f) => f.sourceFile)).toEqual([
+      'set-values-regular.tsv',
+      'set-values-buy-bonus.tsv',
+    ])
+    expect(body.feeds[1].tsv).toBe('1\t50.00\tbonus\n')
+    // Legacy mirror: a client that predates batches still gets a session.
+    expect(body.sourceFile).toBe('set-values-regular.tsv')
+    expect(body.tsv).toBe('0\t1000.00\tjoker5-maxwin\n')
   })
 
   it('500s when the source file is gone', () => {
     const cfg = tempCfg()
     rmSync(cfg.file)
     expect(sessionResult(cfg).status).toBe(500)
+  })
+
+  it('500s when any file of a batch is gone — a short batch must not pass as whole', () => {
+    const cfg = tempCfg()
+    const buy = secondFile(cfg)
+    rmSync(buy)
+    const batch: BridgeSession = {
+      ...cfg,
+      feeds: [...cfg.feeds, { file: buy, exportName: 'ref-weights-buy-bonus.tsv', game: '' }],
+    }
+    const r = sessionResult(batch)
+    expect(r.status).toBe(500)
+    expect((r.body as { error: string }).error).toContain('set-values-buy-bonus.tsv')
   })
 })
 
@@ -123,6 +177,9 @@ describe('switchResult', () => {
       sessionId: 'cafe0123deadbeef',
       seq: 2,
       openAs: 'overwrite',
+      feeds: [
+        { file: cfg.file, exportName: 'ref-weights-buy-bonus.tsv', game: 'imperial-express' },
+      ],
     })
   })
 
@@ -196,5 +253,68 @@ describe('switchResult', () => {
     expect(
       switchResult(cfg, { dir: cfg.dir, file: cfg.file, exportName: '../out.tsv' }).result.status,
     ).toBe(400)
+  })
+
+  it('accepts a batch: every file becomes a feed, in order, on one seq bump', () => {
+    const cfg = tempCfg()
+    const buy = secondFile(cfg)
+    const { result, next } = switchResult(cfg, {
+      dir: cfg.dir,
+      files: [
+        { file: cfg.file, exportName: 'ref-weights-regular.tsv', game: 'imperial-express' },
+        { file: buy, exportName: 'ref-weights-buy-bonus.tsv', game: 'imperial-express' },
+      ],
+      openAs: 'new-tab',
+    })
+    expect(result.status).toBe(200)
+    expect(next?.seq).toBe(2)
+    expect(next?.openAs).toBe('new-tab')
+    expect(next?.feeds).toEqual([
+      { file: cfg.file, exportName: 'ref-weights-regular.tsv', game: 'imperial-express' },
+      { file: buy, exportName: 'ref-weights-buy-bonus.tsv', game: 'imperial-express' },
+    ])
+    // The flat fields mirror the first feed for older readers of the session.
+    expect(next?.file).toBe(cfg.file)
+    expect(next?.exportName).toBe('ref-weights-regular.tsv')
+    expect((result.body as { files: string[] }).files).toEqual([cfg.file, buy])
+  })
+
+  it('defaults a batch entry export name, and its game from the top-level game', () => {
+    const cfg = tempCfg()
+    const { next } = switchResult(cfg, {
+      dir: cfg.dir,
+      files: [{ file: cfg.file }],
+      game: 'imperial-express',
+    })
+    expect(next?.feeds).toEqual([
+      { file: cfg.file, exportName: 'ref-weights-regular.tsv', game: 'imperial-express' },
+    ])
+  })
+
+  it('rejects an empty batch', () => {
+    const cfg = tempCfg()
+    const { result, next } = switchResult(cfg, { dir: cfg.dir, files: [] })
+    expect(result.status).toBe(400)
+    expect(next).toBeNull()
+  })
+
+  it('rejects the whole batch when one file is missing — never a partial feed', () => {
+    const cfg = tempCfg()
+    const { result, next } = switchResult(cfg, {
+      dir: cfg.dir,
+      files: [{ file: cfg.file }, { file: resolve(cfg.dir, 'gone.tsv') }],
+    })
+    expect(result.status).toBe(400)
+    expect(next).toBeNull()
+  })
+
+  it('names the entry when a batch member is malformed', () => {
+    const cfg = tempCfg()
+    const { result } = switchResult(cfg, {
+      dir: cfg.dir,
+      files: [{ file: cfg.file }, { file: 5 }],
+    })
+    expect(result.status).toBe(400)
+    expect((result.body as { error: string }).error).toContain('files[1]')
   })
 })
