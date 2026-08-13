@@ -569,13 +569,6 @@ body {
   min-width: 100%;
 }
 
-/* Wrapped: the table has the whole width, so centre it rather than pinning it
-   to an edge the chart is no longer beside. */
-.content-row.stacked .grid-table {
-  margin-left: auto;
-  margin-right: auto;
-}
-
 .panel {
   background: var(--surface);
   border: 1px solid var(--line);
@@ -625,8 +618,8 @@ body {
   overflow: visible;
 }
 
-/* Right-aligned in its panel: the columns are fixed-width, so any slack sits
-   on the left and the numbers stay next to the chart they are read against. */
+/* Base default: table on the left, chart on the right — columns hug the
+   right edge, next to the chart. */
 .grid-table {
   border-collapse: separate;
   border-spacing: 0;
@@ -635,6 +628,23 @@ body {
   background: var(--surface);
   margin-left: auto;
   margin-right: 0;
+}
+
+/* Swapped: chart on the left, table on the right — columns hug the left
+   edge, next to the chart. Same specificity as the .stacked rule below, so
+   it must be declared first: the wrapped/centered rule needs to win the tie
+   when both classes are present. */
+.content-row.swapped .grid-table {
+  margin-left: 0;
+  margin-right: auto;
+}
+
+/* Wrapped onto its own line: neither edge is beside the chart anymore, so
+   center regardless of swap state. Declared after .swapped above so it wins
+   the specificity tie. */
+.content-row.stacked .grid-table {
+  margin-left: auto;
+  margin-right: auto;
 }
 
 .grid-table th,

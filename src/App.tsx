@@ -943,84 +943,114 @@ function WorkspaceView({
             onClose={() => setSettingsOpen(false)}
           />
 
-          <div className={`content-row${chart.forceStack ? ' force-stack' : ''}`} ref={rowRef}>
-          <section className="panel buckets">
-            <div className="panel-head">
-              <h2>Buckets</h2>
-              <span className="panel-hint">
-                arrow keys to move · type +500 to add · drag a header edge to resize
-              </span>
-              <button
-                type="button"
-                className={`btn group-sort ${sort.key === 'group' ? 'primary' : ''}`}
-                title="Order rows by bucket group — colors match the chart"
-                onClick={() => handleSort('group')}
+          {(() => {
+            const bucketsSection = (
+              <section className="panel buckets" key="buckets">
+                <div className="panel-head">
+                  <h2>Buckets</h2>
+                  <span className="panel-hint">
+                    arrow keys to move · type +500 to add · drag a header edge to resize
+                  </span>
+                  <button
+                    type="button"
+                    className={`btn group-sort ${sort.key === 'group' ? 'primary' : ''}`}
+                    title="Order rows by bucket group — colors match the chart"
+                    onClick={() => handleSort('group')}
+                  >
+                    Group sort
+                  </button>
+                </div>
+                <GroupChips
+                  groups={grouping.groups}
+                  selected={collapsedGroups}
+                  onSelected={setCollapsedGroups}
+                  label="Collapse"
+                  titleOn={(n) => `Show ${n}'s buckets as rows`}
+                  titleOff={(n) => `Fold ${n} into one summary row`}
+                />
+                <BucketTable
+                  rows={viewRows}
+                  totalWeight={totalWeight}
+                  sort={sort}
+                  columnWidths={columnWidths}
+                  grouping={grouping}
+                  groups={doc.groups}
+                  weightStep={doc.weightStep}
+                  collapsed={collapsedGroups}
+                  onSort={handleSort}
+                  onPatch={patchRow}
+                  onWidths={setColumnWidths}
+                  onTotalWeight={changeTotalWeight}
+                  onTotalRtp={changeTotalRtp}
+                  onExpand={(id) => setCollapsedGroups((prev) => prev.filter((g) => g !== id))}
+                  onGroupLock={setGroupLocked}
+                />
+              </section>
+            )
+            const chartSection = (
+              <section className="panel chart" key="chart">
+                <div className="panel-head">
+                  <h2>Distribution</h2>
+                  <button
+                    type="button"
+                    className={`btn ${chart.swapped ? 'primary' : ''}`}
+                    aria-pressed={chart.swapped}
+                    title="Put the distribution chart on the left and the table on the right"
+                    onClick={() => setChart({ ...chart, swapped: !chart.swapped })}
+                  >
+                    Swap sides
+                  </button>
+                  <button
+                    type="button"
+                    className={`btn ${chart.forceStack ? 'primary' : ''}`}
+                    aria-pressed={chart.forceStack}
+                    title="Always show the distribution chart below the table, even if there's room beside it"
+                    onClick={() => setChart({ ...chart, forceStack: !chart.forceStack })}
+                  >
+                    Stack below
+                  </button>
+                </div>
+                <DistributionChart
+                  rows={viewRows}
+                  totalWeight={totalWeight}
+                  chart={chart}
+                  grouping={grouping}
+                  weightStep={doc.weightStep}
+                  height={effectiveChartHeight}
+                  onChart={setChart}
+                  onHeight={(h) => {
+                    setChartHeight(h)
+                    setChartHeightAuto(false)
+                  }}
+                  onHeightReset={() => setChartHeightAuto(true)}
+                  onPreview={handleDragPreview}
+                  onCommit={handleDragCommit}
+                  onBlocked={handleBlocked}
+                  onGroupLock={setGroupLocked}
+                  softLocked={softLockedGroups}
+                  onGroupSoftLock={(id, locked) => patchGroup(id, { totalLocked: locked })}
+                />
+              </section>
+            )
+            return (
+              <div
+                className={`content-row${chart.forceStack ? ' force-stack' : ''}${chart.swapped ? ' swapped' : ''}`}
+                ref={rowRef}
               >
-                Group sort
-              </button>
-            </div>
-            <GroupChips
-              groups={grouping.groups}
-              selected={collapsedGroups}
-              onSelected={setCollapsedGroups}
-              label="Collapse"
-              titleOn={(n) => `Show ${n}'s buckets as rows`}
-              titleOff={(n) => `Fold ${n} into one summary row`}
-            />
-            <BucketTable
-              rows={viewRows}
-              totalWeight={totalWeight}
-              sort={sort}
-              columnWidths={columnWidths}
-              grouping={grouping}
-              groups={doc.groups}
-              weightStep={doc.weightStep}
-              collapsed={collapsedGroups}
-              onSort={handleSort}
-              onPatch={patchRow}
-              onWidths={setColumnWidths}
-              onTotalWeight={changeTotalWeight}
-              onTotalRtp={changeTotalRtp}
-              onExpand={(id) => setCollapsedGroups((prev) => prev.filter((g) => g !== id))}
-              onGroupLock={setGroupLocked}
-            />
-          </section>
-
-          <section className="panel chart">
-            <div className="panel-head">
-              <h2>Distribution</h2>
-              <button
-                type="button"
-                className={`btn ${chart.forceStack ? 'primary' : ''}`}
-                aria-pressed={chart.forceStack}
-                title="Always show the distribution chart below the table, even if there's room beside it"
-                onClick={() => setChart({ ...chart, forceStack: !chart.forceStack })}
-              >
-                Stack below
-              </button>
-            </div>
-            <DistributionChart
-              rows={viewRows}
-              totalWeight={totalWeight}
-              chart={chart}
-              grouping={grouping}
-              weightStep={doc.weightStep}
-              height={effectiveChartHeight}
-              onChart={setChart}
-              onHeight={(h) => {
-                setChartHeight(h)
-                setChartHeightAuto(false)
-              }}
-              onHeightReset={() => setChartHeightAuto(true)}
-              onPreview={handleDragPreview}
-              onCommit={handleDragCommit}
-              onBlocked={handleBlocked}
-              onGroupLock={setGroupLocked}
-              softLocked={softLockedGroups}
-              onGroupSoftLock={(id, locked) => patchGroup(id, { totalLocked: locked })}
-            />
-          </section>
-          </div>
+                {chart.swapped ? (
+                  <>
+                    {chartSection}
+                    {bucketsSection}
+                  </>
+                ) : (
+                  <>
+                    {bucketsSection}
+                    {chartSection}
+                  </>
+                )}
+              </div>
+            )
+          })()}
 
           <section className="panel full">
             <div className="panel-head">

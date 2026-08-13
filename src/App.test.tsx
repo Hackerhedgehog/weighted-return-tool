@@ -3,7 +3,8 @@ import { describe, it, expect, beforeEach, afterEach, vi } from 'vitest'
 import { act, cleanup, fireEvent, render, screen, waitFor, within } from '@testing-library/react'
 import App from './App'
 import { readFileSync } from 'node:fs'
-import { saveTabsState, saveWorkspace } from './lib/storage'
+import { saveTabsState, saveWorkspace, TABS_KEY } from './lib/storage'
+import type { TabsState } from './lib/storage'
 import { DEFAULT_CHART, DEFAULT_TARGETS } from './lib/types'
 
 const INPUT = readFileSync('example-input-data.tsv', 'utf8')
@@ -680,6 +681,28 @@ describe('page layout', () => {
     fireEvent.click(toggle)
     expect(toggle.getAttribute('aria-pressed')).toBe('true')
     expect(document.querySelector('.content-row')!.className).toContain('force-stack')
+  })
+
+  it('swaps the table and chart sides, and persists it', async () => {
+    loadRealData()
+    const toggle = screen.getByRole('button', { name: 'Swap sides' })
+    expect(toggle.getAttribute('aria-pressed')).toBe('false')
+
+    fireEvent.click(toggle)
+
+    expect(toggle.getAttribute('aria-pressed')).toBe('true')
+    const row = document.querySelector('.content-row')!
+    expect(row.className).toContain('swapped')
+    expect([...row.children].map((el) => el.className)).toEqual(['panel chart', 'panel buckets'])
+
+    // The workspace save is debounced (see SAVE_DEBOUNCE_MS in App.tsx), and
+    // persists per-tab under TABS_KEY, not the legacy single-workspace
+    // STORAGE_KEY — App.tsx only ever calls loadTabsState/saveTabsState.
+    await waitFor(() => {
+      const saved = JSON.parse(localStorage.getItem(TABS_KEY)!) as TabsState
+      const active = saved.tabs.find((t) => t.id === saved.active)
+      expect(active?.workspace?.chart.swapped).toBe(true)
+    })
   })
 })
 
