@@ -748,6 +748,29 @@ body {
   background: var(--accent-soft);
 }
 
+/* shift+click row selection — the table's twin of `.bar.selected`. Drawn as
+   an inset shadow on the cells rather than an outline on the row: table rows
+   render outlines inconsistently across browsers. */
+.grid-row.multi-selected td {
+  box-shadow:
+    inset 0 2px 0 -1px var(--accent),
+    inset 0 -2px 0 -1px var(--accent);
+}
+
+.grid-row.multi-selected td:first-child {
+  box-shadow:
+    inset 0 2px 0 -1px var(--accent),
+    inset 0 -2px 0 -1px var(--accent),
+    inset 2px 0 0 -1px var(--accent);
+}
+
+.grid-row.multi-selected td:last-child {
+  box-shadow:
+    inset 0 2px 0 -1px var(--accent),
+    inset 0 -2px 0 -1px var(--accent),
+    inset -2px 0 0 -1px var(--accent);
+}
+
 /* A locked row is tinted inline, not here: it keeps its group's hue at a
    deeper alpha, so a lock never repaints a green-grouped bucket yellow. The
    🔒 in the lock column is what identifies the state. */
@@ -1563,9 +1586,38 @@ input.gcell.editing {
 
 .group-row {
   display: flex;
+  flex-direction: column;
+  gap: 6px;
+  padding-bottom: 8px;
+  border-bottom: 1px solid var(--line);
+}
+
+.group-row:last-child {
+  border-bottom: none;
+  padding-bottom: 0;
+}
+
+.group-row-main {
+  display: flex;
   align-items: center;
   gap: 10px;
   flex-wrap: wrap;
+}
+
+/* The demand fields sit on their own line, indented under the group header,
+   so their labels have room to be words rather than placeholders. */
+.group-row-demands {
+  display: flex;
+  align-items: center;
+  gap: 16px;
+  flex-wrap: wrap;
+  padding-left: 24px;
+}
+
+.group-pref-label {
+  font-size: 12px;
+  color: var(--text-dim);
+  white-space: nowrap;
 }
 
 .group-chip {
@@ -1699,11 +1751,11 @@ input.gcell.editing {
 .group-pref {
   display: inline-flex;
   align-items: center;
-  gap: 2px;
+  gap: 6px;
 }
 
 .group-pref-num {
-  width: 64px;
+  width: 96px;
 }
 
 .group-pref-unit {
@@ -1797,9 +1849,9 @@ input.gcell.editing {
   top: 0;
   right: 0;
   bottom: 0;
-  /* Wide enough for a group row — name, demand fields and the swatch palette
-     wrap into two comfortable lines at this width. */
-  width: 480px;
+  /* Wide enough for a group row — the header line and the labeled demand
+     fields each fit on one comfortable line at this width. */
+  width: 600px;
   max-width: 95vw;
   background: var(--surface);
   border-left: 1px solid var(--line);

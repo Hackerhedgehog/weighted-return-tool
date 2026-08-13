@@ -1,10 +1,10 @@
 import type { KeyboardEvent } from 'react'
 
 /**
- * The numpad decimal key emits ',' on many keyboard layouts, but every
- * numeric field here reads '.' as the decimal separator — and the expression
- * evaluator strips ',' as a thousands separator, so the slip is silent:
- * `1,5` becomes 15. Rewrite exactly that key to '.' at the caret.
+ * The numpad decimal key emits ',' on many keyboard layouts. The expression
+ * evaluator reads ',' as a decimal point too, but fields that don't parse
+ * through it would still miss the intent — rewrite exactly that key to '.'
+ * at the caret so what lands in the field is unambiguous.
  *
  * Returns true when the event was handled; controlled inputs then sync their
  * state from `e.currentTarget.value`. Identified by `code`, not `key`, so

@@ -35,6 +35,7 @@ const tableProps = (collapsed: string[], onExpand = vi.fn(), onGroupLock = vi.fn
   collapsed,
   onSort: vi.fn(),
   onPatch: vi.fn(),
+  onGroupMany: vi.fn(),
   onWidths: vi.fn(),
   onTotalWeight: vi.fn(),
   onTotalRtp: vi.fn(),

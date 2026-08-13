@@ -1,4 +1,4 @@
-import { useCallback, useMemo, useRef } from 'react'
+import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import type {
   BucketRow,
   ColumnKey,
@@ -35,6 +35,8 @@ interface BucketTableProps {
   collapsed: string[]
   onSort: (key: SortKey) => void
   onPatch: (uid: string, patch: RowPatch) => void
+  /** A group change applied to every shift-selected row at once, as one undo step. */
+  onGroupMany: (uids: string[], groupId: string) => void
   onWidths: (widths: Record<string, number>) => void
   onTotalWeight: (n: number) => void
   onTotalRtp: (n: number) => void
@@ -63,6 +65,7 @@ export function BucketTable({
   collapsed,
   onSort,
   onPatch,
+  onGroupMany,
   onWidths,
   onTotalWeight,
   onTotalRtp,
@@ -74,6 +77,37 @@ export function BucketTable({
     [rows, grouping, collapsed, sort, totalWeight],
   )
   const tableRef = useRef<HTMLTableElement>(null)
+  const wrapRef = useRef<HTMLDivElement>(null)
+
+  /**
+   * Rows toggled on with shift+click — the same selection idiom the chart's
+   * bars use. Changing the group dropdown on any selected row then moves every
+   * selected row; a plain click on an unselected row, or anywhere outside the
+   * table, drops the selection.
+   */
+  const [multiSel, setMultiSel] = useState<Set<string>>(() => new Set())
+  const clearMulti = useCallback(
+    () => setMultiSel((prev) => (prev.size === 0 ? prev : new Set())),
+    [],
+  )
+  const toggleMulti = useCallback((uid: string) => {
+    setMultiSel((prev) => {
+      const next = new Set(prev)
+      if (next.has(uid)) next.delete(uid)
+      else next.add(uid)
+      return next
+    })
+  }, [])
+
+  useEffect(() => {
+    const onDown = (e: PointerEvent) => {
+      if (e.button !== 0 || e.shiftKey) return
+      const el = wrapRef.current
+      if (el !== null && !el.contains(e.target as Node)) clearMulti()
+    }
+    window.addEventListener('pointerdown', onDown)
+    return () => window.removeEventListener('pointerdown', onDown)
+  }, [clearMulti])
 
   const totalsRowIndex = display.length
   const rtp =
@@ -230,7 +264,7 @@ export function BucketTable({
   })
 
   return (
-    <div className="grid-wrap">
+    <div className="grid-wrap" ref={wrapRef}>
       <table className="grid-table" ref={tableRef} role="grid">
         <colgroup>
           {COLUMNS.map((c) => (
@@ -290,12 +324,27 @@ export function BucketTable({
             ) : (
               <tr
                 key={unit.uid}
-                className={`grid-row ${unit.row.locked ? 'locked' : ''}`}
+                className={`grid-row ${unit.row.locked ? 'locked' : ''} ${multiSel.has(unit.row.uid) ? 'multi-selected' : ''}`}
                 // color only — spacing must stay identical across groups, and a
                 // locked row keeps its group hue, just deepened, so grouping
                 // stays readable while rows are pinned
                 style={{
                   background: rowTint(grouping.byUid.get(unit.row.uid)?.color, unit.row.locked),
+                }}
+                // Capture phase, so a shift+click toggles the selection instead
+                // of also landing in a cell (or starting a text selection). A
+                // plain click on an *unselected* row drops the selection; on a
+                // selected row it must not, or the group dropdown could never
+                // be reached to apply the multi-change.
+                onMouseDownCapture={(e) => {
+                  if (e.button !== 0) return
+                  if (e.shiftKey) {
+                    e.preventDefault()
+                    e.stopPropagation()
+                    toggleMulti(unit.row.uid)
+                  } else if (!multiSel.has(unit.row.uid)) {
+                    clearMulti()
+                  }
                 }}
               >
                 <td className="col-lock">
@@ -314,7 +363,13 @@ export function BucketTable({
                     aria-label={`Group of ${unit.row.label}`}
                     value={unit.row.groupId}
                     style={{ color: grouping.byUid.get(unit.row.uid)?.color }}
-                    onChange={(e) => onPatch(unit.row.uid, { groupId: e.target.value })}
+                    onChange={(e) => {
+                      if (multiSel.has(unit.row.uid) && multiSel.size > 1) {
+                        onGroupMany([...multiSel], e.target.value)
+                      } else {
+                        onPatch(unit.row.uid, { groupId: e.target.value })
+                      }
+                    }}
                   >
                     {groups.map((g) => (
                       <option key={g.id} value={g.id}>

@@ -50,6 +50,18 @@ describe('evaluateExpression', () => {
     expect(ev('1_000')).toBe(1000)
   })
 
+  it('reads a comma as a decimal point unless it groups thousands', () => {
+    expect(ev('1,5')).toBe(1.5)
+    expect(ev('0,33+0,6')).toBeCloseTo(0.93, 10)
+    expect(ev(',5')).toBe(0.5)
+    expect(ev('2*1,5')).toBe(3)
+    // A leading 0 groups nothing — this is a typed decimal, not 375.
+    expect(ev('0,375')).toBe(0.375)
+    // Exact thousands grouping keeps its long-standing meaning.
+    expect(ev('1,500')).toBe(1500)
+    expect(ev('(1+3)*250,000')).toBe(1_000_000)
+  })
+
   it('supports decimals throughout', () => {
     expect(ev('50.16*2')).toBe(100.32)
     expect(ev('0.33+0.6')).toBeCloseTo(0.93, 10)

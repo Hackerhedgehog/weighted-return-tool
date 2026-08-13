@@ -31,7 +31,11 @@ interface SettingsPanelProps {
   onGroupRecolor: (id: string, color: string) => void
   onGroupDelete: (id: string) => void
   onGroupLock: (id: string, locked: boolean) => void
-  onGroupPatch: (id: string, patch: Partial<GroupDef>) => void
+  onGroupSoftLock: (id: string, locked: boolean) => void
+  onGroupChance: (id: string, fraction: number | undefined) => void
+  onGroupValue: (id: string, value: number | undefined) => void
+  onGroupAutoDetect: (id: string) => void
+  onGroupAutoDetectAll: () => void
   onClose: () => void
 }
 
@@ -50,7 +54,11 @@ export function SettingsPanel({
   onGroupRecolor,
   onGroupDelete,
   onGroupLock,
-  onGroupPatch,
+  onGroupSoftLock,
+  onGroupChance,
+  onGroupValue,
+  onGroupAutoDetect,
+  onGroupAutoDetectAll,
   onClose,
 }: SettingsPanelProps) {
   if (!open) return null
@@ -90,7 +98,11 @@ export function SettingsPanel({
             onRecolor={onGroupRecolor}
             onDelete={onGroupDelete}
             onLock={onGroupLock}
-            onPatch={onGroupPatch}
+            onSoftLock={onGroupSoftLock}
+            onChance={onGroupChance}
+            onValue={onGroupValue}
+            onAutoDetect={onGroupAutoDetect}
+            onAutoDetectAll={onGroupAutoDetectAll}
           />
         </div>
 

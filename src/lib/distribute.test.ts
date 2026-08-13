@@ -876,3 +876,52 @@ describe('the ladder stays in order', () => {
     expect(r.warnings.some((w) => w.includes('locked weights are never reordered'))).toBe(true)
   })
 })
+
+describe('in-group ordering when table-wide ordering yields', () => {
+  let n = 0
+  const mkRow = (payout: number, weight: number, groupId: string): BucketRow => ({
+    uid: `og${(n += 1)}`,
+    bucketId: n,
+    payout,
+    label: `og-${payout}x-${n}`,
+    weight,
+    locked: false,
+    groupId,
+    weightId: '',
+  })
+  // Ordered, the best this table can do is equal weights — RTP 8.25. A
+  // target of 15 forces ordering to yield.
+  const table = (low: string, high: string) => [
+    mkRow(1, 250, low),
+    mkRow(2, 250, low),
+    mkRow(10, 250, high),
+    mkRow(20, 250, high),
+  ]
+  const targets = { ...DEFAULT_TARGETS, rtp: 15, useChances: false, useVolatility: false }
+
+  const groupInversions = (rs: BucketRow[], w: number[]): string[] => {
+    const ids = [...new Set(rs.map((r) => r.groupId))]
+    return ids.flatMap((id) => {
+      const idx = rs.map((_, i) => i).filter((i) => rs[i].groupId === id)
+      return inversions(idx.map((i) => rs[i]), idx.map((i) => w[i]))
+    })
+  }
+
+  it('keeps each user group internally ordered and says so', () => {
+    const rs = table('low', 'high')
+    const r = solveWeights(rs, 1000, targets, 0)
+    expect(sum(r.weights)).toBe(1000)
+    expect(groupInversions(rs, r.weights)).toEqual([])
+    expect(r.warnings.some((w) => w.includes('kept within each bucket group'))).toBe(true)
+  })
+
+  it('still inverts freely when the rows share one group', () => {
+    const rs = table('x', 'x')
+    const r = solveWeights(rs, 1000, targets, 0)
+    expect(sum(r.weights)).toBe(1000)
+    // The single-group table has nothing to scope the ordering to — the
+    // yield reaches the target exactly as it always has.
+    expect(r.achieved.rtp).toBeCloseTo(15, 2)
+    expect(r.warnings.some((w) => w.includes('kept within each bucket group'))).toBe(false)
+  })
+})

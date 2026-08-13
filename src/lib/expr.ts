@@ -17,7 +17,26 @@
 type Token = { kind: 'num'; value: number } | { kind: 'op'; value: string }
 
 /** Thousands separators and whitespace, stripped before tokenizing. */
-const NOISE = /[,\s_']/g
+const NOISE = /[\s_']/g
+
+/**
+ * A comma is a decimal point — many numpads emit it for the decimal key and
+ * the tool's users type it as one — *except* inside a number that reads as
+ * thousands grouping ("1,200,350"), which keeps its long-standing meaning.
+ * "0,375" is excluded from grouping: a number leading with 0 groups nothing.
+ */
+const GROUPED = /^(?!0,)\d{1,3}(,\d{3})+(\.\d+)?$/
+
+function commasToDecimals(src: string): string {
+  return (
+    src
+      .replace(/\d[\d.,]*/g, (tok) =>
+        tok.includes(',') ? tok.replace(/,/g, GROUPED.test(tok) ? '' : '.') : tok,
+      )
+      // A comma with no digit before it (",5") can only be a decimal point.
+      .replace(/,/g, '.')
+  )
+}
 
 function tokenize(src: string): Token[] | null {
   const tokens: Token[] = []
@@ -66,7 +85,7 @@ function tokenize(src: string): Token[] | null {
 export function evaluateExpression(input: string): number | null {
   let src = input.trim()
   if (src.startsWith('=')) src = src.slice(1)
-  src = src.replace(NOISE, '')
+  src = commasToDecimals(src.replace(NOISE, ''))
   if (src === '') return null
 
   const tokens = tokenize(src)

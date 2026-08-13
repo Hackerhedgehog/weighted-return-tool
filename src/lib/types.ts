@@ -31,13 +31,23 @@ export interface GroupDef {
    * members' combined mass, and a member's weight edit rebalances the other
    * unlocked members instead of moving the total. Unlike locking every row,
    * the weights *inside* the group stay editable — fix "bonus triggers 10% of
-   * the time", then play with the individual bonus buckets. Optional — absent
-   * in workspaces saved before group demands existed.
+   * the time", then play with the individual bonus buckets. One state with
+   * `prefChance` (see groupTargets.ts's isSoftLocked): the Σ toggle records
+   * the chance it pinned, and typing a chance sets the toggle. Optional —
+   * absent in workspaces saved before group demands existed.
    */
   totalLocked?: boolean
-  /** Preferred share of total weight (fraction). Auto-Distribute sets the group's mass to it. */
+  /**
+   * Pinned share of total weight (fraction). A hard rule: Auto-Distribute
+   * meets it to 0.0001%, reporting even the weight step's rounding. Setting it
+   * is the same act as soft-locking the group; clearing it releases Σ.
+   */
   prefChance?: number
-  /** Preferred RTP contribution (fraction of bet). Auto-Distribute tilts the group's members to land it. */
+  /**
+   * Preferred weighted value — the group's RTP contribution as a fraction of
+   * bet. A soft rule: Auto-Distribute tilts the group's members toward it and
+   * warns when it cannot land within 0.001.
+   */
   prefRtp?: number
 }
 

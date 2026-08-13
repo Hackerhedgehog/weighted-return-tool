@@ -34,8 +34,17 @@ import {
   stepBlockWarning,
 } from './lib/distribute'
 import { buildTsv, copyTsv, downloadTsv, withTsvExtension } from './lib/exportTsv'
-import { planGroupTargets, rebalanceWithinGroup } from './lib/groupTargets'
-import { buildGrouping, groupLockState, nextGroupColor, nextGroupId, seedGroups, type LockState } from './lib/groups'
+import { isSoftLocked, planGroupTargets, rebalanceWithinGroup } from './lib/groupTargets'
+import {
+  autoDetectAssignments,
+  autoDetectUids,
+  buildGrouping,
+  groupLockState,
+  nextGroupColor,
+  nextGroupId,
+  seedGroups,
+  type LockState,
+} from './lib/groups'
 import { emptyHistory, pushHistory, redo, undo, type HistoryState } from './lib/history'
 import { DEFAULT_SPINS } from './lib/sim'
 import {
@@ -56,7 +65,7 @@ import { SimulationPanel } from './components/SimulationPanel'
 import { TargetsPanel } from './components/TargetsPanel'
 
 /** Used only when a fresh paste carries no weights of its own. */
-const SEED_TOTAL_WEIGHT = 1_000_000
+const SEED_TOTAL_WEIGHT = 10_000_000
 const SAVE_DEBOUNCE_MS = 300
 
 const offStepNotice = (step: number) =>
@@ -485,7 +494,7 @@ function WorkspaceView({
    * the thing the lock pins — goes inert. It just needs to know which groups.
    */
   const softLockedGroups = useMemo(
-    () => new Set(doc.groups.filter((g) => g.totalLocked === true).map((g) => g.id)),
+    () => new Set(doc.groups.filter(isSoftLocked).map((g) => g.id)),
     [doc.groups],
   )
 
@@ -553,16 +562,31 @@ function WorkspaceView({
     const d = docRef.current
     if (d.rows.length === 0) return
     const total = totalWeight > 0 ? totalWeight : SEED_TOTAL_WEIGHT
-    // Group demands (locked totals, preferred chance/RTP) are decided first
-    // and handed to the solver as locked rows — its rank-1 constraint — so it
-    // steers the rest of the table around them without knowing about groups.
-    const plan = planGroupTargets(d.rows, d.groups, total, d.weightStep)
+    // Group demands (pinned chances, preferred weighted values) are decided
+    // first and handed to the solver as locked rows — its rank-1 constraint —
+    // so it steers the rest of the table around them without knowing about
+    // groups.
+    const plan = planGroupTargets(d.rows, d.groups, total, d.weightStep, d.targets)
     const solveRows =
       plan.pinned.size === 0
         ? d.rows
         : d.rows.map((r, i) =>
             plan.pinned.has(i) ? { ...r, weight: plan.pinned.get(i)!, locked: true } : r,
           )
+    // When the pins cover every unlocked row, the plan already distributed
+    // everything there is to distribute (inside the groups) — running the
+    // main solve would only report "every row is locked", which is not true
+    // of any soft-locked group.
+    if (plan.pinned.size > 0 && solveRows.every((r) => r.locked)) {
+      setNotices(plan.notes)
+      commit({
+        ...d,
+        rows: d.rows.map((r, i) =>
+          plan.pinned.has(i) ? { ...r, weight: plan.pinned.get(i)! } : r,
+        ),
+      })
+      return
+    }
     const res = solveWeights(solveRows, total, d.targets, d.curve, d.weightStep)
     setNotices([...plan.notes, ...res.warnings])
     commit({ ...d, rows: d.rows.map((r, i) => ({ ...r, weight: res.weights[i] })) })
@@ -579,7 +603,7 @@ function WorkspaceView({
         const d = docRef.current
         const row = d.rows.find((r) => r.uid === uid)
         const g = row === undefined ? undefined : d.groups.find((x) => x.id === row.groupId)
-        if (row !== undefined && !row.locked && g?.totalLocked === true) {
+        if (row !== undefined && !row.locked && g !== undefined && isSoftLocked(g)) {
           const rebalanced = rebalanceWithinGroup(d.rows, uid, patch.weight)
           if (rebalanced === null) {
             setNotices([groupPinnedNotice(g.name)])
@@ -747,12 +771,89 @@ function WorkspaceView({
     [commit],
   )
 
-  /** Demand edits (total lock, preferred chance/RTP) are document data — undoable. */
-  const patchGroup = useCallback(
-    (id: string, patch: Partial<GroupDef>) => {
+  /**
+   * The Σ soft lock and the chance demand are one thing: locking records the
+   * group's current chance as the demand, and releasing clears it — so the
+   * chart toggle and the settings field can never disagree.
+   */
+  const setGroupSoftLock = useCallback(
+    (id: string, locked: boolean) => {
+      commit((d) => {
+        const total = d.rows.reduce((a, r) => a + Math.max(0, r.weight), 0)
+        const mass = d.rows.reduce(
+          (a, r) => (r.groupId === id ? a + Math.max(0, r.weight) : a),
+          0,
+        )
+        const chance =
+          locked && total > 0 ? Number((mass / total).toPrecision(12)) : undefined
+        return {
+          ...d,
+          groups: d.groups.map((g) =>
+            g.id === id ? { ...g, totalLocked: locked, prefChance: chance } : g,
+          ),
+        }
+      })
+    },
+    [commit],
+  )
+
+  /** Typing a chance pins the group (Σ on); clearing the field releases it. */
+  const setGroupChance = useCallback(
+    (id: string, fraction: number | undefined) => {
       commit((d) => ({
         ...d,
-        groups: d.groups.map((g) => (g.id === id ? { ...g, ...patch } : g)),
+        groups: d.groups.map((g) =>
+          g.id === id ? { ...g, prefChance: fraction, totalLocked: fraction !== undefined } : g,
+        ),
+      }))
+    },
+    [commit],
+  )
+
+  const setGroupValue = useCallback(
+    (id: string, value: number | undefined) => {
+      commit((d) => ({
+        ...d,
+        groups: d.groups.map((g) => (g.id === id ? { ...g, prefRtp: value } : g)),
+      }))
+    },
+    [commit],
+  )
+
+  // Pre-checked against the live doc so a detect that moves nothing does not
+  // burn an undo step on a no-op.
+  const autoDetectGroup = useCallback(
+    (id: string) => {
+      const d = docRef.current
+      const g = d.groups.find((x) => x.id === id)
+      if (g === undefined) return
+      const uids = new Set(autoDetectUids(d.rows, g.name))
+      if (![...uids].some((u) => d.rows.some((r) => r.uid === u && r.groupId !== id))) return
+      commit({
+        ...d,
+        rows: d.rows.map((r) => (uids.has(r.uid) && r.groupId !== id ? { ...r, groupId: id } : r)),
+      })
+    },
+    [commit],
+  )
+
+  const autoDetectAllGroups = useCallback(() => {
+    const d = docRef.current
+    const moves = autoDetectAssignments(d.rows, d.groups)
+    if (moves.size === 0) return
+    commit({
+      ...d,
+      rows: d.rows.map((r) => (moves.has(r.uid) ? { ...r, groupId: moves.get(r.uid)! } : r)),
+    })
+  }, [commit])
+
+  /** A multi-selected group change lands as one undo step. */
+  const setRowsGroup = useCallback(
+    (uids: string[], groupId: string) => {
+      const set = new Set(uids)
+      commit((d) => ({
+        ...d,
+        rows: d.rows.map((r) => (set.has(r.uid) ? { ...r, groupId } : r)),
       }))
     },
     [commit],
@@ -952,7 +1053,11 @@ function WorkspaceView({
             onGroupRecolor={recolorGroup}
             onGroupDelete={deleteGroup}
             onGroupLock={setGroupLocked}
-            onGroupPatch={patchGroup}
+            onGroupSoftLock={setGroupSoftLock}
+            onGroupChance={setGroupChance}
+            onGroupValue={setGroupValue}
+            onGroupAutoDetect={autoDetectGroup}
+            onGroupAutoDetectAll={autoDetectAllGroups}
             onClose={() => setSettingsOpen(false)}
           />
 
@@ -962,7 +1067,8 @@ function WorkspaceView({
                 <div className="panel-head">
                   <h2>Buckets</h2>
                   <span className="panel-hint">
-                    arrow keys to move · type +500 to add · drag a header edge to resize
+                    arrow keys to move · type +500 to add · shift+click selects rows ·
+                    drag a header edge to resize
                   </span>
                   <button
                     type="button"
@@ -992,6 +1098,7 @@ function WorkspaceView({
                   collapsed={collapsedGroups}
                   onSort={handleSort}
                   onPatch={patchRow}
+                  onGroupMany={setRowsGroup}
                   onWidths={setColumnWidths}
                   onTotalWeight={changeTotalWeight}
                   onTotalRtp={changeTotalRtp}
@@ -1041,7 +1148,7 @@ function WorkspaceView({
                   onBlocked={handleBlocked}
                   onGroupLock={setGroupLocked}
                   softLocked={softLockedGroups}
-                  onGroupSoftLock={(id, locked) => patchGroup(id, { totalLocked: locked })}
+                  onGroupSoftLock={setGroupSoftLock}
                   yZoom={distChartYZoom}
                   onYZoom={setDistChartYZoom}
                   yPan={distChartYPan}

@@ -192,7 +192,15 @@ export interface AmountOptions {
  * or computed ("5-10"), it is a mistake, not a request for the floor.
  */
 export function parseAmount(text: string, opts: AmountOptions): number | null {
-  const cleaned = text.replace(/[,\s_]/g, '')
+  let cleaned = text.replace(/[\s_]/g, '')
+  if (cleaned.includes(',')) {
+    // The same comma rule evaluateExpression applies: exact thousands
+    // grouping keeps its meaning, any other comma is a decimal point —
+    // "2,5" is 2.5, never a silent 25.
+    cleaned = /^(?!0,)\d{1,3}(,\d{3})+(\.\d+)?[kmb]?$/i.test(cleaned)
+      ? cleaned.replace(/,/g, '')
+      : cleaned.replace(/,/g, '.')
+  }
   const m = /^(\d+(?:\.\d+)?)([kmb])?$/i.exec(cleaned)
   const mult = { k: 1e3, m: 1e6, b: 1e9 }[m?.[2]?.toLowerCase() as 'k' | 'm' | 'b'] ?? 1
   // Fallback only when the plain form does not read, so every input the regex

@@ -1,6 +1,7 @@
 import { describe, it, expect } from 'vitest'
 import type { BucketRow, GroupDef } from './types'
-import { hasGroupDemands, planGroupTargets, rebalanceWithinGroup } from './groupTargets'
+import { DEFAULT_TARGETS } from './types'
+import { hasGroupDemands, isSoftLocked, planGroupTargets, rebalanceWithinGroup } from './groupTargets'
 
 let uidCounter = 0
 function row(partial: Partial<BucketRow> & Pick<BucketRow, 'payout' | 'weight' | 'groupId'>): BucketRow {
@@ -162,5 +163,82 @@ describe('rebalanceWithinGroup', () => {
     const rows = table()
     expect(rebalanceWithinGroup(rows, rows[1].uid, -5)).toBeNull()
     expect(rebalanceWithinGroup(rows, 'nope', 100)).toBeNull()
+  })
+})
+
+describe('isSoftLocked', () => {
+  it('reads the Σ toggle and the chance demand as one state', () => {
+    expect(isSoftLocked(group('g'))).toBe(false)
+    expect(isSoftLocked(group('g', { totalLocked: true }))).toBe(true)
+    expect(isSoftLocked(group('g', { prefChance: 0.25 }))).toBe(true)
+    expect(isSoftLocked(group('g', { prefRtp: 0.25 }))).toBe(false)
+  })
+})
+
+describe('planGroupTargets with solve targets', () => {
+  const targets = { ...DEFAULT_TARGETS, useChances: false, useVolatility: false }
+
+  it('distributes inside pinned groups to land the table RTP when nothing else is free', () => {
+    const rows = [
+      row({ payout: 0, weight: 500_000, groupId: 'zero', locked: true }),
+      row({ payout: 1, weight: 100_000, groupId: 'a' }),
+      row({ payout: 10, weight: 400_000, groupId: 'a' }),
+    ]
+    const plan = planGroupTargets(
+      rows,
+      [group('zero'), group('a', { prefChance: 0.5 })],
+      1_000_000,
+      1,
+      { ...targets, rtp: 0.95 },
+    )
+    const w1 = plan.pinned.get(1) ?? 0
+    const w10 = plan.pinned.get(2) ?? 0
+    expect(w1 + w10).toBe(500_000)
+    // 1·w1 + 10·w10 must supply the full 950,000 — the exact solution is
+    // w10 = 50,000, and it is in payout order.
+    expect(Math.abs(w1 + 10 * w10 - 950_000)).toBeLessThan(50)
+    expect(w1).toBeGreaterThanOrEqual(w10)
+  })
+
+  it('keeps a pinned group in payout order', () => {
+    const rows = [
+      row({ payout: 2, weight: 10, groupId: 'b' }),
+      row({ payout: 10, weight: 990, groupId: 'b' }),
+    ]
+    const plan = planGroupTargets(rows, [group('b', { prefRtp: 0.4 })], 10_000, 1, targets)
+    const w2 = plan.pinned.get(0) ?? 0
+    const w10 = plan.pinned.get(1) ?? 0
+    expect(w2 + w10).toBe(1000)
+    expect(w2).toBeGreaterThanOrEqual(w10)
+    expect(Math.abs((2 * w2 + 10 * w10) / 10_000 - 0.4)).toBeLessThan(0.001)
+  })
+
+  it('reports when the pinned groups cannot reach the table RTP', () => {
+    const rows = [
+      row({ payout: 1, weight: 500, groupId: 'a' }),
+      row({ payout: 2, weight: 500, groupId: 'a' }),
+    ]
+    const plan = planGroupTargets(rows, [group('a', { totalLocked: true })], 1000, 1, {
+      ...targets,
+      rtp: 0.95,
+    })
+    // Max contribution is 2.0 — far above 0.95, so the tilt lands it; use an
+    // unreachable low target instead: min is 1.0 at all weight on 1x… 0.95
+    // is below even that.
+    expect(plan.notes.some((x) => x.includes('landing RTP'))).toBe(true)
+  })
+
+  it('reports a chance the weight step cannot represent', () => {
+    const rows = [
+      row({ payout: 10, weight: 66_666, groupId: 'bonus' }),
+      row({ payout: 50, weight: 33_334, groupId: 'bonus' }),
+    ]
+    const plan = planGroupTargets(
+      rows,
+      [group('bonus', { prefChance: 0.123456 })],
+      1_000_000,
+      100,
+    )
+    expect(plan.notes.some((x) => x.includes('cannot represent'))).toBe(true)
   })
 })

@@ -217,6 +217,45 @@ export function nextGroupColor(groups: GroupDef[]): string {
 }
 
 /**
+ * On-demand label matching for the group settings' Auto-detect buttons: the
+ * unlocked rows whose label contains the group's name, case-insensitively.
+ * Locked rows are the user's pinned decisions, so they are never re-assigned.
+ * A blank name matches nothing rather than everything.
+ */
+export function autoDetectUids(rows: BucketRow[], name: string): string[] {
+  const needle = name.trim().toLowerCase()
+  if (needle === '') return []
+  return rows.filter((r) => !r.locked && r.label.toLowerCase().includes(needle)).map((r) => r.uid)
+}
+
+/**
+ * Auto-detect across every group at once: each unlocked row goes to the group
+ * whose name appears in its label. When several names match, the longest one
+ * wins — "bonus2" must beat "bonus" on a "bonus2-tease" — and a tie falls to
+ * the earlier group, so the outcome is stable. Rows matching no name keep
+ * their assignment; only actual moves are returned.
+ */
+export function autoDetectAssignments(rows: BucketRow[], groups: GroupDef[]): Map<string, string> {
+  const out = new Map<string, string>()
+  for (const r of rows) {
+    if (r.locked) continue
+    const label = r.label.toLowerCase()
+    let best: GroupDef | null = null
+    let bestLen = 0
+    for (const g of groups) {
+      const needle = g.name.trim().toLowerCase()
+      if (needle === '' || !label.includes(needle)) continue
+      if (best === null || needle.length > bestLen) {
+        best = g
+        bestLen = needle.length
+      }
+    }
+    if (best !== null && best.id !== r.groupId) out.set(r.uid, best.id)
+  }
+  return out
+}
+
+/**
  * How much of a group is locked. A group has no lock of its own: it is locked
  * when every one of its buckets is, which keeps row locks the single source of
  * truth for the solver, for `interact.ts` and for the export.

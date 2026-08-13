@@ -636,6 +636,28 @@ function inOrder(ctx: Ctx, w: number[], ladder: number[]): boolean {
 }
 
 /**
+ * One ladder per user group over the unlocked paying rows, for the regime
+ * where table-wide ordering has yielded: the inversions the RTP target forced
+ * are kept *between* groups, while each group's own members stay in payout
+ * order — a shape a reader can still recognize. Meaningless when the rows all
+ * share one group: that single ladder would be table-wide ordering again,
+ * undoing the very sacrifice that reached the target.
+ */
+function groupLaddersOf(ctx: Ctx, rows: BucketRow[]): number[][] {
+  if (new Set(rows.map((r) => r.groupId)).size < 2) return []
+  const byId = new Map<string, number[]>()
+  for (const i of [...ctx.freeIdx[1], ...ctx.freeIdx[2]]) {
+    const id = rows[i].groupId
+    const list = byId.get(id)
+    if (list === undefined) byId.set(id, [i])
+    else list.push(i)
+  }
+  return [...byId.values()]
+    .map((lad) => lad.sort((a, b) => ctx.payouts[a] - ctx.payouts[b] || a - b))
+    .filter((lad) => lad.length >= 2)
+}
+
+/**
  * Integer sweep that puts the ladder back in order.
  *
  * Every fix is a transfer, so the total never moves, and weight only ever
@@ -700,12 +722,13 @@ function transfer(
   target: number,
   pair: [number, number] | null,
   step: number,
-  ladder: number[],
+  ladders: number[][],
 ): void {
   if (pair === null) return
   const [lo, hi] = pair
   const span = ctx.payouts[hi] - ctx.payouts[lo]
   if (!(span > 0)) return
+  const ordered = () => ladders.every((l) => inOrder(ctx, w, l))
 
   // Keep the existing conditional floors. Replacing them with a bare `step`
   // inverts the clamp's range whenever a bucket already sits below one step —
@@ -720,7 +743,7 @@ function transfer(
   if (d !== 0) {
     w[lo] -= d
     w[hi] += d
-    if (!inOrder(ctx, w, ladder)) {
+    if (!ordered()) {
       w[lo] += d
       w[hi] -= d
     }
@@ -734,7 +757,7 @@ function transfer(
     if (dir === -1 && w[hi] - step < minHi) return
     w[lo] -= dir * step
     w[hi] += dir * step
-    if (Math.abs(err()) >= before || !inOrder(ctx, w, ladder)) {
+    if (Math.abs(err()) >= before || !ordered()) {
       w[lo] += dir * step
       w[hi] -= dir * step
       return
@@ -751,14 +774,14 @@ function transfer(
  * by ordering — a transfer that would close the gap but invert the ladder is
  * refused rather than taken.
  */
-function repairRtp(ctx: Ctx, w: number[], target: number, step: number, ladder: number[]): void {
+function repairRtp(ctx: Ctx, w: number[], target: number, step: number, ladders: number[][]): void {
   const idx = ctx.freeIdx[2]
   if (idx.length < 2) return
 
   const err = () => Math.abs(target - rtpOf(ctx, w)) * ctx.total
   for (const pair of payoutPairs(ctx, idx)) {
     if (err() < 1e-9) return
-    transfer(ctx, w, target, pair, step, ladder)
+    transfer(ctx, w, target, pair, step, ladders)
   }
 }
 
@@ -1065,12 +1088,17 @@ export function solveWeights(
     break
   }
 
-  // An unordered solve carries deliberate inversions, so `inOrder` would read
-  // them as breakage and veto every RTP-improving transfer `repairRtp` tries —
-  // silently disabling the repair in the one regime that most needs it.
-  // Handing it an empty ladder switches the guard off along with the regime.
+  // An unordered solve carries deliberate inversions, so a table-wide ladder
+  // would read them as breakage and veto every RTP-improving transfer
+  // `repairRtp` tries. What survives the regime change is the *in-group*
+  // order: each user group's own members are re-sorted after allocation and
+  // guard the repair, so the deliberate inversions live between groups only.
   const ladder = solveCtx.ordered ? ladderIdx(solveCtx) : []
+  const groupLadders = solveCtx.ordered ? [] : groupLaddersOf(solveCtx, rows)
   const weights = allocate(solveCtx, cont, step)
+  if (!solveCtx.ordered) {
+    for (const lad of groupLadders) enforceOrder(solveCtx, weights, step, lad)
+  }
   if (solveCtx.ordered) {
     if (orderAboveWin) {
       enforceOrder(solveCtx, weights, step, ladder)
@@ -1087,14 +1115,15 @@ export function solveWeights(
     if (orderAboveHit) restoreResidual(solveCtx, weights, step)
   }
   // repairRtp only ever moves weight inside the win band, but its guard reads
-  // whatever ladder it is handed. With the 1x boundary allowed to stand
+  // whatever ladders it is handed. With the 1x boundary allowed to stand
   // inverted (win chance outranks ordering), a full-ladder guard would read
   // that standing inversion as breakage and veto every transfer — so the
-  // guard shrinks to the band the repair actually touches.
-  const guardLadder = orderAboveWin
-    ? ladder
-    : ladder.filter((i) => groupOf(solveCtx.payouts[i]) === 2)
-  repairRtp(solveCtx, weights, targets.rtp, step, guardLadder)
+  // guard shrinks to the band the repair actually touches. In the unordered
+  // regime the guard is the per-group ladders just enforced.
+  const guardLadders = solveCtx.ordered
+    ? [orderAboveWin ? ladder : ladder.filter((i) => groupOf(solveCtx.payouts[i]) === 2)]
+    : groupLadders
+  repairRtp(solveCtx, weights, targets.rtp, step, guardLadders)
 
   const achieved = statsOf(
     rows.map((r, i) => ({ ...r, weight: weights[i] })),
@@ -1128,7 +1157,17 @@ export function solveWeights(
   }
   if (orderYielded) {
     warnings.push(
-      `Weights could not be kept in payout order at RTP ${targets.rtp} — ordering yielded to the RTP target.`,
+      groupLadders.length > 0
+        ? `Weights could not be kept in payout order at RTP ${targets.rtp} — ordering yielded to the RTP target, but was kept within each bucket group.`
+        : `Weights could not be kept in payout order at RTP ${targets.rtp} — ordering yielded to the RTP target.`,
+    )
+  }
+  // Restoring each group's internal order after the yield is a transfer down
+  // the ladder, which can cost RTP the guarded repair cannot fully recover —
+  // said out loud, since the continuous reach check below cannot see it.
+  if (!solveCtx.ordered && groupLadders.length > 0 && Math.abs(achieved.rtp - targets.rtp) > 1e-6) {
+    warnings.push(
+      `Keeping payout order within each group cost some RTP accuracy — achieved ${achieved.rtp.toFixed(6)}.`,
     )
   }
 

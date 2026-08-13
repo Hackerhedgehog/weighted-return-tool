@@ -85,7 +85,7 @@ describe('App', () => {
   it('has an editable totals row showing the weight sum and RTP', () => {
     loadRealData()
     const totals = document.querySelector('.totals-row')!
-    expect(within(totals as HTMLElement).getByText('1,000,000')).toBeDefined()
+    expect(within(totals as HTMLElement).getByText('10,000,000')).toBeDefined()
     expect(within(totals as HTMLElement).getByText('1')).toBeDefined()
   })
 
@@ -123,7 +123,7 @@ describe('App', () => {
 
     expect(
       screen.getByText(
-        'Every row is locked — unlock something or set the total to exactly the locked weight (1,000,000).',
+        'Every row is locked — unlock something or set the total to exactly the locked weight (10,000,000).',
       ),
     ).toBeDefined()
   })
@@ -1050,12 +1050,102 @@ describe('groups', () => {
     // …and the drawer's Σ shows the same state and can release it.
     fireEvent.click(screen.getByRole('button', { name: /Settings/ }))
     const settings = within(document.querySelector('.group-settings') as HTMLElement)
-    const sigma = settings.getByRole('button', { name: "Unlock the bonus group's total weight" })
+    const sigma = settings.getByRole('button', { name: "Release the bonus group's chance" })
     expect(sigma.getAttribute('aria-pressed')).toBe('true')
     fireEvent.click(sigma)
     expect(
       screen.getByRole('slider', { name: 'bonus group' }).getAttribute('aria-disabled'),
     ).toBeNull()
+  })
+
+  it('soft-locking records the chance demand, and clearing the chance releases Σ', () => {
+    render(<App />)
+    fireEvent.click(screen.getByRole('button', { name: 'Load sample' }))
+
+    fireEvent.click(screen.getByRole('button', { name: 'Soft-lock the bonus group total' }))
+    fireEvent.click(screen.getByRole('button', { name: /Settings/ }))
+
+    // Σ filled the chance field with the group's current chance.
+    const chance = screen.getByLabelText('Preferred chance of group bonus') as HTMLInputElement
+    expect(chance.value).not.toBe('')
+
+    // Clearing the field releases the soft lock — the chart handle drags again.
+    fireEvent.change(chance, { target: { value: '' } })
+    fireEvent.keyDown(chance, { key: 'Enter' })
+    expect(
+      screen.getByRole('slider', { name: 'bonus group' }).getAttribute('aria-disabled'),
+    ).toBeNull()
+  })
+
+  it('typing a chance soft-locks the group, with comma accepted as the decimal point', () => {
+    render(<App />)
+    fireEvent.click(screen.getByRole('button', { name: 'Load sample' }))
+    fireEvent.click(screen.getByRole('button', { name: /Settings/ }))
+
+    const chance = screen.getByLabelText('Preferred chance of group bonus') as HTMLInputElement
+    fireEvent.change(chance, { target: { value: '12,5' } })
+    fireEvent.keyDown(chance, { key: 'Enter' })
+
+    expect(chance.value).toBe('12.5')
+    expect(
+      screen.getByRole('slider', { name: 'bonus group' }).getAttribute('aria-disabled'),
+    ).toBe('true')
+  })
+
+  it('auto-detects buckets for one group by its name', () => {
+    render(<App />)
+    fireEvent.click(screen.getByRole('button', { name: 'Load sample' }))
+    fireEvent.click(screen.getByRole('button', { name: /Settings/ }))
+
+    // Move a bonus bucket away by hand, then let auto-detect reclaim it.
+    const selects = () => [...document.querySelectorAll('.col-group select')] as HTMLSelectElement[]
+    const bonusId = selects()
+      .map((s) => s.value)
+      .find((v) => v === 'bonus')!
+    const moved = selects().find((s) => s.value === bonusId)!
+    const other = [...moved.options].map((o) => o.value).find((v) => v !== bonusId)!
+    fireEvent.change(moved, { target: { value: other } })
+
+    const settings = within(document.querySelector('.group-settings') as HTMLElement)
+    fireEvent.click(settings.getByRole('button', { name: 'Auto-detect buckets for group bonus' }))
+    expect(moved.value).toBe('bonus')
+  })
+
+  it('changes the group of every shift-selected row at once', () => {
+    loadRealData()
+    const rows = [...document.querySelectorAll('.grid-row')]
+    fireEvent.mouseDown(rows[0], { shiftKey: true, button: 0 })
+    fireEvent.mouseDown(rows[1], { shiftKey: true, button: 0 })
+    expect(document.querySelectorAll('.grid-row.multi-selected')).toHaveLength(2)
+
+    const select = rows[0].querySelector('.col-group select') as HTMLSelectElement
+    const other = [...select.options].map((o) => o.value).find((v) => v !== select.value)!
+    fireEvent.change(select, { target: { value: other } })
+
+    const values = [...document.querySelectorAll('.grid-row .col-group select')].map(
+      (s) => (s as HTMLSelectElement).value,
+    )
+    expect(values[0]).toBe(other)
+    expect(values[1]).toBe(other)
+
+    // One undo step reverts the whole multi-change.
+    fireEvent.click(screen.getByRole('button', { name: '↶ Undo' }))
+    const reverted = [...document.querySelectorAll('.grid-row .col-group select')].map(
+      (s) => (s as HTMLSelectElement).value,
+    )
+    expect(reverted[0]).not.toBe(other)
+  })
+
+  it('does not report "every row is locked" when a soft-locked group leaves room', () => {
+    render(<App />)
+    fireEvent.click(screen.getByRole('button', { name: 'Load sample' }))
+
+    // Soft-lock every group, so each is pinned but internally free.
+    for (const handle of document.querySelectorAll('.handle-soft:not(.on)')) {
+      fireEvent.click(handle)
+    }
+    fireEvent.click(screen.getByRole('button', { name: 'Auto-Distribute' }))
+    expect(screen.queryByText(/Every row is locked/)).toBeNull()
   })
 })
 

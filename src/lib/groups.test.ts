@@ -1,6 +1,13 @@
 import { describe, it, expect } from 'vitest'
 import type { BucketRow } from './types'
-import { buildGrouping, groupLockState, groupRows, seedGroups } from './groups'
+import {
+  autoDetectAssignments,
+  autoDetectUids,
+  buildGrouping,
+  groupLockState,
+  groupRows,
+  seedGroups,
+} from './groups'
 
 let n = 0
 const row = (payout: number, label: string): BucketRow => ({
@@ -260,5 +267,55 @@ describe('groupLockState', () => {
 
   it('reports none for a group with no buckets', () => {
     expect(groupLockState(rows([false, false, false]), 'empty')).toBe('none')
+  })
+})
+
+describe('autoDetectUids', () => {
+  const table = () => {
+    const a = row(10, 'bonus-big')
+    const b = row(5, 'Mega Bonus round')
+    const c = row(2, '8-16x')
+    const d = { ...row(20, 'bonus-locked'), locked: true }
+    return { a, b, c, d, rows: [a, b, c, d] }
+  }
+
+  it('matches unlocked rows whose label contains the name, case-insensitively', () => {
+    const { a, b, rows } = table()
+    expect(autoDetectUids(rows, 'bonus')).toEqual([a.uid, b.uid])
+  })
+
+  it('never claims a locked row and matches nothing on a blank name', () => {
+    const { rows, d } = table()
+    expect(autoDetectUids(rows, 'bonus')).not.toContain(d.uid)
+    expect(autoDetectUids(rows, '  ')).toEqual([])
+  })
+})
+
+describe('autoDetectAssignments', () => {
+  const groups = (names: string[]) =>
+    names.map((name, i) => ({ id: `g${i}`, name, color: '#aabbcc' }))
+
+  it('assigns each unlocked row to the group named in its label', () => {
+    const a = row(10, 'bonus-big')
+    const b = row(2, 'joker3-stacks')
+    const moves = autoDetectAssignments([a, b], groups(['bonus', 'joker']))
+    expect(moves.get(a.uid)).toBe('g0')
+    expect(moves.get(b.uid)).toBe('g1')
+  })
+
+  it('prefers the longest matching name and skips locked or settled rows', () => {
+    const a = row(10, 'bonus2-tease')
+    const b = { ...row(5, 'bonus-big'), locked: true }
+    const already = { ...row(1, 'bonus-mid'), groupId: 'g0' }
+    const moves = autoDetectAssignments([a, b, already], groups(['bonus', 'bonus2']))
+    expect(moves.get(a.uid)).toBe('g1')
+    expect(moves.has(b.uid)).toBe(false)
+    // Already in the right group — not reported as a move.
+    expect(moves.has(already.uid)).toBe(false)
+  })
+
+  it('leaves rows matching no name untouched', () => {
+    const a = row(2, '8-16x')
+    expect(autoDetectAssignments([a], groups(['bonus'])).size).toBe(0)
   })
 })
