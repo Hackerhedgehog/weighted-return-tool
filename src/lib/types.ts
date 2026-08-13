@@ -206,6 +206,12 @@ export interface ChartSettings {
    * even when the viewport is wide enough to fit both side by side.
    */
   forceStack: boolean
+  /**
+   * Puts the distribution chart on the left and the buckets table on the
+   * right (default: table left, chart right). The table's column alignment
+   * follows — see `.content-row.swapped .grid-table` in index.css.
+   */
+  swapped: boolean
 }
 
 export const DEFAULT_CHART: ChartSettings = {
@@ -216,6 +222,7 @@ export const DEFAULT_CHART: ChartSettings = {
   relative: true,
   groupBars: [],
   forceStack: false,
+  swapped: false,
 }
 
 export const DEFAULT_EXPORT_FILENAME = 'ref-weights-regular.tsv'

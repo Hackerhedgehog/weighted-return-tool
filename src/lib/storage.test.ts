@@ -256,4 +256,22 @@ describe('storage', () => {
     store.set(STORAGE_KEY, JSON.stringify({ ...workspace, chart }))
     expect(loadWorkspace()).not.toBeNull()
   })
+
+  it('round-trips swapped and rejects a non-boolean', () => {
+    saveWorkspace({ ...workspace, chart: { ...DEFAULT_CHART, swapped: true } })
+    expect(loadWorkspace()?.chart.swapped).toBe(true)
+
+    store.set(
+      STORAGE_KEY,
+      JSON.stringify({ ...workspace, chart: { ...DEFAULT_CHART, swapped: 'yes' } }),
+    )
+    expect(loadWorkspace()).toBeNull()
+  })
+
+  it('accepts a workspace saved before swapped existed', () => {
+    const chart: Record<string, unknown> = { ...DEFAULT_CHART }
+    delete chart.swapped
+    store.set(STORAGE_KEY, JSON.stringify({ ...workspace, chart }))
+    expect(loadWorkspace()).not.toBeNull()
+  })
 })

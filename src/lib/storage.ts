@@ -116,7 +116,9 @@ function isChart(v: unknown): v is ChartSettings {
     (v.groupBars === undefined ||
       (Array.isArray(v.groupBars) && v.groupBars.every((s) => typeof s === 'string'))) &&
     // Optional: absent in workspaces saved before the chart could be force-stacked.
-    (v.forceStack === undefined || typeof v.forceStack === 'boolean')
+    (v.forceStack === undefined || typeof v.forceStack === 'boolean') &&
+    // Optional: absent in workspaces saved before the panels could be swapped.
+    (v.swapped === undefined || typeof v.swapped === 'boolean')
   )
 }
 
