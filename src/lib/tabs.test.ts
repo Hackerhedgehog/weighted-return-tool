@@ -25,11 +25,18 @@ describe('nextTabId', () => {
 })
 
 describe('feedTabName', () => {
-  it('scopes the file by the game when one is known', () => {
+  it('names the tab <game>: <kind>-<mode>, scoped by the game when one is known', () => {
     expect(feedTabName({ game: 'joker', sourceFile: 'set-values-regular.tsv' })).toBe(
-      'joker · set-values-regular.tsv',
+      'joker: set-regular',
     )
-    expect(feedTabName({ game: '', sourceFile: 'a.tsv' })).toBe('a.tsv')
+    expect(feedTabName({ game: 'joker', sourceFile: 'ref-weights-extra-bonus-chance.tsv' })).toBe(
+      'joker: ref-extra-bonus-chance',
+    )
+    expect(feedTabName({ game: '', sourceFile: 'set-values-regular.tsv' })).toBe('set-regular')
+  })
+
+  it('falls back to the bare filename when it matches neither known shape', () => {
+    expect(feedTabName({ game: 'joker', sourceFile: 'a.tsv' })).toBe('joker: a.tsv')
   })
 })
 
@@ -122,9 +129,9 @@ describe('placeFeeds', () => {
     expect(placements.map((p) => p.feedIndex)).toEqual([0, 1, 2])
     expect(next.tabs.map((t) => t.name)).toEqual([
       't1',
-      'imp · set-values-regular.tsv',
-      'imp · set-values-buy-bonus.tsv',
-      'imp · ref-weights-regular.tsv',
+      'imp: set-regular',
+      'imp: set-buy-bonus',
+      'imp: ref-regular',
     ])
   })
 
@@ -146,7 +153,7 @@ describe('placeFeeds', () => {
     const one = [feeds[0]]
     const over = placeFeeds(state(['t1'], 't1'), one, 'overwrite')
     expect(over.state.tabs.map((t) => t.id)).toEqual(['t1'])
-    expect(over.state.tabs[0].name).toBe('imp · set-values-regular.tsv')
+    expect(over.state.tabs[0].name).toBe('imp: set-regular')
     expect(over.placements).toEqual([{ tabId: 't1', feedIndex: 0 }])
 
     const tab = placeFeeds(state(['t1'], 't1'), one, 'new-tab')

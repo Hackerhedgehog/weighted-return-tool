@@ -394,7 +394,7 @@ describe('App', () => {
       const tabs = screen.getAllByRole('tab')
       expect(tabs.map((t) => t.textContent)).toEqual([
         'Table 1×',
-        'joker · set-values-buy.tsv×',
+        'joker: set-buy×',
       ])
       expect(tabs[1].getAttribute('aria-selected')).toBe('true')
     } finally {
@@ -450,8 +450,8 @@ describe('App', () => {
       const tabs = screen.getAllByRole('tab')
       expect(tabs.map((t) => t.textContent)).toEqual([
         'Table 1×',
-        'imp · set-values-regular.tsv×',
-        'imp · set-values-buy.tsv×',
+        'imp: set-regular×',
+        'imp: set-buy×',
       ])
       expect(tabs[2].getAttribute('aria-selected')).toBe('true')
 

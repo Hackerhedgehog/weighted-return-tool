@@ -18,9 +18,28 @@ export function nextTabId(tabs: TabRecord[]): string {
   return `t${n}`
 }
 
-/** What a bridge feed names its tab: the file, scoped by the game when known. */
+const SET_VALUES_FILE = /^set-values-(.+)\.tsv$/
+const REF_WEIGHTS_FILE = /^ref-weights-(.+)\.tsv$/
+
+/**
+ * `set-values-<mode>.tsv` / `ref-weights-<mode>.tsv` shortened to
+ * `set-<mode>` / `ref-<mode>` — the kind and the mode are what distinguish
+ * one feed from another; the rest of the filename is noise in a tab strip.
+ * Anything that doesn't match either shape (a bridge fed by an older or
+ * unrelated caller) falls back to the filename as-is.
+ */
+function sourceLabel(sourceFile: string): string {
+  const setMatch = SET_VALUES_FILE.exec(sourceFile)
+  if (setMatch !== null) return `set-${setMatch[1]}`
+  const refMatch = REF_WEIGHTS_FILE.exec(sourceFile)
+  if (refMatch !== null) return `ref-${refMatch[1]}`
+  return sourceFile
+}
+
+/** What a bridge feed names its tab: `<game>: <kind>-<mode>`, e.g. `joker: set-regular`. */
 export function feedTabName(session: Pick<BridgeSession, 'game' | 'sourceFile'>): string {
-  return session.game === '' ? session.sourceFile : `${session.game} · ${session.sourceFile}`
+  const label = sourceLabel(session.sourceFile)
+  return session.game === '' ? label : `${session.game}: ${label}`
 }
 
 export function withNewTab(
