@@ -220,6 +220,15 @@ describe('App', () => {
     ).toContain('drag a bar')
   })
 
+  it('keeps Log Y and Relative drag in the chart gear menu, with the X options', () => {
+    loadRealData()
+    fireEvent.click(screen.getByRole('button', { name: 'Distribution chart settings' }))
+    expect(screen.getByText('Log Y')).toBeDefined()
+    expect(screen.getByText('Relative drag')).toBeDefined()
+    expect(screen.getByText('X order')).toBeDefined()
+    expect(screen.getByText('bucket label')).toBeDefined()
+  })
+
   it('sorts by group when the Group column header is clicked', () => {
     loadRealData()
     fireEvent.click(screen.getByRole('button', { name: 'Group' }))

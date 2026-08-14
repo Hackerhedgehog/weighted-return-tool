@@ -56,6 +56,11 @@ export interface BuildBarsOptions {
   groupBars: string[]
   /** A log payout axis has nowhere to put a zero-payout bar. */
   logX: boolean
+  /**
+   * 'group' clusters the ladder by group rank (payout order inside each
+   * group). Ignored under logX, whose positions are payout-derived.
+   */
+  xOrder?: 'payout' | 'group'
 }
 
 export interface BuiltBars {
@@ -161,7 +166,13 @@ export function buildBars(
 
   // Stable, so the bucketId tiebreak above survives and a group bar tying with
   // a loose bar keeps the order they were pushed in.
-  bars.sort((a, b) => a.payout - b.payout)
+  const groupRankOf = (b: ChartBar) =>
+    Math.min(...b.uids.map((u) => grouping.rank.get(u) ?? Number.MAX_SAFE_INTEGER))
+  if (opts.xOrder === 'group' && !opts.logX) {
+    bars.sort((a, b) => groupRankOf(a) - groupRankOf(b) || a.payout - b.payout)
+  } else {
+    bars.sort((a, b) => a.payout - b.payout)
+  }
 
   if (!opts.logX) return { bars, droppedZero: 0 }
   const kept = bars.filter((b) => b.payout > 0)

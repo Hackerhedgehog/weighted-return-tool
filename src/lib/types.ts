@@ -214,6 +214,13 @@ export interface ChartSettings {
    */
   groupBars: string[]
   /**
+   * 'group' clusters the x-axis by group rank (payout order inside each
+   * group); 'payout' is the plain ascending ladder. Ignored under Log X.
+   */
+  xOrder: 'payout' | 'group'
+  /** What the x tick under each bar says: its payout, or its bucket label. */
+  xLabels: 'payout' | 'label'
+  /**
    * Forces the distribution chart onto its own line below the buckets table,
    * even when the viewport is wide enough to fit both side by side.
    */
@@ -233,6 +240,8 @@ export const DEFAULT_CHART: ChartSettings = {
   aggregate: true,
   relative: true,
   groupBars: [],
+  xOrder: 'payout',
+  xLabels: 'payout',
   forceStack: false,
   swapped: false,
 }

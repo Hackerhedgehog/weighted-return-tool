@@ -116,7 +116,8 @@ interface DragState {
   blockedNotified: boolean
 }
 
-const MARGIN = { top: 18, right: 150, bottom: 46, left: 64 }
+// Bottom holds a row of diagonal tick labels, so it is deeper than the rest.
+const MARGIN = { top: 18, right: 150, bottom: 68, left: 64 }
 const HANDLE_GAP = 30
 const SEGMENT_GAP = 2
 
@@ -207,7 +208,7 @@ export function DistributionChart({
   /** Bars/handles toggled on with shift+click; a drag on any of them moves them all. */
   const [selected, setSelected] = useState<Set<string>>(() => new Set())
 
-  const { metric, logY, logX, aggregate, relative, groupBars } = chart
+  const { metric, logY, logX, aggregate, relative, groupBars, xOrder, xLabels } = chart
   const set = (patch: Partial<ChartSettings>) => onChart({ ...chart, ...patch })
 
   const clearSelection = () => setSelected((prev) => (prev.size === 0 ? prev : new Set()))
@@ -247,8 +248,8 @@ export function DistributionChart({
   }, [])
 
   const { bars, droppedZero } = useMemo(
-    () => buildBars(rows, grouping, totalWeight, { aggregate, groupBars, logX }),
-    [rows, grouping, totalWeight, aggregate, groupBars, logX],
+    () => buildBars(rows, grouping, totalWeight, { aggregate, groupBars, logX, xOrder }),
+    [rows, grouping, totalWeight, aggregate, groupBars, logX, xOrder],
   )
 
   const plotW = width - MARGIN.left - MARGIN.right
@@ -650,8 +651,19 @@ export function DistributionChart({
     }
   }, [groupStats, scale, plotH])
 
-  const labelEvery = Math.max(1, Math.ceil(n / Math.max(1, Math.floor(plotW / 62))))
+  // Diagonal labels pack far tighter than horizontal ones did — ~16px pitch.
+  const labelEvery = Math.max(1, Math.ceil(n / Math.max(1, Math.floor(plotW / 16))))
   const hovered = hover !== null && hover < bars.length ? bars[hover] : null
+
+  /** The x tick under a bar: group name, bucket label, or payout. */
+  const tickLabel = (b: ChartBar) =>
+    b.kind === 'group'
+      ? b.name
+      : xLabels === 'label'
+        ? b.labels.length === 1
+          ? b.labels[0]
+          : `${b.labels.length} buckets`
+        : `×${fmtPayout(b.payout)}`
 
   /** What the popover calls a bar: its label when there is one, else a summary. */
   const barTitle = (b: ChartBar) =>
@@ -723,23 +735,9 @@ export function DistributionChart({
           <span>Aggregate equal payouts</span>
         </label>
         <label className="checkbox">
-          <input type="checkbox" checked={logY} onChange={(e) => set({ logY: e.target.checked })} />
-          <span>Log Y</span>
-        </label>
-        <label className="checkbox">
           <input type="checkbox" checked={logX} onChange={(e) => set({ logX: e.target.checked })} />
           <span>Log X</span>
         </label>
-        {metric === 'weights' && (
-          <label className="checkbox" title="On: dragging a bar keeps the total weight — other unlocked buckets compensate. Off: only the dragged bar moves.">
-            <input
-              type="checkbox"
-              checked={relative}
-              onChange={(e) => set({ relative: e.target.checked })}
-            />
-            <span>Relative drag</span>
-          </label>
-        )}
         <button type="button" className="btn chart-reset" onClick={axes.resetView} title="Zoom out to fit all data, centered">
           Reset view
         </button>
@@ -854,12 +852,13 @@ export function DistributionChart({
                   inView(i) && (b.kind === 'group' || i % labelEvery === 0) ? (
                     <text
                       key={i}
-                      className="axis-label"
+                      className="axis-label diag"
                       x={centres[i]}
-                      y={height - MARGIN.bottom + 18}
-                      textAnchor="middle"
+                      y={height - MARGIN.bottom + 14}
+                      transform={`rotate(-45 ${centres[i]} ${height - MARGIN.bottom + 14})`}
+                      textAnchor="end"
                     >
-                      {b.kind === 'group' ? b.name : `×${fmtPayout(b.payout)}`}
+                      {tickLabel(b)}
                     </text>
                   ) : null,
                 )}
@@ -1030,7 +1029,7 @@ export function DistributionChart({
               <text
                 className="axis-title"
                 x={MARGIN.left + plotW / 2}
-                y={height - 8}
+                y={height - 6}
                 textAnchor="middle"
               >
                 payout × bet{logX ? ' (logarithmic)' : ' (ascending)'}

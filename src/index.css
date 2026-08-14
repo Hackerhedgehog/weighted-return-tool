@@ -676,6 +676,10 @@ body {
   color: var(--text-dim);
 }
 
+.axis-label.diag {
+  font-size: 10px;
+}
+
 /* ---------- group distribution ---------- */
 
 .gdist-table {

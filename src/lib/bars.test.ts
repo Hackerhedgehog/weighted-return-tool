@@ -64,6 +64,18 @@ describe('buildBars — bucket bars', () => {
     expect(bars[1].allLocked).toBe(false)
   })
 
+  it('orders bars by group rank then payout when xOrder is group', () => {
+    // groupRows ranks: wins first, then bonus, then zero — so the 0.6x wins
+    // bucket leads, the two bonus payouts follow in payout order, zero last.
+    const { bars } = build(rows(), { xOrder: 'group' })
+    expect(bars.map((b) => b.payout)).toEqual([0.6, 8, 100, 0])
+  })
+
+  it('ignores xOrder under logX — positions are payout-derived there', () => {
+    const { bars } = build(rows(), { xOrder: 'group', logX: true })
+    expect(bars.map((b) => b.payout)).toEqual([0.6, 8, 100])
+  })
+
   it('drops zero-payout bars under a log payout axis and counts them', () => {
     const { bars, droppedZero } = build(rows(), { logX: true })
     expect(bars.map((b) => b.payout)).toEqual([0.6, 8, 100])

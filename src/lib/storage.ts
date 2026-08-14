@@ -126,6 +126,9 @@ function isChart(v: unknown): v is ChartSettings {
     // Optional: absent in workspaces saved before groups could be collapsed.
     (v.groupBars === undefined ||
       (Array.isArray(v.groupBars) && v.groupBars.every((s) => typeof s === 'string'))) &&
+    // Optional: absent in workspaces saved before the x-axis options existed.
+    (v.xOrder === undefined || v.xOrder === 'payout' || v.xOrder === 'group') &&
+    (v.xLabels === undefined || v.xLabels === 'payout' || v.xLabels === 'label') &&
     // Optional: absent in workspaces saved before the chart could be force-stacked.
     (v.forceStack === undefined || typeof v.forceStack === 'boolean') &&
     // Optional: absent in workspaces saved before the panels could be swapped.

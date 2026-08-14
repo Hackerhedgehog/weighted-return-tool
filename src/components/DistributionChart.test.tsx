@@ -91,6 +91,22 @@ const lastRows = (fn: ReturnType<typeof vi.fn>): BucketRow[] =>
 const weightsOf = (rows: BucketRow[]) => rows.map((r) => r.weight)
 const sum = (xs: number[]) => xs.reduce((a, b) => a + b, 0)
 
+describe('DistributionChart x-axis labels', () => {
+  it('rotates tick labels diagonally', () => {
+    renderChart({ metric: 'weights' })
+    const tick = document.querySelector('text.axis-label.diag')!
+    expect(tick).toBeTruthy()
+    expect(tick.getAttribute('transform')).toContain('rotate(-45')
+  })
+
+  it('labels ticks by bucket name when xLabels is label', () => {
+    renderChart({ metric: 'weights', xLabels: 'label' })
+    const texts = [...document.querySelectorAll('text.axis-label.diag')].map((t) => t.textContent)
+    expect(texts).toContain('bonus3')
+    expect(texts.some((t) => t?.startsWith('×'))).toBe(false)
+  })
+})
+
 describe('DistributionChart grouping', () => {
   it('draws slim bars', () => {
     // jsdom: useContainerWidth starts at 900px and the faked ResizeObserver
@@ -136,12 +152,11 @@ describe('DistributionChart grouping', () => {
     expect(zero.getAttribute('aria-disabled')).toBe('true')
   })
 
-  it('shows the relative toggle in weights mode only', () => {
+  it('carries no inline Log Y or Relative drag controls — both live in the ⚙ menu', () => {
     renderChart({ metric: 'weights' })
-    expect(screen.getByText('Relative drag')).toBeDefined()
-    cleanup()
-    renderChart({ metric: 'chance' })
     expect(screen.queryByText('Relative drag')).toBeNull()
+    expect(screen.queryByText('Log Y')).toBeNull()
+    expect(screen.getByText('Log X')).toBeDefined()
   })
 })
 

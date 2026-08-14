@@ -1201,6 +1201,78 @@ function WorkspaceView({
                   <h2 title="drag a bar or group handle to reshape · right-click a bar for an exact value · shift+click selects several · scroll an axis to zoom · middle-drag pans · ⚙ for axis and drag options">
                     Distribution
                   </h2>
+                  <GearMenu label="Distribution chart settings">
+                    <label className="checkbox">
+                      <input
+                        type="checkbox"
+                        checked={chart.logY}
+                        onChange={(e) => setChart({ ...chart, logY: e.target.checked })}
+                      />
+                      <span>Log Y</span>
+                    </label>
+                    <label
+                      className="checkbox"
+                      title="On: dragging a bar keeps the total weight — other unlocked buckets compensate. Off: only the dragged bar moves. Chance drags are always relative."
+                    >
+                      <input
+                        type="checkbox"
+                        checked={chart.relative}
+                        disabled={chart.metric === 'chance'}
+                        onChange={(e) => setChart({ ...chart, relative: e.target.checked })}
+                      />
+                      <span>Relative drag</span>
+                    </label>
+                    <div className="gear-group">
+                      <span className="gear-group-label">X order</span>
+                      <label className="checkbox">
+                        <input
+                          type="radio"
+                          name="dist-xorder"
+                          checked={chart.xOrder === 'payout'}
+                          onChange={() => setChart({ ...chart, xOrder: 'payout' })}
+                        />
+                        <span>payout</span>
+                      </label>
+                      <label
+                        className="checkbox"
+                        title={
+                          chart.logX
+                            ? 'Log X positions bars by payout — switch it off to order by group'
+                            : 'Cluster the bars by group, payout order inside each group'
+                        }
+                      >
+                        <input
+                          type="radio"
+                          name="dist-xorder"
+                          disabled={chart.logX}
+                          checked={chart.xOrder === 'group'}
+                          onChange={() => setChart({ ...chart, xOrder: 'group' })}
+                        />
+                        <span>group</span>
+                      </label>
+                    </div>
+                    <div className="gear-group">
+                      <span className="gear-group-label">X labels</span>
+                      <label className="checkbox">
+                        <input
+                          type="radio"
+                          name="dist-xlabels"
+                          checked={chart.xLabels === 'payout'}
+                          onChange={() => setChart({ ...chart, xLabels: 'payout' })}
+                        />
+                        <span>payout</span>
+                      </label>
+                      <label className="checkbox">
+                        <input
+                          type="radio"
+                          name="dist-xlabels"
+                          checked={chart.xLabels === 'label'}
+                          onChange={() => setChart({ ...chart, xLabels: 'label' })}
+                        />
+                        <span>bucket label</span>
+                      </label>
+                    </div>
+                  </GearMenu>
                   <button
                     type="button"
                     className={`btn ${chart.swapped ? 'primary' : ''}`}
