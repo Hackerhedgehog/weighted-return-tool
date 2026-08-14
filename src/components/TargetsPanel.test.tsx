@@ -21,6 +21,7 @@ const renderPanel = (over: Partial<React.ComponentProps<typeof TargetsPanel>> = 
       warnings={[]}
       bucketCount={30}
       lockedCount={0}
+      hasUserCurve={false}
       collapsed={false}
       panelRef={() => {}}
       onCollapsed={() => {}}

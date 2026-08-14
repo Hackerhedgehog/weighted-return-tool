@@ -91,6 +91,12 @@ interface Doc {
   volatility: Volatility
   curve: number
   weightStep: WeightStep
+  /**
+   * The saved user curve: uid → share of total weight at save time. The
+   * solver maintains it while Solve for → User curve is on; the chart draws
+   * it as a reference line. Cleared on import — the uids change.
+   */
+  userCurve: Record<string, number> | null
 }
 
 /** Fills in groups and row fields absent from a pre-groups workspace. */
@@ -113,6 +119,7 @@ const emptyDoc = (): Doc => ({
   volatility: 'medium',
   curve: CURVE_PRESETS.medium,
   weightStep: DEFAULT_WEIGHT_STEP,
+  userCurve: null,
 })
 
 /** A bridge feed waiting to be applied to one specific tab. */
@@ -155,6 +162,7 @@ function WorkspaceView({
           volatility: saved.volatility,
           curve: saved.curve,
           weightStep: saved.weightStep ?? DEFAULT_WEIGHT_STEP,
+          userCurve: saved.userCurve ?? null,
         },
   )
   // Seeded from the per-tab store so switching tabs keeps each tab's undo
@@ -402,6 +410,7 @@ function WorkspaceView({
       targets: doc.targets,
       volatility: doc.volatility,
       curve: doc.curve,
+      userCurve: doc.userCurve,
       columnWidths,
       chart,
       exportFilename,
@@ -556,7 +565,8 @@ function WorkspaceView({
       }
 
       const seeded = seedGroups(rows)
-      commit((d) => ({ ...d, rows: seeded.rows, groups: seeded.groups }))
+      // New rows mean new uids — a saved curve keyed by the old ones is dead.
+      commit((d) => ({ ...d, rows: seeded.rows, groups: seeded.groups, userCurve: null }))
       // New data means new groups; a collapsed id from the old table would
       // either dangle or, worse, collapse an unrelated group of the same name.
       setChart((c) => ({ ...c, groupBars: [] }))
@@ -619,10 +629,21 @@ function WorkspaceView({
       })
       return
     }
-    const res = solveWeights(solveRows, total, d.targets, d.curve, d.weightStep)
+    const res = solveWeights(solveRows, total, d.targets, d.curve, d.weightStep, true, d.userCurve)
     setNotices([...plan.notes, ...res.warnings])
     commit({ ...d, rows: d.rows.map((r, i) => ({ ...r, weight: res.weights[i] })) })
   }, [commit, totalWeight])
+
+  /** Snapshot the current distribution as the curve Auto-Distribute maintains. */
+  const saveCurve = useCallback(() => {
+    const d = docRef.current
+    const total = d.rows.reduce((a, r) => a + Math.max(0, r.weight), 0)
+    if (!(total > 0)) return
+    commit({
+      ...d,
+      userCurve: Object.fromEntries(d.rows.map((r) => [r.uid, Math.max(0, r.weight) / total])),
+    })
+  }, [commit])
 
   const patchRow = useCallback(
     (uid: string, patch: RowPatch) => {
@@ -1067,6 +1088,7 @@ function WorkspaceView({
             warnings={notices}
             bucketCount={doc.rows.length}
             lockedCount={lockedCount}
+            hasUserCurve={doc.userCurve !== null}
             onTargets={(t) => commit((d) => ({ ...d, targets: t }))}
             onVolatility={(v) => commit((d) => ({ ...d, volatility: v, curve: CURVE_PRESETS[v] }))}
             onCurve={(c) => commit((d) => ({ ...d, curve: c, volatility: volatilityForCurve(c) }))}
@@ -1267,6 +1289,17 @@ function WorkspaceView({
                         <span>bucket label</span>
                       </label>
                     </div>
+                    {doc.userCurve !== null && (
+                      <div className="gear-group">
+                        <button
+                          type="button"
+                          className="link-btn"
+                          onClick={() => commit((d) => ({ ...d, userCurve: null }))}
+                        >
+                          Clear saved curve
+                        </button>
+                      </div>
+                    )}
                   </GearMenu>
                   ),
                   children: (
@@ -1277,6 +1310,8 @@ function WorkspaceView({
                   grouping={grouping}
                   weightStep={doc.weightStep}
                   height={effectiveChartHeight}
+                  userCurve={doc.userCurve}
+                  onSaveCurve={saveCurve}
                   onChart={setChart}
                   onHeight={(h) => {
                     setChartHeight(h)

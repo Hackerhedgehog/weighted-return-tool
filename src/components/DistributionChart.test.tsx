@@ -49,6 +49,8 @@ function renderChart(
       grouping={groupRows(rows)}
       weightStep={weightStep}
       height={height}
+      userCurve={null}
+      onSaveCurve={() => {}}
       onChart={onChart}
       onPreview={onPreview}
       onCommit={onCommit}
@@ -90,6 +92,31 @@ const lastRows = (fn: ReturnType<typeof vi.fn>): BucketRow[] =>
 
 const weightsOf = (rows: BucketRow[]) => rows.map((r) => r.weight)
 const sum = (xs: number[]) => xs.reduce((a, b) => a + b, 0)
+
+describe('DistributionChart user curve', () => {
+  it('draws the saved curve as a reference line and offers Save curve', () => {
+    const onSaveCurve = vi.fn()
+    const shares = Object.fromEntries(baseRows().map((r) => [r.uid, 0.25]))
+    renderChart({ metric: 'weights' }, baseRows(), 340, 1, { userCurve: shares, onSaveCurve })
+    expect(document.querySelector('.user-curve-line')).toBeTruthy()
+    fireEvent.click(screen.getByRole('button', { name: 'Save curve' }))
+    expect(onSaveCurve).toHaveBeenCalled()
+  })
+
+  it('draws no line when no curve is saved', () => {
+    renderChart({ metric: 'weights' })
+    expect(document.querySelector('.user-curve-line')).toBeNull()
+  })
+
+  it('skips bars whose buckets carry no saved share', () => {
+    const shares = { a: 0.5, b: 0.3 } // c and d unsaved
+    renderChart({ metric: 'weights' }, baseRows(), 340, 1, { userCurve: shares })
+    // Two points cannot span the unsaved bars — the line still draws through
+    // the two saved ones.
+    const line = document.querySelector('.user-curve-line')!
+    expect(line.getAttribute('points')!.split(' ')).toHaveLength(2)
+  })
+})
 
 describe('DistributionChart x-axis labels', () => {
   it('rotates tick labels diagonally', () => {

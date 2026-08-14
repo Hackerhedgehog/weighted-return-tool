@@ -280,9 +280,28 @@ interface Ctx {
   curve: number
   residual: number
   ordered: boolean
+  /**
+   * The saved user curve as per-row shares, when active. The paying bands'
+   * base shape becomes `share·exp(−γu)` — the saved shape tilted to hit RTP —
+   * and the volatility curvature term is not applied.
+   */
+  userShares: number[] | null
+  /**
+   * While true, gamma is clamped per band to the interval that keeps the
+   * tilted saved shape ordered along the governing ladder. Dropped (the
+   * curve's ordering yields) when the RTP target is unreachable inside it.
+   */
+  curveOrdered: boolean
+  /** Which ladder governs the clamp: the saved-share order, or payout order. */
+  curveByShare: boolean
 }
 
-function buildCtx(rows: BucketRow[], total: number, curve: number): Ctx {
+function buildCtx(
+  rows: BucketRow[],
+  total: number,
+  curve: number,
+  userShares: number[] | null = null,
+): Ctx {
   const n = rows.length
   const payouts = rows.map((r) => r.payout)
   const locked = rows.map((r) => r.locked)
@@ -310,7 +329,38 @@ function buildCtx(rows: BucketRow[], total: number, curve: number): Ctx {
     n, payouts, locked, current, u, freeIdx, lockedSum, totalLocked, total, curve,
     residual: residualIndex(rows),
     ordered: true,
+    userShares,
+    curveOrdered: userShares !== null,
+    curveByShare: true,
   }
+}
+
+/**
+ * The gamma interval that keeps the tilted saved shape ordered along a
+ * ladder. For a consecutive pair (e earlier, l later — the earlier one must
+ * not weigh less): ln(share_e) − γu_e ≥ ln(share_l) − γu_l, which is
+ * γ·(u_l − u_e) ≥ ln(share_l / share_e). A later entry further up the payout
+ * ladder gives a lower bound, one further down an upper bound.
+ */
+function shareGammaBounds(ctx: Ctx, idx: number[]): [number, number] {
+  const shares = ctx.userShares!
+  const order = [...idx].sort(
+    ctx.curveByShare
+      ? (a, b) => shares[b] - shares[a] || a - b
+      : (a, b) => ctx.u[a] - ctx.u[b] || a - b,
+  )
+  let lo = -Infinity
+  let hi = Infinity
+  for (let k = 1; k < order.length; k++) {
+    const e = order[k - 1]
+    const l = order[k]
+    const du = ctx.u[l] - ctx.u[e]
+    if (Math.abs(du) < 1e-12) continue
+    const bound = Math.log(Math.max(shares[l], 1e-12) / Math.max(shares[e], 1e-12)) / du
+    if (du > 0) lo = Math.max(lo, bound)
+    else hi = Math.min(hi, bound)
+  }
+  return [lo, hi]
 }
 
 function massesFor(targets: Targets, s: number, total: number): number[] {
@@ -465,9 +515,15 @@ function continuousWeights(
     const budget = budgets[g]
     if (idx.length > 0 && budget > 0) {
       // Zero-payout buckets contribute nothing to RTP and there is no
-      // principled curve for them, so keep whatever balance the user has.
-      const base = idx.map((i) => ctx.current[i])
-      const sum = base.reduce((a, b) => a + b, 0)
+      // principled curve for them, so keep whatever balance the user has —
+      // or the saved curve's, when one is active.
+      let base =
+        ctx.userShares !== null ? idx.map((i) => ctx.userShares![i]) : idx.map((i) => ctx.current[i])
+      let sum = base.reduce((a, b) => a + b, 0)
+      if (!(sum > 0) && ctx.userShares !== null) {
+        base = idx.map((i) => ctx.current[i])
+        sum = base.reduce((a, b) => a + b, 0)
+      }
       const props = sum > 0 ? base.map((b) => b / sum) : zeroShares(idx, ctx.residual)
       idx.forEach((i, k) => {
         w[i] = props[k] * budget
@@ -477,8 +533,22 @@ function continuousWeights(
 
   for (const [idx, budget] of curveBands(ctx, budgets, pooled)) {
     if (idx.length === 0 || !(budget > 0)) continue
-    const g = ctx.ordered ? Math.max(gamma, bandFloor(ctx, idx)) : gamma
-    const logs = idx.map((i) => -g * ctx.u[i] - ctx.curve * ctx.u[i] * ctx.u[i])
+    // The gamma floor enforces payout order of the exp family. With a saved
+    // base shape the governing ladder instead bounds gamma to an interval per
+    // band — clamped only while the curve's ordering is being kept at all.
+    let g = gamma
+    if (ctx.userShares !== null) {
+      if (ctx.curveOrdered) {
+        const [lo, hi] = shareGammaBounds(ctx, idx)
+        if (lo <= hi) g = clamp(g, lo, hi)
+      }
+    } else if (ctx.ordered) {
+      g = Math.max(gamma, bandFloor(ctx, idx))
+    }
+    const logs =
+      ctx.userShares !== null
+        ? idx.map((i) => Math.log(Math.max(ctx.userShares![i], 1e-12)) - g * ctx.u[i])
+        : idx.map((i) => -g * ctx.u[i] - ctx.curve * ctx.u[i] * ctx.u[i])
     const maxLog = Math.max(...logs)
     const raw = logs.map((l) => Math.exp(l - maxLog))
     const sum = raw.reduce((a, b) => a + b, 0)
@@ -625,12 +695,16 @@ function ladderIdx(ctx: Ctx): number[] {
   )
 }
 
-/** True when no higher payout carries more weight than a lower one. */
-function inOrder(ctx: Ctx, w: number[], ladder: number[]): boolean {
+/**
+ * True when no later ladder entry carries more weight than an earlier one.
+ * `keys` decides which pairs are constrained — the payout by default, or the
+ * negated saved share when the user curve's own ordering is the ladder.
+ */
+function inOrder(ctx: Ctx, w: number[], ladder: number[], keys: number[] = ctx.payouts): boolean {
   for (let k = 1; k < ladder.length; k++) {
     const lo = ladder[k - 1]
     const hi = ladder[k]
-    if (ctx.payouts[hi] > ctx.payouts[lo] && w[hi] > w[lo]) return false
+    if (keys[hi] > keys[lo] && w[hi] > w[lo]) return false
   }
   return true
 }
@@ -675,13 +749,19 @@ function groupLaddersOf(ctx: Ctx, rows: BucketRow[]): number[][] {
  * the resulting cascade converges geometrically rather than one rung per pass —
  * a four-bucket band can need seven.
  */
-function enforceOrder(ctx: Ctx, w: number[], step: number, ladder: number[]): void {
+function enforceOrder(
+  ctx: Ctx,
+  w: number[],
+  step: number,
+  ladder: number[],
+  keys: number[] = ctx.payouts,
+): void {
   for (let pass = 0; pass < ladder.length * 50 + 100; pass++) {
     let moved = false
     for (let k = 1; k < ladder.length; k++) {
       const lo = ladder[k - 1]
       const hi = ladder[k]
-      if (ctx.payouts[hi] <= ctx.payouts[lo]) continue
+      if (keys[hi] <= keys[lo]) continue
       const excess = w[hi] - w[lo]
       if (excess <= 0) continue
       const give = Math.min(Math.ceil(excess / 2 / step) * step, Math.max(0, w[hi] - step))
@@ -723,12 +803,13 @@ function transfer(
   pair: [number, number] | null,
   step: number,
   ladders: number[][],
+  guardKeys?: number[],
 ): void {
   if (pair === null) return
   const [lo, hi] = pair
   const span = ctx.payouts[hi] - ctx.payouts[lo]
   if (!(span > 0)) return
-  const ordered = () => ladders.every((l) => inOrder(ctx, w, l))
+  const ordered = () => ladders.every((l) => inOrder(ctx, w, l, guardKeys))
 
   // Keep the existing conditional floors. Replacing them with a bare `step`
   // inverts the clamp's range whenever a bucket already sits below one step —
@@ -774,14 +855,21 @@ function transfer(
  * by ordering — a transfer that would close the gap but invert the ladder is
  * refused rather than taken.
  */
-function repairRtp(ctx: Ctx, w: number[], target: number, step: number, ladders: number[][]): void {
+function repairRtp(
+  ctx: Ctx,
+  w: number[],
+  target: number,
+  step: number,
+  ladders: number[][],
+  guardKeys?: number[],
+): void {
   const idx = ctx.freeIdx[2]
   if (idx.length < 2) return
 
   const err = () => Math.abs(target - rtpOf(ctx, w)) * ctx.total
   for (const pair of payoutPairs(ctx, idx)) {
     if (err() < 1e-9) return
-    transfer(ctx, w, target, pair, step, ladders)
+    transfer(ctx, w, target, pair, step, ladders, guardKeys)
   }
 }
 
@@ -901,6 +989,13 @@ export function solveWeights(
   step: WeightStep = 1,
   /** Internal: false on the inner call, so the remainder split cannot recurse. */
   absorbRemainder = true,
+  /**
+   * The saved user curve: uid → share of total weight at save time. Active
+   * when `targets.useUserCurve` holds and at least one uid matches a row —
+   * the paying bands' shape becomes the saved one, tilted to hit RTP, and
+   * the `usercurve` priority rank decides every conflict it gets into.
+   */
+  userCurve?: Record<string, number> | null,
 ): SolveResult {
   const empty: SolveResult = {
     weights: rows.map((r) => Math.max(0, Math.round(r.weight))),
@@ -912,9 +1007,25 @@ export function solveWeights(
   }
   if (rows.length === 0 || !(totalWeight > 0)) return empty
 
+  // The saved user curve, mapped onto row indices. Rows added after the save
+  // fall back to their current share of the solve total.
+  const curveActive =
+    targets.useUserCurve !== false &&
+    userCurve != null &&
+    rows.some((r) => userCurve[r.uid] !== undefined)
+  const userShares = curveActive
+    ? rows.map((r) => {
+        const s = userCurve![r.uid]
+        return s !== undefined
+          ? Math.max(0, s)
+          : Math.max(0, Math.round(r.weight)) / Math.max(1, totalWeight)
+      })
+    : null
+
   // Volatility off means no curvature term at all — a pure power law, with
-  // gamma alone left to solve RTP.
-  const ctx = buildCtx(rows, totalWeight, targets.useVolatility ? curve : 0)
+  // gamma alone left to solve RTP. A live user curve owns the shape outright,
+  // so the curvature is inert while it is active.
+  const ctx = buildCtx(rows, totalWeight, targets.useVolatility ? curve : 0, userShares)
   const pooled = !targets.useChances
   const warnings: string[] = []
 
@@ -922,6 +1033,24 @@ export function solveWeights(
   // when the two collide, the one that does not gets sacrificed.
   const priority = normalizePriority(targets.priority)
   const above = (a: PriorityKey, b: PriorityKey) => priority.indexOf(a) < priority.indexOf(b)
+  const curveAboveRtp = userShares !== null && above('usercurve', 'rtp')
+  const curveAboveOrdering = userShares !== null && above('usercurve', 'ordering')
+  // The governing ladder for the gamma clamp: the curve's own order when it
+  // outranks ordering, the payout ladder when ordering outranks it.
+  ctx.curveByShare = curveAboveOrdering
+
+  // The saved curve's band masses, for when usercurve outranks a chance
+  // preference: they replace the target-derived masses band by band.
+  const savedMasses = (() => {
+    if (userShares === null) return null
+    const sums = [0, 0, 0]
+    rows.forEach((r, i) => {
+      sums[groupOf(r.payout)] += userShares[i]
+    })
+    const s = sums[0] + sums[1] + sums[2]
+    if (!(s > 0)) return null
+    return sums.map((v) => (v / s) * totalWeight)
+  })()
 
   if (ctx.freeIdx.every((g) => g.length === 0)) {
     return { ...empty, warnings: ['Every row is locked — nothing left to distribute.'] }
@@ -942,7 +1071,7 @@ export function solveWeights(
     // `freeWeight - remainder` divides by construction, so the inner call
     // takes the normal path; the flag makes that guarantee explicit.
     const base = absorbRemainder
-      ? solveWeights(rows, totalWeight - remainder, targets, curve, step, false)
+      ? solveWeights(rows, totalWeight - remainder, targets, curve, step, false, userCurve)
       : null
     const weights = base === null ? null : [...base.weights]
     const carrier = weights === null ? -1 : remainderCarrier(rows, weights)
@@ -982,6 +1111,29 @@ export function solveWeights(
    * does the caller run this again unordered, which is the pre-ordering search
    * exactly.
    */
+  /**
+   * The masses to solve at a band position: the targets' when the chances
+   * outrank the user curve, the saved curve's for each band it outranks. The
+   * paying split is decided as a win-share ratio, so a hybrid still sums to
+   * the total exactly.
+   */
+  const hybridMasses = (s: number): number[] => {
+    const t = massesFor(targets, s, totalWeight)
+    if (savedMasses === null) return t
+    const zero = above('usercurve', 'hit') ? savedMasses[0] : t[0]
+    const paying = Math.max(0, totalWeight - zero)
+    const savedPaying = savedMasses[1] + savedMasses[2]
+    const targetPaying = t[1] + t[2]
+    const winShare = above('usercurve', 'win')
+      ? savedPaying > 0
+        ? savedMasses[2] / savedPaying
+        : 0
+      : targetPaying > 0
+        ? t[2] / targetPaying
+        : 0
+    return [zero, paying * (1 - winShare), paying * winShare]
+  }
+
   const chooseBand = (c: Ctx): Candidate => {
     const reaches = (budgets: number[]) => {
       const [min, max] = reachRange(c, budgets, pooled)
@@ -990,13 +1142,15 @@ export function solveWeights(
 
     if (pooled) {
       // Nothing to search: with no chance targets there is no band to spend.
-      const { budgets, conflict } = freeBudgets(c, currentMasses(c, targets), step)
+      // A live user curve supplies the masses; otherwise the table as it
+      // stands does.
+      const { budgets, conflict } = freeBudgets(c, savedMasses ?? currentMasses(c, targets), step)
       return { s: 0, budgets, conflict, reachable: reaches(budgets) }
     }
 
     let fallback: Candidate | null = null
     for (const s of bandCandidates()) {
-      const { budgets, conflict } = freeBudgets(c, massesFor(targets, s, totalWeight), step)
+      const { budgets, conflict } = freeBudgets(c, hybridMasses(s), step)
       const candidate: Candidate = { s, budgets, conflict, reachable: reaches(budgets) }
       if (!conflict && candidate.reachable) return candidate
       // Locks are hard, so a lock-clean position beats an RTP-reachable one.
@@ -1004,7 +1158,7 @@ export function solveWeights(
     }
     if (fallback !== null) return fallback
 
-    const { budgets, conflict } = freeBudgets(c, massesFor(targets, 0, totalWeight), step)
+    const { budgets, conflict } = freeBudgets(c, hybridMasses(0), step)
     return { s: 0, budgets, conflict, reachable: reaches(budgets) }
   }
 
@@ -1020,9 +1174,12 @@ export function solveWeights(
   let chosen = chooseBand(ctx)
   let curveUsed = ctx.curve
   let orderYielded = false
+  let curveOrderYielded = false
 
-  if (!chosen.reachable) {
-    const sacrifices = (['volatility', 'ordering', 'rtp'] as const)
+  // With the curve ranked above RTP, the miss is the accepted outcome — no
+  // lower-ranked dimension may be spent chasing a target the curve outranks.
+  if (!chosen.reachable && !curveAboveRtp) {
+    const sacrifices = (['volatility', 'ordering', 'usercurve', 'rtp'] as const)
       .slice()
       .sort((a, b) => priority.indexOf(b) - priority.indexOf(a))
 
@@ -1030,6 +1187,9 @@ export function solveWeights(
       if (dim === 'rtp') break
 
       if (dim === 'volatility') {
+        // With a live user curve there is no curvature in the shape to
+        // flatten — the dimension has nothing to give.
+        if (solveCtx.userShares !== null) continue
         const flat = fitCurve(solveCtx, chosen.budgets, targets.rtp, pooled)
         const flattened = flat === null ? null : chooseBand({ ...solveCtx, curve: flat })
         if (flat !== null && flattened !== null && flattened.reachable) {
@@ -1041,14 +1201,29 @@ export function solveWeights(
         continue
       }
 
+      if (dim === 'usercurve') {
+        // Dropping the gamma clamp lets RTP through; the curve's ordering is
+        // what gives, and the notice below says so.
+        if (solveCtx.userShares === null || !solveCtx.curveOrdered) continue
+        const relaxedCurve = { ...solveCtx, curveOrdered: false }
+        const relaxed = chooseBand(relaxedCurve)
+        if (relaxed.reachable) {
+          solveCtx = relaxedCurve
+          chosen = relaxed
+          curveOrderYielded = true
+          break
+        }
+        continue
+      }
+
       // Ordering yields with the user's own curvature, not a flattened one —
       // if flattening ran before this and did not reach, it bought nothing.
-      const unordered = { ...ctx, ordered: false }
+      const unordered = { ...solveCtx, ordered: false }
       const relaxed = chooseBand(unordered)
       if (relaxed.reachable) {
         solveCtx = unordered
         chosen = relaxed
-        curveUsed = ctx.curve
+        curveUsed = solveCtx.curve
         orderYielded = true
         break
       }
@@ -1070,17 +1245,21 @@ export function solveWeights(
   const orderAboveWin = above('ordering', 'win')
 
   for (let round = 0; round < ORDER_ROUNDS; round++) {
-    gamma = solveGamma(solveCtx, budgets, targets.rtp, pooled)
+    // Above RTP, the curve's shape is exact: γ = 0 means no tilt at all.
+    gamma = curveAboveRtp ? 0 : solveGamma(solveCtx, budgets, targets.rtp, pooled)
     cont = continuousWeights(solveCtx, budgets, gamma, pooled)
     if (!solveCtx.ordered) {
       settled = true
       break
     }
-    if (orderAboveHit && raiseResidual(solveCtx, budgets, cont, step) > 0) {
+    // The two mass repairs serve *payout* ordering; when the saved curve
+    // outranks ordering it is the curve's own shape that rules, so neither
+    // may spend chance repairing a ladder the curve deliberately bends.
+    if (orderAboveHit && !curveAboveOrdering && raiseResidual(solveCtx, budgets, cont, step) > 0) {
       yieldedHit = true
       continue
     }
-    if (orderAboveWin && levelBoundary(solveCtx, budgets, cont, step) > 0) {
+    if (orderAboveWin && !curveAboveOrdering && levelBoundary(solveCtx, budgets, cont, step) > 0) {
       yieldedWin = true
       continue
     }
@@ -1095,12 +1274,28 @@ export function solveWeights(
   // guard the repair, so the deliberate inversions live between groups only.
   const ladder = solveCtx.ordered ? ladderIdx(solveCtx) : []
   const groupLadders = solveCtx.ordered ? [] : groupLaddersOf(solveCtx, rows)
+  // The saved curve's own ordering, as a ladder: paying rows by share
+  // descending, keyed on the negated share so the enforce/guard machinery
+  // reads "weight never rises as saved share falls".
+  const shareKeys = solveCtx.userShares === null ? null : solveCtx.userShares.map((s) => -s)
+  const shareLadder =
+    shareKeys === null
+      ? []
+      : [...solveCtx.freeIdx[1], ...solveCtx.freeIdx[2]].sort(
+          (a, b) => shareKeys[a] - shareKeys[b] || a - b,
+        )
   const weights = allocate(solveCtx, cont, step)
   if (!solveCtx.ordered) {
     for (const lad of groupLadders) enforceOrder(solveCtx, weights, step, lad)
   }
   if (solveCtx.ordered) {
-    if (orderAboveWin) {
+    if (curveAboveOrdering) {
+      // The saved order is the ladder: deliberate inversions like "1x rarer
+      // than 2x" are enforced, not repaired away — but only while the clamp
+      // held. On a shape the clamp could not keep ordered, integer transfers
+      // would push weight up the payout ladder and wreck RTP.
+      if (solveCtx.curveOrdered) enforceOrder(solveCtx, weights, step, shareLadder, shareKeys!)
+    } else if (orderAboveWin) {
       enforceOrder(solveCtx, weights, step, ladder)
     } else {
       // A transfer across the 1x boundary moves mass between the small-win
@@ -1112,18 +1307,25 @@ export function solveWeights(
     }
     // The residual's integer top-up takes its weight from the paying ladder —
     // hit chance again — so it is gated exactly like raiseResidual above.
-    if (orderAboveHit) restoreResidual(solveCtx, weights, step)
+    if (orderAboveHit && !curveAboveOrdering) restoreResidual(solveCtx, weights, step)
   }
   // repairRtp only ever moves weight inside the win band, but its guard reads
   // whatever ladders it is handed. With the 1x boundary allowed to stand
   // inverted (win chance outranks ordering), a full-ladder guard would read
   // that standing inversion as breakage and veto every transfer — so the
   // guard shrinks to the band the repair actually touches. In the unordered
-  // regime the guard is the per-group ladders just enforced.
+  // regime the guard is the per-group ladders just enforced; under a live
+  // user curve it is the saved-order ladder.
   const guardLadders = solveCtx.ordered
-    ? [orderAboveWin ? ladder : ladder.filter((i) => groupOf(solveCtx.payouts[i]) === 2)]
+    ? curveAboveOrdering
+      ? solveCtx.curveOrdered
+        ? [shareLadder]
+        : []
+      : [orderAboveWin ? ladder : ladder.filter((i) => groupOf(solveCtx.payouts[i]) === 2)]
     : groupLadders
-  repairRtp(solveCtx, weights, targets.rtp, step, guardLadders)
+  const guardKeys = solveCtx.ordered && curveAboveOrdering ? shareKeys! : undefined
+  // Above RTP, no repair may bend the shape toward a target the curve outranks.
+  if (!curveAboveRtp) repairRtp(solveCtx, weights, targets.rtp, step, guardLadders, guardKeys)
 
   const achieved = statsOf(
     rows.map((r, i) => ({ ...r, weight: weights[i] })),
@@ -1134,14 +1336,35 @@ export function solveWeights(
   // inverted everywhere on purpose, and any lock that happens to sit beside one
   // of those inversions would be blamed for a mess it did not make — unlocking
   // it would change nothing.
-  if (solveCtx.ordered) {
+  if (solveCtx.ordered && !curveAboveOrdering) {
     const lockNote = lockedOrderNote(solveCtx, rows, weights)
     if (lockNote !== null) warnings.push(lockNote)
   }
 
+  // Payout ordering outranked the curve and won — say the curve gave way.
+  if (
+    solveCtx.ordered &&
+    solveCtx.userShares !== null &&
+    !curveAboveOrdering &&
+    !inOrder(solveCtx, weights, shareLadder, shareKeys!)
+  ) {
+    warnings.push("The saved user curve's ordering yielded to payout ordering.")
+  }
+  if (curveOrderYielded) {
+    warnings.push(
+      `The saved user curve's ordering could not be kept at RTP ${targets.rtp} — it yielded to the higher-ranked targets.`,
+    )
+  }
+
+  if (curveAboveRtp && Math.abs(achieved.rtp - targets.rtp) > 1e-6) {
+    warnings.push(
+      `Target RTP ${targets.rtp} not solved — the user curve outranks it (achieved ${achieved.rtp.toFixed(6)}).`,
+    )
+  }
+
   if (chosen.conflict && targets.useChances) {
     const over = [0, 1, 2].filter(
-      (g) => ctx.lockedSum[g] - massesFor(targets, chosen!.s, totalWeight)[g] > 0.5,
+      (g) => ctx.lockedSum[g] - hybridMasses(chosen!.s)[g] > 0.5,
     )
     for (const g of over) {
       warnings.push(
@@ -1192,9 +1415,10 @@ export function solveWeights(
 
   // Reachability is a property of the continuous solve. Integer rounding
   // leaves a residue whose size depends on the closest pair of payouts on the
-  // ladder, so it is not evidence that the target was unreachable.
+  // ladder, so it is not evidence that the target was unreachable. With the
+  // curve above RTP the dedicated warning above already owns the miss.
   const [min, max] = reachRange(solveCtx, budgets, pooled)
-  if (!(targets.rtp >= min - 1e-12 && targets.rtp <= max + 1e-12)) {
+  if (!curveAboveRtp && !(targets.rtp >= min - 1e-12 && targets.rtp <= max + 1e-12)) {
     warnings.push(
       `Target RTP ${targets.rtp} is out of reach at these chances — achieved ${achieved.rtp.toFixed(6)}.`,
     )
@@ -1213,12 +1437,22 @@ export function solveWeights(
     warnings.push('Weights could not be brought into payout order within the solver’s iteration limit.')
   }
 
-  // Nothing to report against when the chances are not being steered.
+  // Nothing to report against when the chances are not being steered. A
+  // chance the user curve outranks follows the curve's masses — reported as
+  // such rather than as a plain band miss.
+  const isOutside = (got: number, want: number) =>
+    want > 0 && (got < want * (1 - tau) - 1e-9 || got > want * (1 + tau) + 1e-9)
   if (targets.useChances) {
     if (yieldedHit) {
       warnings.push(
         `Hit chance yielded to payout ordering — achieved ${achieved.hitChance.toFixed(3)} against a target of ${targets.hitChance}.`,
       )
+    } else if (userShares !== null && above('usercurve', 'hit')) {
+      if (isOutside(achieved.hitChance, targets.hitChance)) {
+        warnings.push(
+          `Hit chance follows the saved curve — achieved ${achieved.hitChance.toFixed(3)} against a target of ${targets.hitChance}.`,
+        )
+      }
     } else {
       outOfBand('hit chance', achieved.hitChance, targets.hitChance)
     }
@@ -1226,6 +1460,12 @@ export function solveWeights(
       warnings.push(
         `Win chance yielded to payout ordering — achieved ${achieved.winChance.toFixed(3)} against a target of ${targets.winChance}.`,
       )
+    } else if (userShares !== null && above('usercurve', 'win')) {
+      if (isOutside(achieved.winChance, targets.winChance)) {
+        warnings.push(
+          `Win chance follows the saved curve — achieved ${achieved.winChance.toFixed(3)} against a target of ${targets.winChance}.`,
+        )
+      }
     } else {
       outOfBand('win chance', achieved.winChance, targets.winChance)
     }

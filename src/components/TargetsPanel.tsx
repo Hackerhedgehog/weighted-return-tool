@@ -21,6 +21,8 @@ interface TargetsPanelProps {
   warnings: string[]
   bucketCount: number
   lockedCount: number
+  /** Whether a user curve is saved — gates the Solve for → User curve toggle. */
+  hasUserCurve: boolean
   collapsed: boolean
   /** App measures the panel to keep the other sticky offsets clear of it. */
   panelRef: (el: HTMLElement | null) => void
@@ -177,6 +179,7 @@ export function TargetsPanel(props: TargetsPanelProps) {
     warnings,
     bucketCount,
     lockedCount,
+    hasUserCurve,
     collapsed,
     panelRef,
     onCollapsed,
@@ -199,6 +202,11 @@ export function TargetsPanel(props: TargetsPanelProps) {
 
   const rtpDelta = achieved.rtp - targets.rtp
   const rtpOk = Math.abs(rtpDelta) < 1e-6
+
+  // While the saved curve steers the solve it owns the shape outright, so
+  // the volatility fields are readouts — same treatment as useVolatility off.
+  const curveActive = hasUserCurve && targets.useUserCurve
+  const volatilityOn = targets.useVolatility && !curveActive
 
   /**
    * Auto-Distribute appears in exactly one place at a time — the settings row
@@ -356,7 +364,10 @@ export function TargetsPanel(props: TargetsPanelProps) {
           </div>
         </div>
 
-        <div className={targets.useVolatility ? 'target-field' : 'target-field off'}>
+        <div
+          className={volatilityOn ? 'target-field' : 'target-field off'}
+          title={curveActive ? 'The user curve owns the shape while it is active' : undefined}
+        >
           <label className="field-label">Volatility</label>
           <div className="seg small">
             {VOLATILITY_STEPS.map((v) => (
@@ -364,7 +375,7 @@ export function TargetsPanel(props: TargetsPanelProps) {
                 key={v}
                 type="button"
                 className={`seg-btn ${volatility === v ? 'active' : ''}`}
-                disabled={!targets.useVolatility}
+                disabled={!volatilityOn}
                 onClick={() => onVolatility(v)}
                 title={`curve c = ${CURVE_PRESETS[v]}`}
               >
@@ -375,10 +386,13 @@ export function TargetsPanel(props: TargetsPanelProps) {
           </div>
         </div>
 
-        <div className={targets.useVolatility ? 'target-field' : 'target-field off'}>
+        <div
+          className={volatilityOn ? 'target-field' : 'target-field off'}
+          title={curveActive ? 'The user curve owns the shape while it is active' : undefined}
+        >
           <label className="field-label">Curve c</label>
           <PanelNumber
-            disabled={!targets.useVolatility}
+            disabled={!volatilityOn}
             display={String(curve)}
             raw={String(curve)}
             ariaLabel="Curve curvature"
@@ -405,6 +419,22 @@ export function TargetsPanel(props: TargetsPanelProps) {
               onChange={(e) => onTargets({ ...targets, useVolatility: e.target.checked })}
             />
             <span>Volatility curve</span>
+          </label>
+          <label
+            className="checkbox"
+            title={
+              hasUserCurve
+                ? 'On: Auto-Distribute keeps the saved curve’s shape and ordering'
+                : 'Save a curve first — the Save curve button on the distribution chart'
+            }
+          >
+            <input
+              type="checkbox"
+              disabled={!hasUserCurve}
+              checked={targets.useUserCurve && hasUserCurve}
+              onChange={(e) => onTargets({ ...targets, useUserCurve: e.target.checked })}
+            />
+            <span>User curve</span>
           </label>
         </div>
 

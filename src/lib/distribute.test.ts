@@ -44,6 +44,104 @@ const inversions = (rs: BucketRow[], w: number[]): string[] => {
   return bad
 }
 
+describe('user curve', () => {
+  const mkRow = (id: number, payout: number, label: string): BucketRow => ({
+    uid: `u${id}`,
+    bucketId: id,
+    payout,
+    label,
+    weight: 0,
+    locked: false,
+    groupId: 'g',
+    weightId: '',
+  })
+  // Four paying buckets + residual, saved from a near-tuned table (raw RTP
+  // 0.72 against a 0.9 target) with a deliberate inversion: 1x is RARER
+  // than 2x, which plain payout ordering would repair away.
+  const curveRows = [
+    mkRow(0, 0, '0x'),
+    mkRow(1, 1, '1x'),
+    mkRow(2, 2, '2x'),
+    mkRow(3, 10, '10x'),
+    mkRow(4, 100, '100x'),
+  ]
+  const shares: Record<string, number> = {
+    u0: 0.735,
+    u1: 0.1,
+    u2: 0.14,
+    u3: 0.024,
+    u4: 0.001,
+  }
+  const targets = { ...DEFAULT_TARGETS, rtp: 0.9, useChances: false }
+
+  it('keeps the saved ordering (1x rarer than 2x) while hitting RTP', () => {
+    const res = solveWeights(curveRows, 1_000_000, targets, 0.09, 1, true, shares)
+    expect(res.achieved.rtp).toBeCloseTo(0.9, 4)
+    const w = res.weights
+    expect(w[1]).toBeLessThanOrEqual(w[2]) // saved order survives
+    expect(w[2]).toBeLessThanOrEqual(w[0]) // residual still heaviest
+    expect(res.warnings.some((m) => /yielded/i.test(m))).toBe(false)
+  })
+
+  it('with usercurve ranked above rtp the shape is exact and the miss is reported', () => {
+    const t = {
+      ...targets,
+      priority: ['usercurve', 'rtp', 'ordering', 'volatility', 'hit', 'win'] as PriorityKey[],
+    }
+    const res = solveWeights(curveRows, 1_000_000, t, 0.09, 1, true, shares)
+    for (const [i, uid] of curveRows.map((r, i) => [i, r.uid] as const)) {
+      expect(res.weights[i] / 1_000_000).toBeCloseTo(shares[uid], 2)
+    }
+    expect(res.warnings.some((w) => /user curve outranks/i.test(w))).toBe(true)
+  })
+
+  it('with ordering ranked above usercurve the payout ladder wins and a notice says so', () => {
+    const t = {
+      ...targets,
+      priority: ['rtp', 'ordering', 'usercurve', 'volatility', 'hit', 'win'] as PriorityKey[],
+    }
+    const res = solveWeights(curveRows, 1_000_000, t, 0.09, 1, true, shares)
+    expect(res.weights[2]).toBeLessThanOrEqual(res.weights[1]) // payout order restored
+    expect(res.warnings.some((w) => /yielded to payout ordering/i.test(w))).toBe(true)
+  })
+
+  it('is inert when useUserCurve is off or no share matches', () => {
+    const plain = solveWeights(curveRows, 1_000_000, targets, 0.09)
+    const off = solveWeights(
+      curveRows,
+      1_000_000,
+      { ...targets, useUserCurve: false },
+      0.09,
+      1,
+      true,
+      shares,
+    )
+    const none = solveWeights(curveRows, 1_000_000, targets, 0.09, 1, true, { nope: 0.5 })
+    expect(off.weights).toEqual(plain.weights)
+    expect(none.weights).toEqual(plain.weights)
+  })
+
+  it('band masses follow the saved curve when usercurve outranks the chances', () => {
+    const t = { ...targets, useChances: true, hitChance: 0.3, winChance: 0.12 }
+    const res = solveWeights(curveRows, 1_000_000, t, 0.09, 1, true, shares)
+    // saved zero-band mass is 0.735 → hit chance lands ≈ 0.265, not 0.3
+    expect(res.achieved.hitChance).toBeCloseTo(0.265, 2)
+    expect(res.achieved.rtp).toBeCloseTo(0.9, 4)
+  })
+
+  it('target masses win when the chances outrank usercurve', () => {
+    const t = {
+      ...targets,
+      useChances: true,
+      hitChance: 0.3,
+      winChance: 0.12,
+      priority: ['rtp', 'hit', 'win', 'usercurve', 'ordering', 'volatility'] as PriorityKey[],
+    }
+    const res = solveWeights(curveRows, 1_000_000, t, 0.09, 1, true, shares)
+    expect(res.achieved.hitChance).toBeCloseTo(0.3, 2)
+  })
+})
+
 describe('groupOf', () => {
   it('splits on 0 and 1', () => {
     expect(groupOf(0)).toBe(0)

@@ -66,6 +66,10 @@ interface DistributionChartProps {
   grouping: Grouping
   weightStep: WeightStep
   height: number
+  /** The saved user curve (uid → share), drawn as a reference line; null when none saved. */
+  userCurve: Record<string, number> | null
+  /** Snapshot the current distribution as the saved curve. */
+  onSaveCurve: () => void
   onChart: (c: ChartSettings) => void
   onHeight: (h: number) => void
   /** Reset gesture on the grip — restores auto-fit rather than a fixed height. */
@@ -173,6 +177,8 @@ export function DistributionChart({
   grouping,
   weightStep,
   height,
+  userCurve,
+  onSaveCurve,
   onChart,
   onHeight,
   onHeightReset,
@@ -741,6 +747,14 @@ export function DistributionChart({
         <button type="button" className="btn chart-reset" onClick={axes.resetView} title="Zoom out to fit all data, centered">
           Reset view
         </button>
+        <button
+          type="button"
+          className="btn"
+          onClick={onSaveCurve}
+          title="Snapshot the current distribution as the curve Auto-Distribute maintains (Solve for → User curve)"
+        >
+          Save curve
+        </button>
       </div>
 
       <GroupChips
@@ -845,6 +859,29 @@ export function DistributionChart({
                     </g>
                   )
                 })}
+
+                {/* The saved user curve, as a dashed reference line over the
+                    bars — visible even when the solve deviates from it, which
+                    is exactly when it is worth seeing. */}
+                {userCurve !== null &&
+                  (() => {
+                    const pts: string[] = []
+                    bars.forEach((b, i) => {
+                      if (!inView(i)) return
+                      const share = b.uids.reduce((a, u) => a + (userCurve[u] ?? NaN), 0)
+                      if (!Number.isFinite(share)) return
+                      const v = metric === 'weights' ? share * totalWeight : share
+                      pts.push(`${centres[i]},${yOf(v)}`)
+                    })
+                    return pts.length >= 2 ? (
+                      <polyline
+                        className="user-curve-line"
+                        points={pts.join(' ')}
+                        fill="none"
+                        pointerEvents="none"
+                      />
+                    ) : null
+                  })()}
 
                 {bars.map((b, i) =>
                   // Group bars are the coarse landmarks of the view and there are

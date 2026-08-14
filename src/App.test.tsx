@@ -220,6 +220,27 @@ describe('App', () => {
     ).toContain('drag a bar')
   })
 
+  it('saves a user curve: line appears, Solve-for toggle arms, clear removes it', () => {
+    loadRealData()
+    // Before a save: no line, and the Solve for → User curve toggle is inert.
+    expect(document.querySelector('.user-curve-line')).toBeNull()
+    const toggle = () =>
+      screen.getByRole('checkbox', { name: /User curve/ }) as HTMLInputElement
+    expect(toggle().disabled).toBe(true)
+
+    fireEvent.click(screen.getByRole('button', { name: 'Save curve' }))
+    expect(document.querySelector('.user-curve-line')).not.toBeNull()
+    expect(toggle().disabled).toBe(false)
+    expect(toggle().checked).toBe(true)
+
+    // Clear lives in the chart gear and is undoable like any doc change.
+    fireEvent.click(screen.getByRole('button', { name: 'Distribution chart settings' }))
+    fireEvent.click(screen.getByRole('button', { name: 'Clear saved curve' }))
+    expect(document.querySelector('.user-curve-line')).toBeNull()
+    fireEvent.keyDown(window, { key: 'z', ctrlKey: true })
+    expect(document.querySelector('.user-curve-line')).not.toBeNull()
+  })
+
   it('keeps Log Y and Relative drag in the chart gear menu, with the X options', () => {
     loadRealData()
     fireEvent.click(screen.getByRole('button', { name: 'Distribution chart settings' }))

@@ -71,6 +71,8 @@ export interface Workspace {
    * instead migrate the legacy chart.swapped / chart.forceStack flags.
    */
   layout?: DockLayout
+  /** Optional — absent in workspaces saved before the user curve existed. */
+  userCurve?: Record<string, number> | null
 }
 
 const isObject = (v: unknown): v is Record<string, unknown> =>
@@ -197,7 +199,10 @@ function isWorkspace(v: unknown): v is Workspace {
     (v.hiddenBucketColumns === undefined ||
       (Array.isArray(v.hiddenBucketColumns) &&
         v.hiddenBucketColumns.every((s) => typeof s === 'string'))) &&
-    (v.layout === undefined || isDockLayout(v.layout))
+    (v.layout === undefined || isDockLayout(v.layout)) &&
+    (v.userCurve === undefined ||
+      v.userCurve === null ||
+      (isObject(v.userCurve) && Object.values(v.userCurve).every(isFiniteNumber)))
   )
 }
 

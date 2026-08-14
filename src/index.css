@@ -733,6 +733,13 @@ body {
   opacity: 0.55;
 }
 
+.user-curve-line {
+  stroke: var(--accent);
+  stroke-width: 1.5;
+  stroke-dasharray: 5 4;
+  opacity: 0.9;
+}
+
 /* ---------- group distribution ---------- */
 
 .gdist-table {

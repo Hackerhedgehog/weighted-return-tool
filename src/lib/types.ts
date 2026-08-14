@@ -106,13 +106,21 @@ export const DEFAULT_WEIGHT_STEP: WeightStep = 1
  * for what "yielding" means per dimension. Row locks are not listed: they are
  * absolute and outrank everything by design.
  */
-export type PriorityKey = 'rtp' | 'ordering' | 'volatility' | 'hit' | 'win'
+export type PriorityKey = 'rtp' | 'usercurve' | 'ordering' | 'volatility' | 'hit' | 'win'
 
-/** The solver's long-standing fixed ranking, now merely the default. */
-export const DEFAULT_PRIORITY: PriorityKey[] = ['rtp', 'ordering', 'volatility', 'hit', 'win']
+/** The default ranking: the user's saved curve sits right under RTP. */
+export const DEFAULT_PRIORITY: PriorityKey[] = [
+  'rtp',
+  'usercurve',
+  'ordering',
+  'volatility',
+  'hit',
+  'win',
+]
 
 export const PRIORITY_LABELS: Record<PriorityKey, string> = {
   rtp: 'Target RTP',
+  usercurve: 'User curve',
   ordering: 'Ordering / weighted value',
   volatility: 'Volatility curve',
   hit: 'Pref hit chance',
@@ -121,8 +129,11 @@ export const PRIORITY_LABELS: Record<PriorityKey, string> = {
 
 /**
  * A priority list from storage or an older workspace, made safe to rank by:
- * unknown keys dropped, duplicates collapsed, missing keys appended in default
- * order. Total by construction, so `indexOf` on the result never misses.
+ * unknown keys dropped, duplicates collapsed, missing keys inserted at their
+ * default-relative position — directly after the last present key that
+ * precedes them in the default order, so a pre-usercurve workspace gains
+ * User curve at rank 2 rather than at the bottom. Total by construction, so
+ * `indexOf` on the result never misses.
  */
 export function normalizePriority(p: readonly string[] | undefined): PriorityKey[] {
   const seen = new Set<PriorityKey>()
@@ -133,7 +144,16 @@ export function normalizePriority(p: readonly string[] | undefined): PriorityKey
       out.push(k as PriorityKey)
     }
   }
-  for (const k of DEFAULT_PRIORITY) if (!seen.has(k)) out.push(k)
+  for (const k of DEFAULT_PRIORITY) {
+    if (seen.has(k)) continue
+    const earlier = DEFAULT_PRIORITY.slice(0, DEFAULT_PRIORITY.indexOf(k))
+    let at = 0
+    out.forEach((x, i) => {
+      if (earlier.includes(x)) at = i + 1
+    })
+    out.splice(at, 0, k)
+    seen.add(k)
+  }
   return out
 }
 
@@ -158,6 +178,11 @@ export interface Targets {
   useChances: boolean
   /** Off: the tail shape is left as a pure power law, c = 0. */
   useVolatility: boolean
+  /**
+   * Off: a saved user curve stops steering Auto-Distribute. Only meaningful
+   * while a curve is saved; defaults on so saving a curve activates it.
+   */
+  useUserCurve: boolean
   /** Conflict-resolution ranking. Optional — absent in older workspaces, meaning the default. */
   priority?: PriorityKey[]
 }
@@ -169,6 +194,7 @@ export const DEFAULT_TARGETS: Targets = {
   tolerance: 3.5,
   useChances: true,
   useVolatility: true,
+  useUserCurve: true,
   priority: DEFAULT_PRIORITY,
 }
 
