@@ -1,7 +1,7 @@
 // @vitest-environment jsdom
 import { describe, it, expect, beforeEach, afterEach, vi } from 'vitest'
 import { cleanup, fireEvent, render, screen } from '@testing-library/react'
-import { DistributionChart } from './DistributionChart'
+import { DistributionChart, type DistributionChartHandle } from './DistributionChart'
 import { groupRows } from '../lib/groups'
 import { DEFAULT_CHART, type BucketRow, type ChartSettings } from '../lib/types'
 
@@ -29,7 +29,6 @@ function renderChart(
   weightStep: 1 | 10 | 100 = 1,
   extra: Partial<React.ComponentProps<typeof DistributionChart>> = {},
 ) {
-  const onChart = vi.fn()
   const onPreview = vi.fn()
   const onCommit = vi.fn()
   const onBlocked = vi.fn()
@@ -50,8 +49,6 @@ function renderChart(
       weightStep={weightStep}
       height={height}
       userCurve={null}
-      onSaveCurve={() => {}}
-      onChart={onChart}
       onPreview={onPreview}
       onCommit={onCommit}
       onBlocked={onBlocked}
@@ -71,7 +68,6 @@ function renderChart(
     />,
   )
   return {
-    onChart,
     onPreview,
     onCommit,
     onBlocked,
@@ -94,13 +90,10 @@ const weightsOf = (rows: BucketRow[]) => rows.map((r) => r.weight)
 const sum = (xs: number[]) => xs.reduce((a, b) => a + b, 0)
 
 describe('DistributionChart user curve', () => {
-  it('draws the saved curve as a reference line and offers Save curve', () => {
-    const onSaveCurve = vi.fn()
+  it('draws the saved curve as a reference line', () => {
     const shares = Object.fromEntries(baseRows().map((r) => [r.uid, 0.25]))
-    renderChart({ metric: 'weights' }, baseRows(), 340, 1, { userCurve: shares, onSaveCurve })
+    renderChart({ metric: 'weights' }, baseRows(), 340, 1, { userCurve: shares })
     expect(document.querySelector('.user-curve-line')).toBeTruthy()
-    fireEvent.click(screen.getByRole('button', { name: 'Save curve' }))
-    expect(onSaveCurve).toHaveBeenCalled()
   })
 
   it('draws no line when no curve is saved', () => {
@@ -179,11 +172,13 @@ describe('DistributionChart grouping', () => {
     expect(zero.getAttribute('aria-disabled')).toBe('true')
   })
 
-  it('carries no inline Log Y or Relative drag controls — both live in the ⚙ menu', () => {
+  it('carries no inline settings controls — metric, aggregate, axis and drag options all live in App.tsx\'s header and ⚙ menu', () => {
     renderChart({ metric: 'weights' })
     expect(screen.queryByText('Relative drag')).toBeNull()
     expect(screen.queryByText('Log Y')).toBeNull()
-    expect(screen.getByText('Log X')).toBeDefined()
+    expect(screen.queryByText('Log X')).toBeNull()
+    expect(screen.queryByText('Aggregate equal payouts')).toBeNull()
+    expect(screen.queryByRole('button', { name: 'Weights' })).toBeNull()
   })
 })
 
@@ -625,9 +620,12 @@ describe('DistributionChart zoom and pan', () => {
     expect(screen.getByRole('slider', { name: "Zoom the distribution chart's x-axis" })).toBeDefined()
   })
 
-  it('renders a reset view button', () => {
-    renderChart({ metric: 'weights' })
-    expect(screen.getByRole('button', { name: /reset/i })).toBeDefined()
+  it('exposes resetView via ref for App.tsx\'s header button to call', () => {
+    const ref = { current: null as DistributionChartHandle | null }
+    const { onXZoom, onYZoom } = renderChart({ metric: 'weights' }, baseRows(), 340, 1, { ref })
+    ref.current!.resetView()
+    expect(onXZoom).toHaveBeenCalled()
+    expect(onYZoom).toHaveBeenCalled()
   })
 
   it('zooms both axes together when scrolling the plot itself', () => {

@@ -9,7 +9,7 @@ import type {
   WeightStep,
 } from './types'
 import { isHexColor } from './palette'
-import { isDockLayout, type DockLayout } from './layout'
+import { isDockLayout, isLegacyDockLayout, type DockLayout, type LegacyDockLayout } from './layout'
 
 /**
  * One autosaved workspace. The key carries the schema version, and the payload
@@ -68,9 +68,11 @@ export interface Workspace {
   hiddenBucketColumns?: string[]
   /**
    * Optional — absent in workspaces saved before the dock existed, which
-   * instead migrate the legacy chart.swapped / chart.forceStack flags.
+   * instead migrate the legacy chart.swapped / chart.forceStack flags. A
+   * workspace saved by the pre-tree dock carries the flat `LegacyDockLayout`
+   * shape instead, which the app migrates on load via `migrateLegacyLayout`.
    */
-  layout?: DockLayout
+  layout?: DockLayout | LegacyDockLayout
   /** Optional — absent in workspaces saved before the user curve existed. */
   userCurve?: Record<string, number> | null
 }
@@ -199,7 +201,7 @@ function isWorkspace(v: unknown): v is Workspace {
     (v.hiddenBucketColumns === undefined ||
       (Array.isArray(v.hiddenBucketColumns) &&
         v.hiddenBucketColumns.every((s) => typeof s === 'string'))) &&
-    (v.layout === undefined || isDockLayout(v.layout)) &&
+    (v.layout === undefined || isDockLayout(v.layout) || isLegacyDockLayout(v.layout)) &&
     (v.userCurve === undefined ||
       v.userCurve === null ||
       (isObject(v.userCurve) && Object.values(v.userCurve).every(isFiniteNumber)))

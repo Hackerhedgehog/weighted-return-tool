@@ -233,9 +233,9 @@ describe('App', () => {
     expect(toggle().disabled).toBe(false)
     expect(toggle().checked).toBe(true)
 
-    // Clear lives in the chart gear and is undoable like any doc change.
-    fireEvent.click(screen.getByRole('button', { name: 'Distribution chart settings' }))
-    fireEvent.click(screen.getByRole('button', { name: 'Clear saved curve' }))
+    // The same header button toggles to Clear curve once one is saved, and
+    // clearing is undoable like any doc change.
+    fireEvent.click(screen.getByRole('button', { name: 'Clear curve' }))
     expect(document.querySelector('.user-curve-line')).toBeNull()
     fireEvent.keyDown(window, { key: 'z', ctrlKey: true })
     expect(document.querySelector('.user-curve-line')).not.toBeNull()
@@ -772,7 +772,7 @@ describe('numpad decimal', () => {
 })
 
 describe('page layout', () => {
-  it('docks the three panels — group distribution on its own row, table beside chart', () => {
+  it('docks the three panels — group distribution above, table beside chart', () => {
     loadRealData()
     const content = document.querySelector('.content')!
     expect([...content.children].map((el) => el.className)).toEqual([
@@ -780,14 +780,13 @@ describe('page layout', () => {
       'dock-wrap',
       'panel full',
     ])
-    const rows = document.querySelectorAll('.dock-row')
-    expect(rows).toHaveLength(2)
-    expect(rows[0].querySelector('.dock-panel')!.className).toContain('group-dist')
-    const second = [...rows[1].querySelectorAll('.dock-panel')].map((el) => el.className)
-    expect(second[0]).toContain('buckets')
-    expect(second[1]).toContain('chart')
+    const panels = [...document.querySelectorAll('.dock-panel')].map((el) => el.className)
+    expect(panels[0]).toContain('group-dist')
+    expect(panels[1]).toContain('buckets')
+    expect(panels[2]).toContain('chart')
     // The chart sticks only while it shares a row with the table.
-    expect(second[1]).toContain('dock-sticky')
+    expect(panels[2]).toContain('dock-sticky')
+    expect(document.querySelectorAll('.dock-row')).toHaveLength(1)
   })
 
   it('has no Swap sides or Stack below buttons — panels move by dragging their headers', () => {
@@ -801,13 +800,17 @@ describe('page layout', () => {
     // The workspace save is debounced (see SAVE_DEBOUNCE_MS in App.tsx), and
     // persists per-tab under TABS_KEY, not the legacy single-workspace
     // STORAGE_KEY — App.tsx only ever calls loadTabsState/saveTabsState.
+    // Leaf ids in document order — root children flattened, regardless of nesting.
+    const leafIds = (n: { type: string; id?: string; children?: unknown[] }): string[] =>
+      n.type === 'leaf'
+        ? [n.id!]
+        : (n.children as { type: string; id?: string; children?: unknown[] }[]).flatMap(leafIds)
+
     await waitFor(() => {
       const saved = JSON.parse(localStorage.getItem(TABS_KEY)!) as TabsState
       const active = saved.tabs.find((t) => t.id === saved.active)
-      expect(active?.workspace?.layout?.rows.map((r) => r.panels.map((p) => p.id))).toEqual([
-        ['groupDist'],
-        ['buckets', 'chart'],
-      ])
+      const root = active?.workspace?.layout as { root: { type: string; id?: string; children?: unknown[] } }
+      expect(leafIds(root.root)).toEqual(['groupDist', 'buckets', 'chart'])
     })
   })
 })
@@ -1275,9 +1278,10 @@ describe('group bars', () => {
     render(<App />)
     fireEvent.click(screen.getByRole('button', { name: 'Load sample' }))
 
-    // The table's Collapse row renders a chip named "bonus" too, so the
+    // The table's Collapse gear renders a chip named "bonus" too, so the
     // chart's chip is picked out by its title rather than its name.
     const before = document.querySelectorAll('.bar').length
+    fireEvent.click(screen.getByRole('button', { name: 'Group bars' }))
     fireEvent.click(screen.getByTitle('Draw bonus as one bar'))
 
     expect(document.querySelectorAll('.bar').length).toBeLessThan(before)
@@ -1300,6 +1304,7 @@ describe('group bars', () => {
       exportFilename: 'f.tsv',
     })
     render(<App />)
+    fireEvent.click(screen.getByRole('button', { name: 'Group bars' }))
     expect(screen.getByRole('button', { name: 'bonus', pressed: true })).toBeDefined()
     expect(document.querySelectorAll('.bar')).toHaveLength(1)
   })

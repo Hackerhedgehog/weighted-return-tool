@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useRef, useState } from 'react'
+import { forwardRef, useEffect, useImperativeHandle, useMemo, useRef, useState } from 'react'
 import type { BucketRow, ChartSettings, GroupDef, WeightStep } from '../lib/types'
 import type { Grouping } from '../lib/groups'
 import { buildBars, type ChartBar, type Segment } from '../lib/bars'
@@ -10,7 +10,6 @@ import { ChartResizeGrip } from './ChartResizeGrip'
 import { ChartScrollbar } from './ChartScrollbar'
 import { ChartXAxisZoom } from './ChartXAxisZoom'
 import { ChartYAxisZoom } from './ChartYAxisZoom'
-import { GroupChips } from './GroupChips'
 import { DIST_HEIGHT, linearBarWidth, logBarWidth, niceCeil, useContainerWidth } from './chartUtils'
 import { useChartAxes } from './useChartAxes'
 import { useCombinedWheelZoom } from './useCombinedWheelZoom'
@@ -68,9 +67,6 @@ interface DistributionChartProps {
   height: number
   /** The saved user curve (uid → share), drawn as a reference line; null when none saved. */
   userCurve: Record<string, number> | null
-  /** Snapshot the current distribution as the saved curve. */
-  onSaveCurve: () => void
-  onChart: (c: ChartSettings) => void
   onHeight: (h: number) => void
   /** Reset gesture on the grip — restores auto-fit rather than a fixed height. */
   onHeightReset?: () => void
@@ -170,33 +166,41 @@ function spreadPositions(ys: number[], gap: number, lo: number, hi: number): num
   return out
 }
 
-export function DistributionChart({
-  rows,
-  totalWeight,
-  chart,
-  grouping,
-  weightStep,
-  height,
-  userCurve,
-  onSaveCurve,
-  onChart,
-  onHeight,
-  onHeightReset,
-  onPreview,
-  onCommit,
-  onBlocked,
-  onGroupLock,
-  softLocked,
-  onGroupSoftLock,
-  yZoom,
-  onYZoom,
-  yPan,
-  onYPan,
-  xZoom,
-  onXZoom,
-  xPan,
-  onXPan,
-}: DistributionChartProps) {
+/** Imperative surface for header controls App.tsx renders outside this component. */
+export interface DistributionChartHandle {
+  /** Restores the auto-fit view — the same reset the ⚙-less Reset view button always triggered. */
+  resetView: () => void
+}
+
+export const DistributionChart = forwardRef<DistributionChartHandle, DistributionChartProps>(
+  function DistributionChart(
+    {
+      rows,
+      totalWeight,
+      chart,
+      grouping,
+      weightStep,
+      height,
+      userCurve,
+      onHeight,
+      onHeightReset,
+      onPreview,
+      onCommit,
+      onBlocked,
+      onGroupLock,
+      softLocked,
+      onGroupSoftLock,
+      yZoom,
+      onYZoom,
+      yPan,
+      onYPan,
+      xZoom,
+      onXZoom,
+      xPan,
+      onXPan,
+    },
+    ref,
+  ) {
   const [containerRef, width] = useContainerWidth()
   const [hover, setHover] = useState<number | null>(null)
   const svgRef = useRef<SVGSVGElement>(null)
@@ -215,7 +219,6 @@ export function DistributionChart({
   const [selected, setSelected] = useState<Set<string>>(() => new Set())
 
   const { metric, logY, logX, aggregate, relative, groupBars, xOrder, xLabels } = chart
-  const set = (patch: Partial<ChartSettings>) => onChart({ ...chart, ...patch })
 
   const clearSelection = () => setSelected((prev) => (prev.size === 0 ? prev : new Set()))
   const toggleSelected = (key: string) =>
@@ -352,6 +355,11 @@ export function DistributionChart({
     // no zero to keep visible; it just pans/zooms across decades.
     keepZeroVisible: yBaseline.kind === 'linear',
   })
+
+  // Header controls (group bars, reset view, save/clear curve) live in
+  // App.tsx's shared panel head, not in this component — resetView is the
+  // one piece of that toolbar that only exists once the axes are built here.
+  useImperativeHandle(ref, () => ({ resetView: axes.resetView }), [axes.resetView])
 
   const liveScale = useMemo(() => {
     const label = (v: number) => (metric === 'weights' ? fmtWeight(v) : fmtPct(v, 3))
@@ -715,57 +723,6 @@ export function DistributionChart({
 
   return (
     <>
-      <div className="chart-controls">
-        <div className="seg small">
-          <button
-            type="button"
-            className={`seg-btn ${metric === 'weights' ? 'active' : ''}`}
-            onClick={() => set({ metric: 'weights' })}
-          >
-            Weights
-          </button>
-          <button
-            type="button"
-            className={`seg-btn ${metric === 'chance' ? 'active' : ''}`}
-            onClick={() => set({ metric: 'chance' })}
-          >
-            % Chance
-          </button>
-        </div>
-        <label className="checkbox">
-          <input
-            type="checkbox"
-            checked={aggregate}
-            onChange={(e) => set({ aggregate: e.target.checked })}
-          />
-          <span>Aggregate equal payouts</span>
-        </label>
-        <label className="checkbox">
-          <input type="checkbox" checked={logX} onChange={(e) => set({ logX: e.target.checked })} />
-          <span>Log X</span>
-        </label>
-        <button type="button" className="btn chart-reset" onClick={axes.resetView} title="Zoom out to fit all data, centered">
-          Reset view
-        </button>
-        <button
-          type="button"
-          className="btn"
-          onClick={onSaveCurve}
-          title="Snapshot the current distribution as the curve Auto-Distribute maintains (Solve for → User curve)"
-        >
-          Save curve
-        </button>
-      </div>
-
-      <GroupChips
-        groups={grouping.groups}
-        selected={groupBars}
-        onSelected={(ids) => set({ groupBars: ids })}
-        label="Group bars"
-        titleOn={(n) => `Show ${n}'s buckets`}
-        titleOff={(n) => `Draw ${n} as one bar`}
-      />
-
       <div className="chart-wrap" ref={containerRef}>
         {n === 0 ? (
           <div className="chart-empty">No buckets to plot.</div>
@@ -1152,4 +1109,6 @@ export function DistributionChart({
       </div>
     </>
   )
-}
+  },
+)
+

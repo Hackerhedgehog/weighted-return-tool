@@ -25,6 +25,15 @@ describe('GearMenu', () => {
     expect(screen.queryByText('Inside')).toBeNull()
   })
 
+  it('uses a custom icon when given one, defaulting to the gear', () => {
+    render(
+      <GearMenu label="Group bars" icon="▤">
+        <span>Inside</span>
+      </GearMenu>,
+    )
+    expect(screen.getByRole('button', { name: 'Group bars' }).textContent).toBe('▤')
+  })
+
   it('stays open on pointerdown inside the popover', () => {
     render(
       <GearMenu label="Table settings">

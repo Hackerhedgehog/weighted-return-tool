@@ -2,7 +2,16 @@ import { useEffect, useRef, useState } from 'react'
 import type { ReactNode } from 'react'
 
 /** A ⚙ button opening a small click-away popover — column toggles, chart options. */
-export function GearMenu({ label, children }: { label: string; children: ReactNode }) {
+export function GearMenu({
+  label,
+  icon = '⚙',
+  children,
+}: {
+  label: string
+  /** Glyph shown on the trigger button; defaults to the gear. */
+  icon?: string
+  children: ReactNode
+}) {
   const [open, setOpen] = useState(false)
   const ref = useRef<HTMLDivElement>(null)
 
@@ -32,7 +41,7 @@ export function GearMenu({ label, children }: { label: string; children: ReactNo
         title={label}
         onClick={() => setOpen((v) => !v)}
       >
-        ⚙
+        {icon}
       </button>
       {open && <div className="gear-pop">{children}</div>}
     </div>

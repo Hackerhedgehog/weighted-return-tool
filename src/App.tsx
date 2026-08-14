@@ -47,7 +47,15 @@ import {
   type LockState,
 } from './lib/groups'
 import { emptyHistory, pushHistory, redo, undo, type HistoryState } from './lib/history'
-import { isDockLayout, migrateLayout, normalizeLayout, type DockLayout } from './lib/layout'
+import {
+  isDockLayout,
+  isLegacyDockLayout,
+  migrateLayout,
+  migrateLegacyLayout,
+  normalizeLayout,
+  panelsShareRow,
+  type DockLayout,
+} from './lib/layout'
 import { DEFAULT_SPINS } from './lib/sim'
 import {
   loadTabsState,
@@ -62,7 +70,7 @@ import { GearMenu } from './components/GearMenu'
 import { GroupDistributionTable } from './components/GroupDistributionTable'
 import { PanelDock } from './components/PanelDock'
 import { clampHeight, DIST_HEIGHT, SIM_HEIGHT } from './components/chartUtils'
-import { DistributionChart } from './components/DistributionChart'
+import { DistributionChart, type DistributionChartHandle } from './components/DistributionChart'
 import { GroupChips } from './components/GroupChips'
 import { SettingsPanel } from './components/SettingsPanel'
 import { TabStrip } from './components/TabStrip'
@@ -252,13 +260,15 @@ function WorkspaceView({
   )
   // A workspace saved before the dock existed derives its layout from the old
   // chart flags (swapped / forceStack), which stay readable on disk.
-  const [layout, setLayout] = useState<DockLayout>(() =>
-    saved?.layout !== undefined && isDockLayout(saved.layout)
-      ? normalizeLayout(saved.layout)
-      : migrateLayout(
-          saved?.chart as unknown as { swapped?: boolean; forceStack?: boolean } | undefined,
-        ),
-  )
+  const [layout, setLayout] = useState<DockLayout>(() => {
+    if (saved?.layout !== undefined && isDockLayout(saved.layout)) return normalizeLayout(saved.layout)
+    if (saved?.layout !== undefined && isLegacyDockLayout(saved.layout)) {
+      return migrateLegacyLayout(saved.layout)
+    }
+    return migrateLayout(saved?.chart as unknown as { swapped?: boolean; forceStack?: boolean } | undefined)
+  })
+  /** The distribution chart's imperative resetView, for the header's Reset view button. */
+  const chartRef = useRef<DistributionChartHandle>(null)
   const [settingsOpen, setSettingsOpen] = useState(false)
   const [sort, setSort] = useState<SortState>({ key: 'id', dir: 1 })
   // View state like chart.groupBars, and deliberately separate from it:
@@ -323,11 +333,7 @@ function WorkspaceView({
   }, [])
 
   /** Auto-fit only makes sense while the chart shares a row with the (open) table. */
-  const chartRow = layout.rows.find((r) => r.panels.some((p) => p.id === 'chart'))
-  const chartBesideBuckets =
-    chartRow !== undefined &&
-    chartRow.panels.length > 1 &&
-    chartRow.panels.some((p) => p.id === 'buckets')
+  const chartBesideBuckets = panelsShareRow(layout, 'chart', 'buckets')
 
   const effectiveChartHeight =
     chartHeightAuto && tableHeight !== null && chartBesideBuckets && !bucketsCollapsed
@@ -1180,18 +1186,20 @@ function WorkspaceView({
                         <span>{c.label}</span>
                       </label>
                     ))}
+                    <div className="gear-group">
+                      <span className="gear-group-label">Collapse groups</span>
+                      <GroupChips
+                        groups={grouping.groups}
+                        selected={collapsedGroups}
+                        onSelected={setCollapsedGroups}
+                        label="Collapse"
+                        titleOn={(n) => `Show ${n}'s buckets as rows`}
+                        titleOff={(n) => `Fold ${n} into one summary row`}
+                      />
+                    </div>
                   </GearMenu>
                   ),
                   children: (
-                  <>
-                    <GroupChips
-                      groups={grouping.groups}
-                      selected={collapsedGroups}
-                      onSelected={setCollapsedGroups}
-                      label="Collapse"
-                      titleOn={(n) => `Show ${n}'s buckets as rows`}
-                      titleOff={(n) => `Fold ${n} into one summary row`}
-                    />
                     <BucketTable
                       rows={viewRows}
                       totalWeight={totalWeight}
@@ -1211,14 +1219,78 @@ function WorkspaceView({
                       onExpand={(id) => setCollapsedGroups((prev) => prev.filter((g) => g !== id))}
                       onGroupLock={setGroupLocked}
                     />
-                  </>
                   ),
                 },
                 chart: {
                   title: 'Distribution',
                   hint: 'drag a bar or group handle to reshape · right-click a bar for an exact value · shift+click selects several · scroll an axis to zoom · middle-drag pans · ⚙ for axis and drag options · drag this header to move the panel',
                   headExtra: (
+                  <>
+                    <GearMenu label="Group bars" icon="▤">
+                      <GroupChips
+                        groups={grouping.groups}
+                        selected={chart.groupBars}
+                        onSelected={(ids) => setChart({ ...chart, groupBars: ids })}
+                        label="Group bars"
+                        titleOn={(n) => `Show ${n}'s buckets`}
+                        titleOff={(n) => `Draw ${n} as one bar`}
+                      />
+                    </GearMenu>
+                    <button
+                      type="button"
+                      className="btn gear-btn"
+                      onClick={() => chartRef.current?.resetView()}
+                      title="Zoom out to fit all data, centered"
+                    >
+                      ⤢
+                    </button>
+                    <button
+                      type="button"
+                      className="btn gear-btn"
+                      onClick={() =>
+                        doc.userCurve !== null ? commit((d) => ({ ...d, userCurve: null })) : saveCurve()
+                      }
+                      title={
+                        doc.userCurve !== null
+                          ? 'Discard the saved curve Auto-Distribute maintains'
+                          : 'Snapshot the current distribution as the curve Auto-Distribute maintains (Solve for → User curve)'
+                      }
+                    >
+                      {doc.userCurve !== null ? 'Clear curve' : 'Save curve'}
+                    </button>
                     <GearMenu label="Distribution chart settings">
+                    <div className="seg small">
+                      <button
+                        type="button"
+                        className={`seg-btn ${chart.metric === 'weights' ? 'active' : ''}`}
+                        onClick={() => setChart({ ...chart, metric: 'weights' })}
+                      >
+                        Weights
+                      </button>
+                      <button
+                        type="button"
+                        className={`seg-btn ${chart.metric === 'chance' ? 'active' : ''}`}
+                        onClick={() => setChart({ ...chart, metric: 'chance' })}
+                      >
+                        % Chance
+                      </button>
+                    </div>
+                    <label className="checkbox">
+                      <input
+                        type="checkbox"
+                        checked={chart.aggregate}
+                        onChange={(e) => setChart({ ...chart, aggregate: e.target.checked })}
+                      />
+                      <span>Aggregate equal payouts</span>
+                    </label>
+                    <label className="checkbox">
+                      <input
+                        type="checkbox"
+                        checked={chart.logX}
+                        onChange={(e) => setChart({ ...chart, logX: e.target.checked })}
+                      />
+                      <span>Log X</span>
+                    </label>
                     <label className="checkbox">
                       <input
                         type="checkbox"
@@ -1289,21 +1361,12 @@ function WorkspaceView({
                         <span>bucket label</span>
                       </label>
                     </div>
-                    {doc.userCurve !== null && (
-                      <div className="gear-group">
-                        <button
-                          type="button"
-                          className="link-btn"
-                          onClick={() => commit((d) => ({ ...d, userCurve: null }))}
-                        >
-                          Clear saved curve
-                        </button>
-                      </div>
-                    )}
                   </GearMenu>
+                  </>
                   ),
                   children: (
                 <DistributionChart
+                  ref={chartRef}
                   rows={viewRows}
                   totalWeight={totalWeight}
                   chart={chart}
@@ -1311,8 +1374,6 @@ function WorkspaceView({
                   weightStep={doc.weightStep}
                   height={effectiveChartHeight}
                   userCurve={doc.userCurve}
-                  onSaveCurve={saveCurve}
-                  onChart={setChart}
                   onHeight={(h) => {
                     setChartHeight(h)
                     setChartHeightAuto(false)

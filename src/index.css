@@ -549,13 +549,24 @@ body {
   align-items: flex-start;
 }
 
+/* A 'col' split nested inside a row cell — same stacking the top-level dock
+   does, so two panels can stack beside a third full-height one. */
+.dock-col {
+  display: flex;
+  flex-direction: column;
+  gap: 16px;
+  min-width: 0;
+}
+
 .dock-cell {
   display: flex;
   align-items: stretch;
   min-width: 0;
 }
 
-.dock-cell > .dock-panel {
+.dock-cell > .dock-panel,
+.dock-cell > .dock-row,
+.dock-cell > .dock-col {
   flex: 1 1 auto;
   min-width: 0;
 }
@@ -596,17 +607,6 @@ body {
   position: sticky;
   top: calc(var(--targets-h, 0px) + 8px);
   align-self: start;
-}
-
-.dock-drop-row {
-  position: absolute;
-  left: 0;
-  right: 0;
-  height: 4px;
-  background: var(--accent);
-  border-radius: 2px;
-  z-index: 40;
-  pointer-events: none;
 }
 
 .dock-drop-beside {
