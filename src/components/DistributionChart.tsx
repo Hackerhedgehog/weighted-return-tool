@@ -41,7 +41,9 @@ import { useMiddleDragPan } from './useMiddleDragPan'
  *    handle); dragging any selected item then moves every selected item by
  *    the same absolute amount in the current metric, each keeping its own
  *    value, just shifted by the same delta. A plain click elsewhere, or
- *    outside the chart entirely, clears the selection.
+ *    outside the chart entirely, clears the selection. Shift+left-click on
+ *    empty plot background instead drags out a rubber-band box; every bar it
+ *    overlaps on release joins the selection, additively like a single toggle.
  *
  * During a drag the pointer math and the rendered axis both use the scale
  * captured at pointer-down: recomputing the scale per move would rescale the
@@ -217,6 +219,14 @@ export const DistributionChart = forwardRef<DistributionChartHandle, Distributio
   >(null)
   /** Bars/handles toggled on with shift+click; a drag on any of them moves them all. */
   const [selected, setSelected] = useState<Set<string>>(() => new Set())
+  /**
+   * Shift+drag on empty plot background: a rubber-band box, in svg-pixel
+   * coordinates. Live state so it renders; the ref just tells pointer-move
+   * whether a box is in progress without waiting for the render it triggers.
+   */
+  const [boxSel, setBoxSel] = useState<{ x0: number; y0: number; x1: number; y1: number } | null>(
+    null,
+  )
 
   const { metric, logY, logX, aggregate, relative, groupBars, xOrder, xLabels } = chart
 
@@ -488,6 +498,87 @@ export const DistributionChart = forwardRef<DistributionChartHandle, Distributio
   const barKey = (b: ChartBar) => `bar:${b.uids.join('|')}`
   const handleKey = (g: GroupDef) => `handle:${g.id}`
 
+  /** Pointer position in the svg's own pixel coordinates — same space xOf/yOf render in. */
+  const svgPoint = (e: React.PointerEvent) => {
+    const r = svgRef.current?.getBoundingClientRect()
+    return { x: e.clientX - (r?.left ?? 0), y: e.clientY - (r?.top ?? 0) }
+  }
+
+  /** A bar's own rect in svg pixels, top/bottom regardless of which is numerically smaller. */
+  const barRect = (b: ChartBar, i: number) => {
+    const v = valueOf(b)
+    const a = yOf(0)
+    const c = yOf(v)
+    return {
+      left: centres[i] - barW / 2,
+      right: centres[i] + barW / 2,
+      top: Math.min(a, c),
+      bottom: Math.max(a, c),
+    }
+  }
+
+  /**
+   * A shift+pointerdown is ambiguous until it either releases in place (a
+   * plain toggle, `toggleKey`) or moves past the threshold (a rubber-band
+   * box, `toggleKey` dropped). This is why shift+click on a single bar still
+   * works even though bar-hit rects tile the entire plot — there is no empty
+   * background behind them for a box-drag to start from otherwise, so the
+   * same pointerdown that would toggle one item is also the one that can
+   * grow into a box.
+   */
+  const MOVE_THRESHOLD = 4
+  const shiftRef = useRef<{ x0: number; y0: number; moved: boolean; toggleKey: string | null } | null>(
+    null,
+  )
+
+  const beginShift = (e: React.PointerEvent, toggleKey: string | null) => {
+    if (e.button !== 0) return
+    e.preventDefault()
+    ;(e.currentTarget as Element).setPointerCapture?.(e.pointerId)
+    const p = svgPoint(e)
+    shiftRef.current = { x0: p.x, y0: p.y, moved: false, toggleKey }
+    setBoxSel({ x0: p.x, y0: p.y, x1: p.x, y1: p.y })
+  }
+
+  const moveShift = (e: React.PointerEvent) => {
+    const s = shiftRef.current
+    if (s === null) return
+    const p = svgPoint(e)
+    if (!s.moved && Math.hypot(p.x - s.x0, p.y - s.y0) >= MOVE_THRESHOLD) s.moved = true
+    setBoxSel({ x0: s.x0, y0: s.y0, x1: p.x, y1: p.y })
+  }
+
+  /** A bar/handle's move and up route to the live shift gesture when one is in progress, else to the ordinary value-drag. */
+  const routeMove = (e: React.PointerEvent) => (shiftRef.current !== null ? moveShift(e) : moveDrag(e))
+  const routeUp = () => (shiftRef.current !== null ? endShift() : endDrag())
+
+  /** No movement: the plain single-item toggle. Moved past the threshold: every in-view bar the box overlaps joins the selection, additively. */
+  const endShift = () => {
+    const s = shiftRef.current
+    shiftRef.current = null
+    const box = boxSel
+    setBoxSel(null)
+    if (s === null) return
+    if (!s.moved) {
+      if (s.toggleKey !== null) toggleSelected(s.toggleKey)
+      return
+    }
+    if (box === null) return
+    const xLo = Math.min(box.x0, box.x1)
+    const xHi = Math.max(box.x0, box.x1)
+    const yLo = Math.min(box.y0, box.y1)
+    const yHi = Math.max(box.y0, box.y1)
+    setSelected((prev) => {
+      const next = new Set(prev)
+      bars.forEach((b, i) => {
+        if (!inView(i) || b.allLocked) return
+        const r = barRect(b, i)
+        if (r.right >= xLo && r.left <= xHi && r.bottom >= yLo && r.top <= yHi) next.add(barKey(b))
+      })
+      return next
+    })
+  }
+
   /** Every selectable item's current uids/value/disabled state, keyed the same way selection is. */
   const itemsByKey = useMemo(() => {
     const m = new Map<string, { uids: string[]; value: number; disabled: boolean }>()
@@ -641,10 +732,7 @@ export const DistributionChart = forwardRef<DistributionChartHandle, Distributio
   ) => {
     if (e.button !== 0) return
     if (e.shiftKey) {
-      if (!disabled) {
-        e.preventDefault()
-        toggleSelected(key)
-      }
+      beginShift(e, disabled ? null : key)
       return
     }
     if (!disabled && selected.has(key) && selected.size > 0) {
@@ -757,8 +845,13 @@ export const DistributionChart = forwardRef<DistributionChartHandle, Distributio
                   height={Math.max(0, plotH)}
                   fill="transparent"
                   onPointerDown={(e) => {
-                    if (e.button === 0 && !e.shiftKey) clearSelection()
+                    if (e.button !== 0) return
+                    if (e.shiftKey) beginShift(e, null)
+                    else clearSelection()
                   }}
+                  onPointerMove={moveShift}
+                  onPointerUp={endShift}
+                  onPointerCancel={endShift}
                 />
 
                 {bars.map((b, i) => {
@@ -879,9 +972,9 @@ export const DistributionChart = forwardRef<DistributionChartHandle, Distributio
                         metric === 'weights' ? Math.round(s.weight) : Math.round(s.chance * 1000) / 10
                       }
                       onPointerDown={(e) => onItemPointerDown(e, key, s.group.uids, pinned, s.value)}
-                      onPointerMove={moveDrag}
-                      onPointerUp={endDrag}
-                      onPointerCancel={endDrag}
+                      onPointerMove={routeMove}
+                      onPointerUp={routeUp}
+                      onPointerCancel={routeUp}
                       onContextMenu={(e) => openEntry(e, s.group.name, s.group.uids, s.value, pinned)}
                     >
                       <line
@@ -1011,13 +1104,25 @@ export const DistributionChart = forwardRef<DistributionChartHandle, Distributio
                       }}
                       onMouseLeave={() => setHover(null)}
                       onPointerDown={(e) => onItemPointerDown(e, key, b.uids, b.allLocked, valueOf(b))}
-                      onPointerMove={moveDrag}
-                      onPointerUp={endDrag}
-                      onPointerCancel={endDrag}
+                      onPointerMove={routeMove}
+                      onPointerUp={routeUp}
+                      onPointerCancel={routeUp}
                       onContextMenu={(e) => openEntry(e, barTitle(b), b.uids, valueOf(b), b.allLocked)}
                     />
                   )
                 })}
+
+                {/* the rubber-band box itself, drawn on top while shift+drag is live */}
+                {boxSel !== null && (
+                  <rect
+                    className="dist-box-select"
+                    x={Math.min(boxSel.x0, boxSel.x1)}
+                    y={Math.min(boxSel.y0, boxSel.y1)}
+                    width={Math.abs(boxSel.x1 - boxSel.x0)}
+                    height={Math.abs(boxSel.y1 - boxSel.y0)}
+                    pointerEvents="none"
+                  />
+                )}
               </g>
 
               <text

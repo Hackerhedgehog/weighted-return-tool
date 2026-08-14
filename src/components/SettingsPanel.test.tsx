@@ -12,6 +12,8 @@ const renderPanel = (onTargets = vi.fn(), targets: Targets = DEFAULT_TARGETS) =>
   render(
     <SettingsPanel
       open
+      locked={false}
+      onLocked={vi.fn()}
       targets={targets}
       weightStep={1}
       groups={groups}

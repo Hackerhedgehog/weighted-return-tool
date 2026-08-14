@@ -250,6 +250,7 @@ function WorkspaceView({
     ),
   )
   const [targetsCollapsed, setTargetsCollapsed] = useState(saved?.targetsCollapsed ?? false)
+  const [settingsLocked, setSettingsLocked] = useState(saved?.settingsLocked ?? false)
   const [groupDistCollapsed, setGroupDistCollapsed] = useState(saved?.groupDistCollapsed ?? false)
   const [bucketsCollapsed, setBucketsCollapsed] = useState(saved?.bucketsCollapsed ?? false)
   const [hiddenGroupColumns, setHiddenGroupColumns] = useState<string[]>(
@@ -446,6 +447,7 @@ function WorkspaceView({
       hiddenGroupColumns,
       hiddenBucketColumns,
       layout,
+      settingsLocked,
     }
     snapshotRef.current = workspace
     const t = window.setTimeout(() => onPersistRef.current(workspace), SAVE_DEBOUNCE_MS)
@@ -480,6 +482,7 @@ function WorkspaceView({
     hiddenGroupColumns,
     hiddenBucketColumns,
     layout,
+    settingsLocked,
   ])
 
   useEffect(
@@ -1081,6 +1084,7 @@ function WorkspaceView({
       </header>
 
       {hasRows && (
+        <div className="app-body">
         <main className="content">
           <TargetsPanel
             panelRef={targetsRef}
@@ -1101,41 +1105,18 @@ function WorkspaceView({
             onAutoDistribute={autoDistribute}
           />
 
-          <SettingsPanel
-            open={settingsOpen}
-            targets={doc.targets}
-            weightStep={doc.weightStep}
-            groups={doc.groups}
-            groupCounts={groupCounts}
-            groupLockStates={groupLockStates}
-            groupStats={groupStats}
-            onTargets={(t) => commit((d) => ({ ...d, targets: t }))}
-            onWeightStep={(s) => commit((d) => ({ ...d, weightStep: s }))}
-            onGroupAdd={addGroup}
-            onGroupRename={renameGroup}
-            onGroupRecolor={recolorGroup}
-            onGroupDelete={deleteGroup}
-            onGroupLock={setGroupLocked}
-            onGroupSoftLock={setGroupSoftLock}
-            onGroupChance={setGroupChance}
-            onGroupValue={setGroupValue}
-            onGroupAutoDetect={autoDetectGroup}
-            onGroupAutoDetectAll={autoDetectAllGroups}
-            onClose={() => setSettingsOpen(false)}
-          />
-
           <div className="dock-wrap" ref={rowRef}>
             <PanelDock
               layout={layout}
               onLayout={setLayout}
               panels={{
                 groupDist: {
-                  title: 'Group Distribution',
+                  title: 'Groups',
                   hint: 'per-group chance, payout and RTP share — hover Chance for full precision · ⚙ chooses columns · drag this header to move the panel',
                   collapsed: groupDistCollapsed,
                   onCollapsed: setGroupDistCollapsed,
                   headExtra: (
-                    <GearMenu label="Group distribution columns">
+                    <GearMenu label="Groups columns">
                 {GROUP_DIST_COLUMNS.map((c) => (
                   <label className="checkbox" key={c.key}>
                     <input
@@ -1169,25 +1150,7 @@ function WorkspaceView({
                   collapsed: bucketsCollapsed,
                   onCollapsed: setBucketsCollapsed,
                   headExtra: (
-                    <GearMenu label="Buckets table columns">
-                    {COLUMNS.filter((c) => c.key !== 'lock').map((c) => (
-                      <label className="checkbox" key={c.key}>
-                        <input
-                          type="checkbox"
-                          checked={!hiddenBucketColumns.includes(c.key)}
-                          onChange={(e) =>
-                            setHiddenBucketColumns(
-                              e.target.checked
-                                ? hiddenBucketColumns.filter((k) => k !== c.key)
-                                : [...hiddenBucketColumns, c.key],
-                            )
-                          }
-                        />
-                        <span>{c.label}</span>
-                      </label>
-                    ))}
-                    <div className="gear-group">
-                      <span className="gear-group-label">Collapse groups</span>
+                    <>
                       <GroupChips
                         groups={grouping.groups}
                         selected={collapsedGroups}
@@ -1196,8 +1159,25 @@ function WorkspaceView({
                         titleOn={(n) => `Show ${n}'s buckets as rows`}
                         titleOff={(n) => `Fold ${n} into one summary row`}
                       />
-                    </div>
-                  </GearMenu>
+                      <GearMenu label="Buckets table columns">
+                        {COLUMNS.filter((c) => c.key !== 'lock').map((c) => (
+                          <label className="checkbox" key={c.key}>
+                            <input
+                              type="checkbox"
+                              checked={!hiddenBucketColumns.includes(c.key)}
+                              onChange={(e) =>
+                                setHiddenBucketColumns(
+                                  e.target.checked
+                                    ? hiddenBucketColumns.filter((k) => k !== c.key)
+                                    : [...hiddenBucketColumns, c.key],
+                                )
+                              }
+                            />
+                            <span>{c.label}</span>
+                          </label>
+                        ))}
+                      </GearMenu>
+                    </>
                   ),
                   children: (
                     <BucketTable
@@ -1226,23 +1206,22 @@ function WorkspaceView({
                   hint: 'drag a bar or group handle to reshape · right-click a bar for an exact value · shift+click selects several · scroll an axis to zoom · middle-drag pans · ⚙ for axis and drag options · drag this header to move the panel',
                   headExtra: (
                   <>
-                    <GearMenu label="Group bars" icon="▤">
-                      <GroupChips
-                        groups={grouping.groups}
-                        selected={chart.groupBars}
-                        onSelected={(ids) => setChart({ ...chart, groupBars: ids })}
-                        label="Group bars"
-                        titleOn={(n) => `Show ${n}'s buckets`}
-                        titleOff={(n) => `Draw ${n} as one bar`}
-                      />
-                    </GearMenu>
+                    <GroupChips
+                      groups={grouping.groups}
+                      selected={chart.groupBars}
+                      onSelected={(ids) => setChart({ ...chart, groupBars: ids })}
+                      label="Group"
+                      titleOn={(n) => `Show ${n}'s buckets`}
+                      titleOff={(n) => `Draw ${n} as one bar`}
+                    />
+                    <div className="panel-head-right">
                     <button
                       type="button"
                       className="btn gear-btn"
                       onClick={() => chartRef.current?.resetView()}
                       title="Zoom out to fit all data, centered"
                     >
-                      ⤢
+                      ⤢ Reset view
                     </button>
                     <button
                       type="button"
@@ -1362,6 +1341,7 @@ function WorkspaceView({
                       </label>
                     </div>
                   </GearMenu>
+                    </div>
                   </>
                   ),
                   children: (
@@ -1437,6 +1417,32 @@ function WorkspaceView({
             />
           </section>
         </main>
+
+        <SettingsPanel
+          open={settingsOpen}
+          locked={settingsLocked}
+          onLocked={setSettingsLocked}
+          targets={doc.targets}
+          weightStep={doc.weightStep}
+          groups={doc.groups}
+          groupCounts={groupCounts}
+          groupLockStates={groupLockStates}
+          groupStats={groupStats}
+          onTargets={(t) => commit((d) => ({ ...d, targets: t }))}
+          onWeightStep={(s) => commit((d) => ({ ...d, weightStep: s }))}
+          onGroupAdd={addGroup}
+          onGroupRename={renameGroup}
+          onGroupRecolor={recolorGroup}
+          onGroupDelete={deleteGroup}
+          onGroupLock={setGroupLocked}
+          onGroupSoftLock={setGroupSoftLock}
+          onGroupChance={setGroupChance}
+          onGroupValue={setGroupValue}
+          onGroupAutoDetect={autoDetectGroup}
+          onGroupAutoDetectAll={autoDetectAllGroups}
+          onClose={() => setSettingsOpen(false)}
+        />
+        </div>
       )}
 
       {(pasteOpen || !hasRows) && (

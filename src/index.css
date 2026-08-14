@@ -632,6 +632,12 @@ body {
   overflow: visible;
 }
 
+/* Same reason as buckets above: the settings gear popover is taller than the
+   (short) group table and must not be clipped by the panel's own bounds. */
+.dock-panel.group-dist {
+  overflow: visible;
+}
+
 .panel-head {
   display: flex;
   align-items: center;
@@ -656,8 +662,25 @@ body {
   cursor: help;
 }
 
+/* A collapsible panel's heading doubles as the fold toggle — the arrow button
+   is a small target, the whole title text is a much easier one. */
+.panel-head h2.collapse-toggle {
+  cursor: pointer;
+}
+
 /* The head lays title left, extras right; the gear menu takes the far edge. */
 .panel-head .gear-menu {
+  margin-left: auto;
+}
+
+/* Groups several head buttons (reset view, save/clear curve, settings) into
+   one cluster pinned to the far right — for a head whose left side already
+   holds its own row (the chart's Group chips) that a lone .gear-menu auto
+   margin would not carry along with it. */
+.panel-head-right {
+  display: flex;
+  align-items: center;
+  gap: 8px;
   margin-left: auto;
 }
 
@@ -733,6 +756,13 @@ body {
 
 .priority-row.dragging {
   opacity: 0.55;
+}
+
+/* Shift+drag rubber-band on the distribution chart's plot background. */
+.dist-box-select {
+  fill: color-mix(in srgb, var(--accent) 15%, transparent);
+  stroke: var(--accent);
+  stroke-width: 1;
 }
 
 .user-curve-line {
@@ -2012,11 +2042,40 @@ input.gcell.editing {
   z-index: 41;
 }
 
+/* Pinned: a normal flex sibling of the content column (see .app-body) rather
+   than a floating overlay — nothing left for it to cover, so the shadow and
+   fixed positioning that said "this is on top of something" go away too. */
+.settings-drawer.docked {
+  position: sticky;
+  top: 0;
+  flex: 0 0 auto;
+  height: 100vh;
+  box-shadow: none;
+  z-index: auto;
+}
+
+.app-body {
+  display: flex;
+  align-items: flex-start;
+  gap: 0;
+}
+
+.app-body > .content {
+  flex: 1 1 auto;
+  min-width: 0;
+}
+
 .settings-head {
   display: flex;
   align-items: center;
   justify-content: space-between;
   margin-bottom: 12px;
+}
+
+.settings-head-actions {
+  display: flex;
+  align-items: center;
+  gap: 6px;
 }
 
 .settings-head h2 {

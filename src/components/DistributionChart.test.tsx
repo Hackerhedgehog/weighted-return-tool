@@ -654,9 +654,13 @@ describe('DistributionChart multi-select', () => {
   it('toggles selection on shift+click', () => {
     renderChart({ metric: 'weights' })
     const hit = document.querySelectorAll('.bar-hit')[1]
+    // A shift+click is ambiguous with a shift+drag until release without
+    // having moved past the threshold — the toggle lands on pointerUp.
     fireEvent.pointerDown(hit, { pointerId: 1, button: 0, shiftKey: true, clientY: 200 })
+    fireEvent.pointerUp(hit, { pointerId: 1, button: 0, clientY: 200 })
     expect(hit.classList.contains('selected')).toBe(true)
     fireEvent.pointerDown(hit, { pointerId: 1, button: 0, shiftKey: true, clientY: 200 })
+    fireEvent.pointerUp(hit, { pointerId: 1, button: 0, clientY: 200 })
     expect(hit.classList.contains('selected')).toBe(false)
   })
 
@@ -673,7 +677,9 @@ describe('DistributionChart multi-select', () => {
     const hits = document.querySelectorAll('.bar-hit')
 
     fireEvent.pointerDown(hits[1], { pointerId: 1, button: 0, shiftKey: true, clientY: 200 })
+    fireEvent.pointerUp(hits[1], { pointerId: 1, button: 0, clientY: 200 })
     fireEvent.pointerDown(hits[2], { pointerId: 1, button: 0, shiftKey: true, clientY: 200 })
+    fireEvent.pointerUp(hits[2], { pointerId: 1, button: 0, clientY: 200 })
 
     fireEvent.pointerDown(hits[1], { pointerId: 1, clientY: 200 })
     fireEvent.pointerMove(hits[1], { pointerId: 1, clientY: 100 })
@@ -692,16 +698,37 @@ describe('DistributionChart multi-select', () => {
     renderChart({ metric: 'weights' })
     const hit = document.querySelectorAll('.bar-hit')[1]
     fireEvent.pointerDown(hit, { pointerId: 1, button: 0, shiftKey: true, clientY: 200 })
+    fireEvent.pointerUp(hit, { pointerId: 1, button: 0, clientY: 200 })
     expect(hit.classList.contains('selected')).toBe(true)
 
     fireEvent.pointerDown(document.querySelector('.dist-plot-bg')!, { pointerId: 2, button: 0 })
     expect(hit.classList.contains('selected')).toBe(false)
   })
 
+  it('shift+drag past the threshold draws a box and selects every bar it overlaps', () => {
+    renderChart({ metric: 'weights' })
+    const hits = document.querySelectorAll('.bar-hit')
+
+    // jsdom: useContainerWidth starts at 900px, so with 4 linear bars and no
+    // log-X, bars 1 and 2 sit at roughly x=321 and x=493 — box from 300 to
+    // 550 spans both while leaving bars 0 (x=150) and 3 (x=664) outside it.
+    // y spans the whole plot height so every bar's full extent is covered.
+    fireEvent.pointerDown(hits[1], { pointerId: 1, button: 0, shiftKey: true, clientX: 300, clientY: 300 })
+    fireEvent.pointerMove(hits[1], { pointerId: 1, clientX: 550, clientY: 0 })
+    expect(hits[1].classList.contains('selected')).toBe(false) // still just a live box, not yet committed
+    fireEvent.pointerUp(hits[1], { pointerId: 1, button: 0, clientX: 550, clientY: 0 })
+
+    expect(hits[1].classList.contains('selected')).toBe(true)
+    expect(hits[2].classList.contains('selected')).toBe(true)
+    expect(hits[0].classList.contains('selected')).toBe(false)
+    expect(hits[3].classList.contains('selected')).toBe(false)
+  })
+
   it('clears the selection on a click outside the chart', () => {
     renderChart({ metric: 'weights' })
     const hit = document.querySelectorAll('.bar-hit')[1]
     fireEvent.pointerDown(hit, { pointerId: 1, button: 0, shiftKey: true, clientY: 200 })
+    fireEvent.pointerUp(hit, { pointerId: 1, button: 0, clientY: 200 })
     expect(hit.classList.contains('selected')).toBe(true)
 
     fireEvent.pointerDown(document.body, { pointerId: 2, button: 0 })

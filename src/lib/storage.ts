@@ -75,6 +75,8 @@ export interface Workspace {
   layout?: DockLayout | LegacyDockLayout
   /** Optional — absent in workspaces saved before the user curve existed. */
   userCurve?: Record<string, number> | null
+  /** Optional — absent in workspaces saved before the settings drawer could dock. */
+  settingsLocked?: boolean
 }
 
 const isObject = (v: unknown): v is Record<string, unknown> =>
@@ -195,6 +197,7 @@ function isWorkspace(v: unknown): v is Workspace {
     (v.distChartYPan === undefined || isFiniteNumber(v.distChartYPan)) &&
     (v.groupDistCollapsed === undefined || typeof v.groupDistCollapsed === 'boolean') &&
     (v.bucketsCollapsed === undefined || typeof v.bucketsCollapsed === 'boolean') &&
+    (v.settingsLocked === undefined || typeof v.settingsLocked === 'boolean') &&
     (v.hiddenGroupColumns === undefined ||
       (Array.isArray(v.hiddenGroupColumns) &&
         v.hiddenGroupColumns.every((s) => typeof s === 'string'))) &&

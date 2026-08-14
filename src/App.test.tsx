@@ -1278,10 +1278,9 @@ describe('group bars', () => {
     render(<App />)
     fireEvent.click(screen.getByRole('button', { name: 'Load sample' }))
 
-    // The table's Collapse gear renders a chip named "bonus" too, so the
+    // The table's own Collapse row renders a chip named "bonus" too, so the
     // chart's chip is picked out by its title rather than its name.
     const before = document.querySelectorAll('.bar').length
-    fireEvent.click(screen.getByRole('button', { name: 'Group bars' }))
     fireEvent.click(screen.getByTitle('Draw bonus as one bar'))
 
     expect(document.querySelectorAll('.bar').length).toBeLessThan(before)
@@ -1304,7 +1303,6 @@ describe('group bars', () => {
       exportFilename: 'f.tsv',
     })
     render(<App />)
-    fireEvent.click(screen.getByRole('button', { name: 'Group bars' }))
     expect(screen.getByRole('button', { name: 'bonus', pressed: true })).toBeDefined()
     expect(document.querySelectorAll('.bar')).toHaveLength(1)
   })
@@ -1318,8 +1316,9 @@ describe('chrome layout', () => {
     const btn = screen.getByRole('button', { name: /Settings/ })
     expect(topbar.contains(btn)).toBe(true)
     fireEvent.click(btn)
-    expect(screen.getByRole('heading', { name: 'Groups' })).toBeDefined()
-    expect(document.querySelector('.settings-drawer .group-settings')).not.toBeNull()
+    const drawer = document.querySelector('.settings-drawer')!
+    expect(within(drawer as HTMLElement).getByRole('heading', { name: 'Groups' })).toBeDefined()
+    expect(drawer.querySelector('.group-settings')).not.toBeNull()
   })
 
   it('keeps the settings drawer reachable when the targets panel is collapsed', () => {

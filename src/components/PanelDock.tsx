@@ -100,7 +100,13 @@ function DockPanel({ def, id, dragging, sticky, onHeadDown, onHeadMove, onHeadUp
             </span>
           </button>
         )}
-        <h2 title={def.hint}>{def.title}</h2>
+        <h2
+          title={def.hint}
+          className={def.onCollapsed !== undefined ? 'collapse-toggle' : undefined}
+          onClick={def.onCollapsed !== undefined ? () => def.onCollapsed?.(!def.collapsed) : undefined}
+        >
+          {def.title}
+        </h2>
         {def.headExtra}
       </div>
       {!def.collapsed && def.children}
@@ -154,8 +160,10 @@ export function PanelDock({ layout, onLayout, panels }: PanelDockProps) {
 
   const onHeadPointerDown = (e: React.PointerEvent, id: PanelId) => {
     if (e.button !== 0) return
-    // Buttons, inputs and menus in the head keep their own clicks.
-    if ((e.target as HTMLElement).closest('button, input, select, label, a')) return
+    // Buttons, inputs, menus and the collapsible heading in the head keep
+    // their own clicks — the heading toggles the fold, it must not also
+    // start a panel-move drag.
+    if ((e.target as HTMLElement).closest('button, input, select, label, a, h2')) return
     ;(e.currentTarget as Element).setPointerCapture?.(e.pointerId)
     const root = rootRef.current
     const rootRect = root?.getBoundingClientRect()

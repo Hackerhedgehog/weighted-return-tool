@@ -19,6 +19,9 @@ import { GroupSettings, type GroupStats } from './GroupSettings'
 
 interface SettingsPanelProps {
   open: boolean
+  /** Docked beside the content instead of floating over it — see onLocked. */
+  locked: boolean
+  onLocked: (locked: boolean) => void
   targets: Targets
   weightStep: WeightStep
   groups: GroupDef[]
@@ -42,6 +45,8 @@ interface SettingsPanelProps {
 
 export function SettingsPanel({
   open,
+  locked,
+  onLocked,
   targets,
   weightStep,
   groups,
@@ -65,6 +70,8 @@ export function SettingsPanel({
   return open ? (
     <SettingsPanelBody
       {...{
+        locked,
+        onLocked,
         targets,
         weightStep,
         groups,
@@ -90,6 +97,8 @@ export function SettingsPanel({
 }
 
 function SettingsPanelBody({
+  locked,
+  onLocked,
   targets,
   weightStep,
   groups,
@@ -167,14 +176,33 @@ function SettingsPanelBody({
 
   return (
     <>
-      {/* Click-away layer, like the paste overlay's backdrop dismissal. */}
-      <div className="settings-backdrop" onClick={onClose} />
-      <aside className="settings-drawer" role="dialog" aria-label="Settings">
+      {/* Click-away layer, like the paste overlay's backdrop dismissal — moot
+          once the drawer is docked, since there is nothing left to click away
+          from (the rest of the app has already moved aside for it). */}
+      {!locked && <div className="settings-backdrop" onClick={onClose} />}
+      <aside
+        className={`settings-drawer ${locked ? 'docked' : ''}`}
+        role="dialog"
+        aria-label="Settings"
+      >
         <div className="settings-head">
           <h2>Settings</h2>
-          <button type="button" className="btn" onClick={onClose} aria-label="Close settings">
-            ✕
-          </button>
+          <div className="settings-head-actions">
+            <button
+              type="button"
+              className={`btn gear-btn ${locked ? 'primary' : ''}`}
+              aria-pressed={locked}
+              onClick={() => onLocked(!locked)}
+              title={
+                locked ? 'Unpin — back to a floating panel' : 'Pin — dock this panel on the right, always visible'
+              }
+            >
+              📌
+            </button>
+            <button type="button" className="btn" onClick={onClose} aria-label="Close settings">
+              ✕
+            </button>
+          </div>
         </div>
 
         <div className="settings-section">
