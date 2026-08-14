@@ -51,7 +51,10 @@ describe('App', () => {
 
   it('shows columns in the export order', () => {
     loadRealData()
-    const headers = [...document.querySelectorAll('thead th')].map((th) => th.textContent?.trim())
+    // Scoped to the bucket grid — the group distribution table has headers too.
+    const headers = [...document.querySelectorAll('.grid-table thead th')].map((th) =>
+      th.textContent?.trim(),
+    )
     expect(headers).toEqual([
       '',
       'Group',
@@ -727,6 +730,7 @@ describe('page layout', () => {
     const content = document.querySelector('.content')!
     expect([...content.children].map((el) => el.className)).toEqual([
       'targets',
+      'panel group-dist',
       'content-row',
       'panel full',
     ])

@@ -39,6 +39,22 @@ describe('storage', () => {
     expect(loadWorkspace()).toBeNull()
   })
 
+  it('round-trips the group-distribution panel fields', () => {
+    const w: Workspace = {
+      ...workspace,
+      groupDistCollapsed: true,
+      bucketsCollapsed: false,
+      hiddenGroupColumns: ['std', 'oneIn'],
+    }
+    saveWorkspace(w)
+    expect(loadWorkspace()).toEqual(w)
+  })
+
+  it('rejects non-string hidden group column entries', () => {
+    store.set(STORAGE_KEY, JSON.stringify({ ...workspace, hiddenGroupColumns: [7] }))
+    expect(loadWorkspace()).toBeNull()
+  })
+
   it('discards malformed JSON instead of throwing', () => {
     store.set(STORAGE_KEY, '{not json')
     expect(loadWorkspace()).toBeNull()

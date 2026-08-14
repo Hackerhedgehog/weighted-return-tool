@@ -59,6 +59,10 @@ export interface Workspace {
   distChartXPan?: number
   distChartYZoom?: number
   distChartYPan?: number
+  /** Optional — absent in workspaces saved before the group distribution panel existed. */
+  groupDistCollapsed?: boolean
+  bucketsCollapsed?: boolean
+  hiddenGroupColumns?: string[]
 }
 
 const isObject = (v: unknown): v is Record<string, unknown> =>
@@ -173,7 +177,12 @@ function isWorkspace(v: unknown): v is Workspace {
     (v.distChartXZoom === undefined || isFiniteNumber(v.distChartXZoom)) &&
     (v.distChartXPan === undefined || isFiniteNumber(v.distChartXPan)) &&
     (v.distChartYZoom === undefined || isFiniteNumber(v.distChartYZoom)) &&
-    (v.distChartYPan === undefined || isFiniteNumber(v.distChartYPan))
+    (v.distChartYPan === undefined || isFiniteNumber(v.distChartYPan)) &&
+    (v.groupDistCollapsed === undefined || typeof v.groupDistCollapsed === 'boolean') &&
+    (v.bucketsCollapsed === undefined || typeof v.bucketsCollapsed === 'boolean') &&
+    (v.hiddenGroupColumns === undefined ||
+      (Array.isArray(v.hiddenGroupColumns) &&
+        v.hiddenGroupColumns.every((s) => typeof s === 'string')))
   )
 }
 

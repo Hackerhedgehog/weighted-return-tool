@@ -56,6 +56,7 @@ import {
 import { bridgeLoadPlan, freshTabsState, placeFeeds, withNewTab, withoutTab } from './lib/tabs'
 import { fetchSession, saveTsv, type BridgeSession } from './lib/bridge'
 import { BucketTable } from './components/BucketTable'
+import { GroupDistributionTable } from './components/GroupDistributionTable'
 import { clampHeight, DIST_HEIGHT, SIM_HEIGHT } from './components/chartUtils'
 import { DistributionChart } from './components/DistributionChart'
 import { GroupChips } from './components/GroupChips'
@@ -228,6 +229,11 @@ function WorkspaceView({
     ),
   )
   const [targetsCollapsed, setTargetsCollapsed] = useState(saved?.targetsCollapsed ?? false)
+  const [groupDistCollapsed, setGroupDistCollapsed] = useState(saved?.groupDistCollapsed ?? false)
+  const [bucketsCollapsed, setBucketsCollapsed] = useState(saved?.bucketsCollapsed ?? false)
+  const [hiddenGroupColumns, setHiddenGroupColumns] = useState<string[]>(
+    saved?.hiddenGroupColumns ?? [],
+  )
   const [settingsOpen, setSettingsOpen] = useState(false)
   const [sort, setSort] = useState<SortState>({ key: 'id', dir: 1 })
   // View state like chart.groupBars, and deliberately separate from it:
@@ -404,6 +410,9 @@ function WorkspaceView({
       distChartYPan,
       targetsCollapsed,
       tableCollapsed: collapsedGroups,
+      groupDistCollapsed,
+      bucketsCollapsed,
+      hiddenGroupColumns,
     }
     snapshotRef.current = workspace
     const t = window.setTimeout(() => onPersistRef.current(workspace), SAVE_DEBOUNCE_MS)
@@ -433,6 +442,9 @@ function WorkspaceView({
     distChartYPan,
     targetsCollapsed,
     collapsedGroups,
+    groupDistCollapsed,
+    bucketsCollapsed,
+    hiddenGroupColumns,
   ])
 
   useEffect(
@@ -1061,10 +1073,46 @@ function WorkspaceView({
             onClose={() => setSettingsOpen(false)}
           />
 
+          <section className="panel group-dist">
+            <div className="panel-head">
+              <button
+                type="button"
+                className="panel-collapse"
+                aria-expanded={!groupDistCollapsed}
+                onClick={() => setGroupDistCollapsed(!groupDistCollapsed)}
+                title={groupDistCollapsed ? 'Show the group distribution' : 'Hide the group distribution'}
+              >
+                <span className="chev" aria-hidden="true">
+                  {groupDistCollapsed ? '▸' : '▾'}
+                </span>
+              </button>
+              <h2>Group Distribution</h2>
+            </div>
+            {!groupDistCollapsed && (
+              <GroupDistributionTable
+                rows={viewRows}
+                grouping={grouping}
+                totalWeight={totalWeight}
+                hidden={hiddenGroupColumns}
+              />
+            )}
+          </section>
+
           {(() => {
             const bucketsSection = (
               <section className="panel buckets" key="buckets">
                 <div className="panel-head">
+                  <button
+                    type="button"
+                    className="panel-collapse"
+                    aria-expanded={!bucketsCollapsed}
+                    onClick={() => setBucketsCollapsed(!bucketsCollapsed)}
+                    title={bucketsCollapsed ? 'Show the buckets table' : 'Hide the buckets table'}
+                  >
+                    <span className="chev" aria-hidden="true">
+                      {bucketsCollapsed ? '▸' : '▾'}
+                    </span>
+                  </button>
                   <h2>Buckets</h2>
                   <span className="panel-hint">
                     arrow keys to move · type +500 to add · shift+click selects rows ·
@@ -1079,32 +1127,36 @@ function WorkspaceView({
                     Group sort
                   </button>
                 </div>
-                <GroupChips
-                  groups={grouping.groups}
-                  selected={collapsedGroups}
-                  onSelected={setCollapsedGroups}
-                  label="Collapse"
-                  titleOn={(n) => `Show ${n}'s buckets as rows`}
-                  titleOff={(n) => `Fold ${n} into one summary row`}
-                />
-                <BucketTable
-                  rows={viewRows}
-                  totalWeight={totalWeight}
-                  sort={sort}
-                  columnWidths={columnWidths}
-                  grouping={grouping}
-                  groups={doc.groups}
-                  weightStep={doc.weightStep}
-                  collapsed={collapsedGroups}
-                  onSort={handleSort}
-                  onPatch={patchRow}
-                  onGroupMany={setRowsGroup}
-                  onWidths={setColumnWidths}
-                  onTotalWeight={changeTotalWeight}
-                  onTotalRtp={changeTotalRtp}
-                  onExpand={(id) => setCollapsedGroups((prev) => prev.filter((g) => g !== id))}
-                  onGroupLock={setGroupLocked}
-                />
+                {!bucketsCollapsed && (
+                  <>
+                    <GroupChips
+                      groups={grouping.groups}
+                      selected={collapsedGroups}
+                      onSelected={setCollapsedGroups}
+                      label="Collapse"
+                      titleOn={(n) => `Show ${n}'s buckets as rows`}
+                      titleOff={(n) => `Fold ${n} into one summary row`}
+                    />
+                    <BucketTable
+                      rows={viewRows}
+                      totalWeight={totalWeight}
+                      sort={sort}
+                      columnWidths={columnWidths}
+                      grouping={grouping}
+                      groups={doc.groups}
+                      weightStep={doc.weightStep}
+                      collapsed={collapsedGroups}
+                      onSort={handleSort}
+                      onPatch={patchRow}
+                      onGroupMany={setRowsGroup}
+                      onWidths={setColumnWidths}
+                      onTotalWeight={changeTotalWeight}
+                      onTotalRtp={changeTotalRtp}
+                      onExpand={(id) => setCollapsedGroups((prev) => prev.filter((g) => g !== id))}
+                      onGroupLock={setGroupLocked}
+                    />
+                  </>
+                )}
               </section>
             )
             const chartSection = (
