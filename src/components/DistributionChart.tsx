@@ -743,9 +743,6 @@ export function DistributionChart({
         <button type="button" className="btn chart-reset" onClick={axes.resetView} title="Zoom out to fit all data, centered">
           Reset view
         </button>
-        <span className="panel-hint">
-          drag a bar or a group handle to reshape · shift+click to select several
-        </span>
       </div>
 
       <GroupChips

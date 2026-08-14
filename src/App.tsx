@@ -1093,7 +1093,9 @@ function WorkspaceView({
                   {groupDistCollapsed ? '▸' : '▾'}
                 </span>
               </button>
-              <h2>Group Distribution</h2>
+              <h2 title="per-group chance, payout and RTP share — hover Chance for full precision · ⚙ chooses columns">
+                Group Distribution
+              </h2>
               <GearMenu label="Group distribution columns">
                 {GROUP_DIST_COLUMNS.map((c) => (
                   <label className="checkbox" key={c.key}>
@@ -1138,19 +1140,9 @@ function WorkspaceView({
                       {bucketsCollapsed ? '▸' : '▾'}
                     </span>
                   </button>
-                  <h2>Buckets</h2>
-                  <span className="panel-hint">
-                    arrow keys to move · type +500 to add · shift+click selects rows ·
-                    drag a header edge to resize
-                  </span>
-                  <button
-                    type="button"
-                    className={`btn group-sort ${sort.key === 'group' ? 'primary' : ''}`}
-                    title="Order rows by bucket group — colors match the chart"
-                    onClick={() => handleSort('group')}
-                  >
-                    Group sort
-                  </button>
+                  <h2 title="arrow keys to move · type +500 to add · shift+click selects rows · drag a header edge to resize · double-click an edge to fit · Space toggles a lock · click a header to sort · Ctrl+Z / Ctrl+Shift+Z undo and redo">
+                    Buckets
+                  </h2>
                   <GearMenu label="Buckets table columns">
                     {COLUMNS.filter((c) => c.key !== 'lock').map((c) => (
                       <label className="checkbox" key={c.key}>
@@ -1206,7 +1198,9 @@ function WorkspaceView({
             const chartSection = (
               <section className="panel chart" key="chart">
                 <div className="panel-head">
-                  <h2>Distribution</h2>
+                  <h2 title="drag a bar or group handle to reshape · right-click a bar for an exact value · shift+click selects several · scroll an axis to zoom · middle-drag pans · ⚙ for axis and drag options">
+                    Distribution
+                  </h2>
                   <button
                     type="button"
                     className={`btn ${chart.swapped ? 'primary' : ''}`}
@@ -1278,11 +1272,9 @@ function WorkspaceView({
 
           <section className="panel full">
             <div className="panel-head">
-              <h2>Simulation</h2>
-              <span className="panel-hint">
-                spins the current table with a fast Monte Carlo run — edits during a run don't
-                change it
-              </span>
+              <h2 title="spins the current table with a fast Monte Carlo run — edits during a run don't change it">
+                Simulation
+              </h2>
             </div>
             <SimulationPanel
               mode={simMode}

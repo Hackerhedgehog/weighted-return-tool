@@ -205,9 +205,24 @@ describe('App', () => {
     expect(alphaOf(locked)).toBeGreaterThan(before)
   })
 
-  it('sorts by group when the Group sort button is clicked', () => {
+  it('has no Group sort button — the Group column header sorts', () => {
     loadRealData()
-    fireEvent.click(screen.getByRole('button', { name: 'Group sort' }))
+    expect(screen.queryByRole('button', { name: 'Group sort' })).toBeNull()
+  })
+
+  it('shows usage hints as tooltips on the panel titles', () => {
+    loadRealData()
+    expect(
+      screen.getByRole('heading', { name: 'Buckets' }).getAttribute('title'),
+    ).toContain('arrow keys')
+    expect(
+      screen.getByRole('heading', { name: 'Distribution' }).getAttribute('title'),
+    ).toContain('drag a bar')
+  })
+
+  it('sorts by group when the Group column header is clicked', () => {
+    loadRealData()
+    fireEvent.click(screen.getByRole('button', { name: 'Group' }))
 
     const labels = [...document.querySelectorAll('.grid-row .col-label .gcell')].map(
       (el) => el.textContent ?? '',

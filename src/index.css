@@ -604,6 +604,13 @@ body {
   margin: 0;
 }
 
+/* A titled heading carries the panel's usage hints — mark it discoverable. */
+.panel-head h2[title] {
+  text-decoration: underline dotted var(--text-faint);
+  text-underline-offset: 3px;
+  cursor: help;
+}
+
 /* Distribution panel head has three children (h2 + two buttons); push both
    buttons to the right edge instead of letting space-between spread them
    across the middle. */
