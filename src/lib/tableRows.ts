@@ -89,8 +89,12 @@ function sortUnits(
         return dir * (payout(a) - payout(b))
       case 'weight':
       case 'chance':
+      // One in is 1/chance — the same ordering, read from the other end.
+      case 'oneIn':
         return dir * (weight(a) - weight(b))
       case 'weightedValue':
+      // RTP share is weighted value over a row-independent constant.
+      case 'rtpShare':
         return dir * (value(a) - value(b))
       case 'id':
       default:

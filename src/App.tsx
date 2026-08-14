@@ -23,7 +23,8 @@ import {
   volatilityForCurve,
 } from './lib/types'
 import { clampBankrollConfig } from './lib/bankroll'
-import { DEFAULT_WIDTHS, sortRows } from './lib/columns'
+import { COLUMNS, DEFAULT_WIDTHS, sortRows } from './lib/columns'
+import { GROUP_DIST_COLUMNS } from './lib/groupDistribution'
 import { parseTsv, SAMPLE_TSV } from './lib/parse'
 import {
   floorBlockWarning,
@@ -56,6 +57,7 @@ import {
 import { bridgeLoadPlan, freshTabsState, placeFeeds, withNewTab, withoutTab } from './lib/tabs'
 import { fetchSession, saveTsv, type BridgeSession } from './lib/bridge'
 import { BucketTable } from './components/BucketTable'
+import { GearMenu } from './components/GearMenu'
 import { GroupDistributionTable } from './components/GroupDistributionTable'
 import { clampHeight, DIST_HEIGHT, SIM_HEIGHT } from './components/chartUtils'
 import { DistributionChart } from './components/DistributionChart'
@@ -233,6 +235,9 @@ function WorkspaceView({
   const [bucketsCollapsed, setBucketsCollapsed] = useState(saved?.bucketsCollapsed ?? false)
   const [hiddenGroupColumns, setHiddenGroupColumns] = useState<string[]>(
     saved?.hiddenGroupColumns ?? [],
+  )
+  const [hiddenBucketColumns, setHiddenBucketColumns] = useState<string[]>(
+    saved?.hiddenBucketColumns ?? [],
   )
   const [settingsOpen, setSettingsOpen] = useState(false)
   const [sort, setSort] = useState<SortState>({ key: 'id', dir: 1 })
@@ -413,6 +418,7 @@ function WorkspaceView({
       groupDistCollapsed,
       bucketsCollapsed,
       hiddenGroupColumns,
+      hiddenBucketColumns,
     }
     snapshotRef.current = workspace
     const t = window.setTimeout(() => onPersistRef.current(workspace), SAVE_DEBOUNCE_MS)
@@ -445,6 +451,7 @@ function WorkspaceView({
     groupDistCollapsed,
     bucketsCollapsed,
     hiddenGroupColumns,
+    hiddenBucketColumns,
   ])
 
   useEffect(
@@ -1087,6 +1094,24 @@ function WorkspaceView({
                 </span>
               </button>
               <h2>Group Distribution</h2>
+              <GearMenu label="Group distribution columns">
+                {GROUP_DIST_COLUMNS.map((c) => (
+                  <label className="checkbox" key={c.key}>
+                    <input
+                      type="checkbox"
+                      checked={!hiddenGroupColumns.includes(c.key)}
+                      onChange={(e) =>
+                        setHiddenGroupColumns(
+                          e.target.checked
+                            ? hiddenGroupColumns.filter((k) => k !== c.key)
+                            : [...hiddenGroupColumns, c.key],
+                        )
+                      }
+                    />
+                    <span>{c.label}</span>
+                  </label>
+                ))}
+              </GearMenu>
             </div>
             {!groupDistCollapsed && (
               <GroupDistributionTable
@@ -1126,6 +1151,24 @@ function WorkspaceView({
                   >
                     Group sort
                   </button>
+                  <GearMenu label="Buckets table columns">
+                    {COLUMNS.filter((c) => c.key !== 'lock').map((c) => (
+                      <label className="checkbox" key={c.key}>
+                        <input
+                          type="checkbox"
+                          checked={!hiddenBucketColumns.includes(c.key)}
+                          onChange={(e) =>
+                            setHiddenBucketColumns(
+                              e.target.checked
+                                ? hiddenBucketColumns.filter((k) => k !== c.key)
+                                : [...hiddenBucketColumns, c.key],
+                            )
+                          }
+                        />
+                        <span>{c.label}</span>
+                      </label>
+                    ))}
+                  </GearMenu>
                 </div>
                 {!bucketsCollapsed && (
                   <>
@@ -1146,6 +1189,7 @@ function WorkspaceView({
                       groups={doc.groups}
                       weightStep={doc.weightStep}
                       collapsed={collapsedGroups}
+                      hidden={hiddenBucketColumns}
                       onSort={handleSort}
                       onPatch={patchRow}
                       onGroupMany={setRowsGroup}

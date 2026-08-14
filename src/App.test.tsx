@@ -65,6 +65,8 @@ describe('App', () => {
       'Weights',
       'Weighted Value',
       'Chance',
+      'One in',
+      'RTP Share',
     ])
   })
 

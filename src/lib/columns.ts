@@ -25,6 +25,9 @@ export const COLUMNS: Column[] = [
   // Sized so the whole table fits beside the chart. Chances run to 15
   // decimals — double-click the header edge to fit the column to them.
   { key: 'chance', label: 'Chance', sortable: true, numeric: true, width: 132 },
+  // Derived, display-only: neither reaches the TSV export.
+  { key: 'oneIn', label: 'One in', sortable: true, numeric: true, width: 84 },
+  { key: 'rtpShare', label: 'RTP Share', sortable: true, numeric: true, width: 92 },
 ]
 
 export const DEFAULT_WIDTHS: Record<string, number> = Object.fromEntries(
@@ -65,8 +68,12 @@ export function sortRows(
         return dir * (a.payout - b.payout)
       case 'weight':
       case 'chance':
+      // One in is 1/chance — the same ordering, read from the other end.
+      case 'oneIn':
         return dir * (a.weight - b.weight)
       case 'weightedValue':
+      // RTP share is weighted value over a row-independent constant.
+      case 'rtpShare':
         return dir * (value(a) - value(b))
       case 'id':
       default:

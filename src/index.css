@@ -630,6 +630,45 @@ body {
   color: var(--text);
 }
 
+/* ---------- gear popover ---------- */
+
+.gear-menu {
+  position: relative;
+}
+
+.gear-pop {
+  position: absolute;
+  right: 0;
+  top: calc(100% + 4px);
+  z-index: 30;
+  background: var(--surface);
+  border: 1px solid var(--line-strong);
+  border-radius: 6px;
+  padding: 8px 10px;
+  min-width: 190px;
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  box-shadow: 0 4px 16px rgba(0, 0, 0, 0.35);
+}
+
+.gear-pop .checkbox {
+  font-size: 12px;
+}
+
+.gear-group {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  border-top: 1px solid var(--line);
+  padding-top: 6px;
+}
+
+.gear-group-label {
+  font-size: 11px;
+  color: var(--text-dim);
+}
+
 /* ---------- group distribution ---------- */
 
 .gdist-table {

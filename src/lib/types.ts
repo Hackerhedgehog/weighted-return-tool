@@ -182,6 +182,8 @@ export type ColumnKey =
   | 'weight'
   | 'weightedValue'
   | 'chance'
+  | 'oneIn'
+  | 'rtpShare'
 
 export type RowPatch = Partial<
   Pick<BucketRow, 'bucketId' | 'payout' | 'label' | 'weight' | 'locked' | 'groupId' | 'weightId'>

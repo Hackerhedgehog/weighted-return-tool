@@ -10,7 +10,7 @@ import type {
 } from '../lib/types'
 import type { Grouping } from '../lib/groups'
 import { COLUMNS, type Column } from '../lib/columns'
-import { fmtDecimal, fmtPayout, fmtWeight } from '../lib/format'
+import { fmtDecimal, fmtPayout, fmtPct, fmtWeight } from '../lib/format'
 import { rowTint } from '../lib/palette'
 import { weightForChance, weightForValue } from '../lib/distribute'
 import { buildTableRows, type TableRow } from '../lib/tableRows'
@@ -33,6 +33,8 @@ interface BucketTableProps {
   weightStep: WeightStep
   /** Group ids drawn as one aggregate row instead of their buckets. */
   collapsed: string[]
+  /** Column keys switched off in the ⚙ menu. The lock column never hides. */
+  hidden: string[]
   onSort: (key: SortKey) => void
   onPatch: (uid: string, patch: RowPatch) => void
   /** A group change applied to every shift-selected row at once, as one undo step. */
@@ -54,6 +56,11 @@ function textWidth(text: string, font: string): number {
   return measureCtx.measureText(text).width
 }
 
+/** "One in" display: 1/X with X to two decimals; a dash when nothing can hit. */
+export function fmtOneIn(chance: number): string {
+  return chance > 0 ? `1/${fmtDecimal(1 / chance, 2)}` : '—'
+}
+
 export function BucketTable({
   rows,
   totalWeight,
@@ -63,6 +70,7 @@ export function BucketTable({
   groups,
   weightStep,
   collapsed,
+  hidden,
   onSort,
   onPatch,
   onGroupMany,
@@ -78,6 +86,12 @@ export function BucketTable({
   )
   const tableRef = useRef<HTMLTableElement>(null)
   const wrapRef = useRef<HTMLDivElement>(null)
+
+  /** The columns actually rendered, in COLUMNS order. Every cell index below is relative to this. */
+  const visible = useMemo(
+    () => COLUMNS.filter((c) => c.key === 'lock' || !hidden.includes(c.key)),
+    [hidden],
+  )
 
   /**
    * Rows toggled on with shift+click — the same selection idiom the chart's
@@ -131,6 +145,10 @@ export function BucketTable({
             return fmtDecimal(u.agg.value)
           case 'chance':
             return fmtDecimal(u.agg.chance)
+          case 'oneIn':
+            return fmtOneIn(u.agg.chance)
+          case 'rtpShare':
+            return rtp > 0 ? fmtPct(u.agg.value / rtp, 2) : '—'
           default:
             return ''
         }
@@ -151,11 +169,15 @@ export function BucketTable({
           return fmtDecimal(total > 0 ? (r.payout * r.weight) / total : 0)
         case 'chance':
           return fmtDecimal(total > 0 ? r.weight / total : 0)
+        case 'oneIn':
+          return fmtOneIn(total > 0 ? r.weight / total : 0)
+        case 'rtpShare':
+          return rtp > 0 && total > 0 ? fmtPct((r.payout * r.weight) / total / rtp, 2) : '—'
         default:
           return ''
       }
     },
-    [totalWeight],
+    [totalWeight, rtp],
   )
 
   const toggleLock = useCallback(
@@ -172,7 +194,7 @@ export function BucketTable({
     (pos: CellPos) => {
       const u = display[pos.row]
       if (u === undefined || u.kind === 'group') return
-      const key = COLUMNS[pos.col].key
+      const key = visible[pos.col].key
       if (key === 'label') onPatch(u.row.uid, { label: '' })
       else if (key === 'id') onPatch(u.row.uid, { bucketId: 0 })
       else if (key === 'payout') onPatch(u.row.uid, { payout: 0 })
@@ -180,14 +202,23 @@ export function BucketTable({
         onPatch(u.row.uid, { weight: 0 })
       }
     },
-    [display, onPatch],
+    [display, onPatch, visible],
   )
 
   const isEditable = useCallback(
     (pos: CellPos) => {
-      const key = COLUMNS[pos.col]?.key
+      const key = visible[pos.col]?.key
       // Group is a dropdown, not a text cell — it has its own edit affordance.
-      if (key === undefined || key === 'lock' || key === 'group') return false
+      // The derived columns are computed and have nothing to write back to.
+      if (
+        key === undefined ||
+        key === 'lock' ||
+        key === 'group' ||
+        key === 'oneIn' ||
+        key === 'rtpShare'
+      ) {
+        return false
+      }
       if (pos.row === display.length) return key === 'weight' || key === 'weightedValue'
       const u = display[pos.row]
       // A collapsed group's cells are aggregates: there is no single row to
@@ -196,14 +227,14 @@ export function BucketTable({
       if (key === 'weightedValue') return u.row.payout > 0
       return true
     },
-    [display],
+    [display, visible],
   )
 
   const nav = useGridNavigation({
     rowCount: display.length + 1,
-    colCount: COLUMNS.length,
-    isNumericCol: (c) => COLUMNS[c].numeric,
-    isLockCol: (c) => COLUMNS[c].key === 'lock',
+    colCount: visible.length,
+    isNumericCol: (c) => visible[c]?.numeric ?? false,
+    isLockCol: (c) => visible[c]?.key === 'lock',
     isEditable,
     onDelete: clearCell,
     onToggleLock: toggleLock,
@@ -263,18 +294,301 @@ export function BucketTable({
     onKeyDown: nav.handleKeyDown,
   })
 
+  const renderBucketCell = (
+    unit: Extract<TableRow, { kind: 'bucket' }>,
+    rowIdx: number,
+    c: Column,
+    ci: number,
+  ) => {
+    const r = unit.row
+    switch (c.key) {
+      case 'lock':
+        return (
+          <td key={c.key} className="col-lock">
+            <LockCell
+              state={r.locked ? 'all' : 'none'}
+              selected={nav.sel.row === rowIdx && nav.sel.col === ci}
+              onToggle={() => toggleLock(rowIdx)}
+              onSelect={() => nav.select({ row: rowIdx, col: ci })}
+              onKeyDown={nav.handleKeyDown}
+            />
+          </td>
+        )
+      case 'group':
+        return (
+          <td key={c.key} className="col-group">
+            <select
+              className="group-select"
+              aria-label={`Group of ${r.label}`}
+              value={r.groupId}
+              style={{ color: grouping.byUid.get(r.uid)?.color }}
+              onChange={(e) => {
+                if (multiSel.has(r.uid) && multiSel.size > 1) {
+                  onGroupMany([...multiSel], e.target.value)
+                } else {
+                  onPatch(r.uid, { groupId: e.target.value })
+                }
+              }}
+            >
+              {groups.map((g) => (
+                <option key={g.id} value={g.id}>
+                  {g.name}
+                </option>
+              ))}
+            </select>
+          </td>
+        )
+      case 'id':
+        return (
+          <td key={c.key} className="col-id">
+            <GridCell
+              {...cellProps(rowIdx, ci)}
+              display={String(r.bucketId)}
+              raw={String(r.bucketId)}
+              numeric
+              editable
+              validate={(n) => Number.isInteger(n) && n >= 0}
+              onCommitValue={(n) => onPatch(r.uid, { bucketId: Math.round(n) })}
+            />
+          </td>
+        )
+      case 'weightId':
+        return (
+          <td key={c.key} className="col-weightId">
+            <GridCell
+              {...cellProps(rowIdx, ci)}
+              display={r.weightId}
+              raw={r.weightId}
+              numeric={false}
+              editable
+              onCommitText={(s) => onPatch(r.uid, { weightId: s })}
+            />
+          </td>
+        )
+      case 'payout':
+        return (
+          <td key={c.key} className="col-payout">
+            <GridCell
+              {...cellProps(rowIdx, ci)}
+              display={fmtPayout(r.payout)}
+              raw={fmtPayout(r.payout)}
+              numeric
+              editable
+              validate={(n) => n >= 0}
+              onCommitValue={(n) => onPatch(r.uid, { payout: n })}
+            />
+          </td>
+        )
+      case 'label':
+        return (
+          <td key={c.key} className="col-label">
+            <GridCell
+              {...cellProps(rowIdx, ci)}
+              display={r.label}
+              raw={r.label}
+              numeric={false}
+              editable
+              onCommitText={(s) => onPatch(r.uid, { label: s })}
+            />
+          </td>
+        )
+      case 'weight':
+        return (
+          <td key={c.key} className="col-weight">
+            <GridCell
+              {...cellProps(rowIdx, ci)}
+              display={fmtWeight(r.weight)}
+              raw={String(r.weight)}
+              numeric
+              editable
+              validate={(n) => n >= 0}
+              onCommitValue={(n) => onPatch(r.uid, { weight: Math.round(n) })}
+            />
+          </td>
+        )
+      case 'weightedValue':
+        return (
+          <td key={c.key} className="col-weightedValue">
+            <GridCell
+              {...cellProps(rowIdx, ci)}
+              display={fmtDecimal(valueOf(r))}
+              raw={fmtDecimal(valueOf(r))}
+              numeric
+              editable={r.payout > 0}
+              validate={(n) => n >= 0}
+              title={
+                r.payout > 0
+                  ? 'Editing solves for the weight that yields this return'
+                  : 'A zero-payout bucket always returns 0'
+              }
+              onCommitValue={(n) => {
+                const w = weightForValue(r.weight, totalWeight, r.payout, n, weightStep)
+                if (w !== null) onPatch(r.uid, { weight: w })
+              }}
+            />
+          </td>
+        )
+      case 'chance':
+        return (
+          <td key={c.key} className="col-chance">
+            <GridCell
+              {...cellProps(rowIdx, ci)}
+              display={fmtDecimal(chanceOf(r))}
+              raw={fmtDecimal(chanceOf(r))}
+              numeric
+              editable
+              validate={(n) => n >= 0 && n < 1}
+              title="Fraction of total weight — the same value the export writes"
+              onCommitValue={(n) => {
+                const w = weightForChance(r.weight, totalWeight, n, weightStep)
+                if (w !== null) onPatch(r.uid, { weight: w })
+              }}
+            />
+          </td>
+        )
+      case 'oneIn':
+        return (
+          <td key={c.key} className="col-oneIn">
+            <GridCell
+              {...cellProps(rowIdx, ci)}
+              display={fmtOneIn(chanceOf(r))}
+              raw=""
+              numeric
+              editable={false}
+              title="1 / chance — one hit of this bucket per this many spins"
+            />
+          </td>
+        )
+      case 'rtpShare':
+        return (
+          <td key={c.key} className="col-rtpShare">
+            <GridCell
+              {...cellProps(rowIdx, ci)}
+              display={rtp > 0 ? fmtPct(valueOf(r) / rtp, 2) : '—'}
+              raw=""
+              numeric
+              editable={false}
+              title="This bucket's share of the table's total RTP"
+            />
+          </td>
+        )
+      default:
+        return null
+    }
+  }
+
+  const renderTotalsCell = (c: Column, ci: number) => {
+    switch (c.key) {
+      case 'label':
+        return (
+          <td key={c.key} className="col-label">
+            <GridCell
+              {...cellProps(totalsRowIndex, ci)}
+              display="Total"
+              raw="Total"
+              numeric={false}
+              editable={false}
+              className="totals-label"
+            />
+          </td>
+        )
+      case 'weight':
+        return (
+          <td key={c.key} className="col-weight">
+            <GridCell
+              {...cellProps(totalsRowIndex, ci)}
+              display={fmtWeight(totalWeight)}
+              raw={String(Math.round(totalWeight))}
+              numeric
+              editable
+              validate={(n) => n > 0}
+              title="Total weight — editing rescales every unlocked row"
+              onCommitValue={(n) => onTotalWeight(Math.round(n))}
+            />
+          </td>
+        )
+      case 'weightedValue':
+        return (
+          <td key={c.key} className="col-weightedValue">
+            <GridCell
+              {...cellProps(totalsRowIndex, ci)}
+              display={fmtDecimal(rtp)}
+              raw={fmtDecimal(rtp)}
+              numeric
+              editable
+              validate={(n) => n >= 0}
+              title="Total weighted return (RTP) — editing reshapes unlocked weights to reach it, leaving hit and win chance alone"
+              onCommitValue={onTotalRtp}
+            />
+          </td>
+        )
+      case 'chance':
+        return (
+          <td key={c.key} className="col-chance">
+            <GridCell
+              {...cellProps(totalsRowIndex, ci)}
+              display={rows.length > 0 ? '1' : '0'}
+              raw="1"
+              numeric
+              editable={false}
+              title="Chances always sum to 1"
+            />
+          </td>
+        )
+      case 'oneIn':
+        return (
+          <td key={c.key} className="col-oneIn">
+            <GridCell
+              {...cellProps(totalsRowIndex, ci)}
+              display={rows.length > 0 ? '1/1' : ''}
+              raw=""
+              numeric
+              editable={false}
+              title="Every spin lands in some bucket"
+            />
+          </td>
+        )
+      case 'rtpShare':
+        return (
+          <td key={c.key} className="col-rtpShare">
+            <GridCell
+              {...cellProps(totalsRowIndex, ci)}
+              display={rtp > 0 ? '100%' : ''}
+              raw=""
+              numeric
+              editable={false}
+            />
+          </td>
+        )
+      default:
+        // Rendered as cells rather than blanks so arrowing along the totals
+        // row cannot strand keyboard focus.
+        return (
+          <td key={c.key} className={`col-${c.key}`}>
+            <GridCell
+              {...cellProps(totalsRowIndex, ci)}
+              display=""
+              raw=""
+              numeric={c.numeric}
+              editable={false}
+            />
+          </td>
+        )
+    }
+  }
+
   return (
     <div className="grid-wrap" ref={wrapRef}>
       <table className="grid-table" ref={tableRef} role="grid">
         <colgroup>
-          {COLUMNS.map((c) => (
+          {visible.map((c) => (
             <col key={c.key} style={{ width: widthOf(c.key) }} />
           ))}
         </colgroup>
 
         <thead>
           <tr>
-            {COLUMNS.map((c) => (
+            {visible.map((c) => (
               <th key={c.key} className={`col-${c.key}`}>
                 {c.sortable ? (
                   <button
@@ -314,6 +628,8 @@ export function BucketTable({
                 key={unit.uid}
                 unit={unit}
                 rowIdx={rowIdx}
+                visible={visible}
+                rtp={rtp}
                 cellProps={cellProps}
                 lockSelected={nav.sel.row === rowIdx && nav.sel.col === 0}
                 onExpand={() => onExpand(unit.group.id)}
@@ -347,227 +663,14 @@ export function BucketTable({
                   }
                 }}
               >
-                <td className="col-lock">
-                  <LockCell
-                    state={unit.row.locked ? 'all' : 'none'}
-                    selected={nav.sel.row === rowIdx && nav.sel.col === 0}
-                    onToggle={() => toggleLock(rowIdx)}
-                    onSelect={() => nav.select({ row: rowIdx, col: 0 })}
-                    onKeyDown={nav.handleKeyDown}
-                  />
-                </td>
-
-                <td className="col-group">
-                  <select
-                    className="group-select"
-                    aria-label={`Group of ${unit.row.label}`}
-                    value={unit.row.groupId}
-                    style={{ color: grouping.byUid.get(unit.row.uid)?.color }}
-                    onChange={(e) => {
-                      if (multiSel.has(unit.row.uid) && multiSel.size > 1) {
-                        onGroupMany([...multiSel], e.target.value)
-                      } else {
-                        onPatch(unit.row.uid, { groupId: e.target.value })
-                      }
-                    }}
-                  >
-                    {groups.map((g) => (
-                      <option key={g.id} value={g.id}>
-                        {g.name}
-                      </option>
-                    ))}
-                  </select>
-                </td>
-
-                <td className="col-id">
-                  <GridCell
-                    {...cellProps(rowIdx, 2)}
-                    display={String(unit.row.bucketId)}
-                    raw={String(unit.row.bucketId)}
-                    numeric
-                    editable
-                    validate={(n) => Number.isInteger(n) && n >= 0}
-                    onCommitValue={(n) => onPatch(unit.row.uid, { bucketId: Math.round(n) })}
-                  />
-                </td>
-
-                <td className="col-weightId">
-                  <GridCell
-                    {...cellProps(rowIdx, 3)}
-                    display={unit.row.weightId}
-                    raw={unit.row.weightId}
-                    numeric={false}
-                    editable
-                    onCommitText={(s) => onPatch(unit.row.uid, { weightId: s })}
-                  />
-                </td>
-
-                <td className="col-payout">
-                  <GridCell
-                    {...cellProps(rowIdx, 4)}
-                    display={fmtPayout(unit.row.payout)}
-                    raw={fmtPayout(unit.row.payout)}
-                    numeric
-                    editable
-                    validate={(n) => n >= 0}
-                    onCommitValue={(n) => onPatch(unit.row.uid, { payout: n })}
-                  />
-                </td>
-
-                <td className="col-label">
-                  <GridCell
-                    {...cellProps(rowIdx, 5)}
-                    display={unit.row.label}
-                    raw={unit.row.label}
-                    numeric={false}
-                    editable
-                    onCommitText={(s) => onPatch(unit.row.uid, { label: s })}
-                  />
-                </td>
-
-                <td className="col-weight">
-                  <GridCell
-                    {...cellProps(rowIdx, 6)}
-                    display={fmtWeight(unit.row.weight)}
-                    raw={String(unit.row.weight)}
-                    numeric
-                    editable
-                    validate={(n) => n >= 0}
-                    onCommitValue={(n) => onPatch(unit.row.uid, { weight: Math.round(n) })}
-                  />
-                </td>
-
-                <td className="col-weightedValue">
-                  <GridCell
-                    {...cellProps(rowIdx, 7)}
-                    display={fmtDecimal(valueOf(unit.row))}
-                    raw={fmtDecimal(valueOf(unit.row))}
-                    numeric
-                    editable={unit.row.payout > 0}
-                    validate={(n) => n >= 0}
-                    title={
-                      unit.row.payout > 0
-                        ? 'Editing solves for the weight that yields this return'
-                        : 'A zero-payout bucket always returns 0'
-                    }
-                    onCommitValue={(n) => {
-                      const w = weightForValue(
-                        unit.row.weight,
-                        totalWeight,
-                        unit.row.payout,
-                        n,
-                        weightStep,
-                      )
-                      if (w !== null) onPatch(unit.row.uid, { weight: w })
-                    }}
-                  />
-                </td>
-
-                <td className="col-chance">
-                  <GridCell
-                    {...cellProps(rowIdx, 8)}
-                    display={fmtDecimal(chanceOf(unit.row))}
-                    raw={fmtDecimal(chanceOf(unit.row))}
-                    numeric
-                    editable
-                    validate={(n) => n >= 0 && n < 1}
-                    title="Fraction of total weight — the same value the export writes"
-                    onCommitValue={(n) => {
-                      const w = weightForChance(unit.row.weight, totalWeight, n, weightStep)
-                      if (w !== null) onPatch(unit.row.uid, { weight: w })
-                    }}
-                  />
-                </td>
+                {visible.map((c, ci) => renderBucketCell(unit, rowIdx, c, ci))}
               </tr>
             ),
           )}
         </tbody>
 
         <tfoot>
-          <tr className="totals-row">
-            {/* Rendered as cells rather than blanks so arrowing along the
-                totals row cannot strand keyboard focus. */}
-            <td className="col-lock">
-              <GridCell
-                {...cellProps(totalsRowIndex, 0)}
-                display=""
-                raw=""
-                numeric={false}
-                editable={false}
-              />
-            </td>
-            <td className="col-group">
-              <GridCell
-                {...cellProps(totalsRowIndex, 1)}
-                display=""
-                raw=""
-                numeric={false}
-                editable={false}
-              />
-            </td>
-            <td className="col-id">
-              <GridCell {...cellProps(totalsRowIndex, 2)} display="" raw="" numeric editable={false} />
-            </td>
-            <td className="col-weightId">
-              <GridCell
-                {...cellProps(totalsRowIndex, 3)}
-                display=""
-                raw=""
-                numeric={false}
-                editable={false}
-              />
-            </td>
-            <td className="col-payout">
-              <GridCell {...cellProps(totalsRowIndex, 4)} display="" raw="" numeric editable={false} />
-            </td>
-            <td className="col-label">
-              <GridCell
-                {...cellProps(totalsRowIndex, 5)}
-                display="Total"
-                raw="Total"
-                numeric={false}
-                editable={false}
-                className="totals-label"
-              />
-            </td>
-
-            <td className="col-weight">
-              <GridCell
-                {...cellProps(totalsRowIndex, 6)}
-                display={fmtWeight(totalWeight)}
-                raw={String(Math.round(totalWeight))}
-                numeric
-                editable
-                validate={(n) => n > 0}
-                title="Total weight — editing rescales every unlocked row"
-                onCommitValue={(n) => onTotalWeight(Math.round(n))}
-              />
-            </td>
-
-            <td className="col-weightedValue">
-              <GridCell
-                {...cellProps(totalsRowIndex, 7)}
-                display={fmtDecimal(rtp)}
-                raw={fmtDecimal(rtp)}
-                numeric
-                editable
-                validate={(n) => n >= 0}
-                title="Total weighted return (RTP) — editing reshapes unlocked weights to reach it, leaving hit and win chance alone"
-                onCommitValue={onTotalRtp}
-              />
-            </td>
-
-            <td className="col-chance">
-              <GridCell
-                {...cellProps(totalsRowIndex, 8)}
-                display={rows.length > 0 ? '1' : '0'}
-                raw="1"
-                numeric
-                editable={false}
-                title="Chances always sum to 1"
-              />
-            </td>
-          </tr>
+          <tr className="totals-row">{visible.map((c, ci) => renderTotalsCell(c, ci))}</tr>
         </tfoot>
       </table>
     </div>

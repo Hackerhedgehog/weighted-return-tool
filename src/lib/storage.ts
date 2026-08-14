@@ -63,6 +63,8 @@ export interface Workspace {
   groupDistCollapsed?: boolean
   bucketsCollapsed?: boolean
   hiddenGroupColumns?: string[]
+  /** Optional — absent in workspaces saved before bucket columns could hide. */
+  hiddenBucketColumns?: string[]
 }
 
 const isObject = (v: unknown): v is Record<string, unknown> =>
@@ -182,7 +184,10 @@ function isWorkspace(v: unknown): v is Workspace {
     (v.bucketsCollapsed === undefined || typeof v.bucketsCollapsed === 'boolean') &&
     (v.hiddenGroupColumns === undefined ||
       (Array.isArray(v.hiddenGroupColumns) &&
-        v.hiddenGroupColumns.every((s) => typeof s === 'string')))
+        v.hiddenGroupColumns.every((s) => typeof s === 'string'))) &&
+    (v.hiddenBucketColumns === undefined ||
+      (Array.isArray(v.hiddenBucketColumns) &&
+        v.hiddenBucketColumns.every((s) => typeof s === 'string')))
   )
 }
 

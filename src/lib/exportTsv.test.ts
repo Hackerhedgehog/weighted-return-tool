@@ -40,6 +40,16 @@ describe('buildTsv acceptance', () => {
     expect(buildTsv([], 0).split('\r\n')[0]).toBe(EXPORT_HEADER)
   })
 
+  it('is independent of table column visibility (columns are display-only)', () => {
+    // buildTsv takes only rows + total; this pins that contract so a future
+    // refactor cannot thread the ⚙ column toggles into the export. The header
+    // and field count never change with what the table happens to show.
+    const rows = parseTsv(OUTPUT).rows
+    const lines = buildTsv(rows, 1200350).split('\r\n')
+    expect(lines[0]).toBe(EXPORT_HEADER)
+    expect(lines[1].split('\t')).toHaveLength(6)
+  })
+
   it('carries no totals row', () => {
     const rows = parseTsv(OUTPUT).rows
     const lines = buildTsv(rows, 1200350).split('\r\n')

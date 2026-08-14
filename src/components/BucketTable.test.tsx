@@ -33,6 +33,7 @@ const tableProps = (collapsed: string[], onExpand = vi.fn(), onGroupLock = vi.fn
   groups: seeded.groups,
   weightStep: 1 as const,
   collapsed,
+  hidden: [] as string[],
   onSort: vi.fn(),
   onPatch: vi.fn(),
   onGroupMany: vi.fn(),
@@ -49,6 +50,35 @@ const renderTable = (collapsed: string[] = []) => {
   const view = render(<BucketTable {...tableProps(collapsed, onExpand, onGroupLock)} />)
   return { onExpand, onGroupLock, rerender: view.rerender }
 }
+
+describe('BucketTable column visibility', () => {
+  it('renders One in and RTP Share for a row', () => {
+    renderTable()
+    expect(screen.getByText('One in')).toBeTruthy()
+    expect(screen.getByText('RTP Share')).toBeTruthy()
+    // One row's derived cells: One in = 1/chance, RTP Share = value / table RTP.
+    const r = rows[0]
+    const chance = r.weight / T
+    const expected = `1/${(1 / chance).toFixed(2).replace(/0+$/, '').replace(/\.$/, '')}`
+    const cells = [...document.querySelectorAll('tbody .col-oneIn .gcell')]
+    expect(cells.some((el) => el.textContent === expected)).toBe(true)
+  })
+
+  it('omits hidden columns from header and body', () => {
+    const props = tableProps([])
+    render(<BucketTable {...props} hidden={['weightId', 'oneIn']} />)
+    expect(screen.queryByText('Weight ID')).toBeNull()
+    expect(screen.queryByText('One in')).toBeNull()
+    expect(document.querySelector('tbody .col-weightId')).toBeNull()
+  })
+
+  it('totals row shows 1/1 and 100% for the derived columns', () => {
+    renderTable()
+    const totals = document.querySelector('.totals-row')!
+    expect(totals.querySelector('.col-oneIn .gcell')!.textContent).toBe('1/1')
+    expect(totals.querySelector('.col-rtpShare .gcell')!.textContent).toBe('100%')
+  })
+})
 
 describe('BucketTable with a collapsed group', () => {
   it('draws one row per bucket when nothing is collapsed', () => {
