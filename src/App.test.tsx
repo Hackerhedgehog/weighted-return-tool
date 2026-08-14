@@ -163,7 +163,7 @@ describe('App', () => {
     expect(Number(after.textContent!.replace(/,/g, ''))).toBe(before + 500)
   })
 
-  it('undoes that edit with the toolbar button', () => {
+  it('undoes that edit with Ctrl+Z', () => {
     loadRealData()
     const cell = document.querySelector('.grid-row .col-weight .gcell') as HTMLElement
     const before = cell.textContent
@@ -175,7 +175,7 @@ describe('App', () => {
     fireEvent.keyDown(input, { key: 'Enter' })
     expect(document.querySelector('.grid-row .col-weight .gcell')!.textContent).not.toBe(before)
 
-    fireEvent.click(screen.getByRole('button', { name: /Undo/ }))
+    fireEvent.keyDown(window, { key: 'z', ctrlKey: true })
     expect(document.querySelector('.grid-row .col-weight .gcell')!.textContent).toBe(before)
   })
 
@@ -638,7 +638,7 @@ describe('weight step', () => {
     openSettings()
     fireEvent.click(screen.getByRole('button', { name: '×100' }))
     expect(screen.getByRole('button', { name: '×100' }).className).toContain('active')
-    fireEvent.click(screen.getByRole('button', { name: /Undo/ }))
+    fireEvent.keyDown(window, { key: 'z', ctrlKey: true })
     expect(screen.getByRole('button', { name: 'free' }).className).toContain('active')
   })
 
@@ -680,10 +680,10 @@ describe('weight step', () => {
     openSettings()
     fireEvent.click(screen.getByRole('button', { name: '×100' }))
 
-    fireEvent.click(screen.getByRole('button', { name: /Undo/ }))
+    fireEvent.keyDown(window, { key: 'z', ctrlKey: true })
     expect(screen.getByRole('button', { name: 'free' }).className).toContain('active')
 
-    fireEvent.click(screen.getByRole('button', { name: /Redo/ }))
+    fireEvent.keyDown(window, { key: 'z', ctrlKey: true, shiftKey: true })
     expect(screen.getByRole('button', { name: '×100' }).className).toContain('active')
   })
 })
@@ -810,8 +810,9 @@ describe('targets panel layout', () => {
     }
 
     expect(within(row).getByRole('button', { name: 'Auto-Distribute' })).toBeDefined()
-    expect(within(row).getByRole('button', { name: /Undo/ })).toBeDefined()
-    expect(within(row).getByRole('button', { name: /Redo/ })).toBeDefined()
+    // Undo/redo are keyboard-only and Settings lives in the top bar.
+    expect(within(row).queryByRole('button', { name: /Undo/ })).toBeNull()
+    expect(within(row).queryByRole('button', { name: /Settings/ })).toBeNull()
   })
 
   it('labels the weight steps as multipliers, in the settings drawer', () => {
@@ -824,32 +825,60 @@ describe('targets panel layout', () => {
 })
 
 describe('solver settings drawer', () => {
-  it('reorders the priority list, undoably', () => {
+  /** Mock the list's box so the pointer math has real geometry under jsdom. */
+  const mockListRect = () => {
+    const list = document.querySelector('.priority-list') as HTMLElement
+    const count = document.querySelectorAll('.priority-row').length
+    vi.spyOn(list, 'getBoundingClientRect').mockReturnValue({
+      top: 0,
+      bottom: 30 * count,
+      left: 0,
+      right: 200,
+      width: 200,
+      height: 30 * count,
+      x: 0,
+      y: 0,
+      toJSON: () => ({}),
+    } as DOMRect)
+  }
+
+  const dragRow = (from: number, to: number) => {
+    mockListRect()
+    const grips = screen.getAllByLabelText(/drag to reorder/i)
+    fireEvent.pointerDown(grips[from], { clientY: from * 30 + 15, button: 0, pointerId: 9 })
+    fireEvent.pointerMove(grips[from], { clientY: to * 30 + 15, pointerId: 9 })
+    fireEvent.pointerUp(grips[from], { pointerId: 9 })
+  }
+
+  it('reorders the priority list by dragging, undoably', () => {
     loadRealData()
     fireEvent.click(screen.getByRole('button', { name: /Settings/ }))
 
     const labels = () =>
       [...document.querySelectorAll('.priority-label')].map((el) => el.textContent)
     expect(labels()[0]).toBe('Target RTP')
+    expect(screen.queryByLabelText(/^Raise /)).toBeNull()
 
-    fireEvent.click(screen.getByRole('button', { name: 'Lower Target RTP' }))
-    expect(labels()[0]).toBe('Ordering / weighted value')
+    dragRow(0, 1)
     expect(labels()[1]).toBe('Target RTP')
 
-    fireEvent.click(screen.getByRole('button', { name: /Undo/ }))
+    fireEvent.keyDown(window, { key: 'z', ctrlKey: true })
     expect(labels()[0]).toBe('Target RTP')
   })
 
   it('closes on the backdrop and keeps the chosen order', () => {
     loadRealData()
     fireEvent.click(screen.getByRole('button', { name: /Settings/ }))
-    fireEvent.click(screen.getByRole('button', { name: 'Raise Pref hit chance' }))
+    const labels = () =>
+      [...document.querySelectorAll('.priority-label')].map((el) => el.textContent)
+    const hitIndex = labels().indexOf('Pref hit chance')
+
+    dragRow(hitIndex, hitIndex - 1)
     fireEvent.click(document.querySelector('.settings-backdrop')!)
     expect(document.querySelector('.settings-drawer')).toBeNull()
 
     fireEvent.click(screen.getByRole('button', { name: /Settings/ }))
-    const labels = [...document.querySelectorAll('.priority-label')].map((el) => el.textContent)
-    expect(labels[2]).toBe('Pref hit chance')
+    expect(labels()[hitIndex - 1]).toBe('Pref hit chance')
   })
 })
 
@@ -879,7 +908,6 @@ describe('targets panel collapse', () => {
 
     const actions = document.querySelector('.targets-head-actions') as HTMLElement
     expect(within(actions).getByRole('button', { name: 'Auto-Distribute' })).toBeDefined()
-    expect(within(actions).getByRole('button', { name: /Undo/ })).toBeDefined()
   })
 
   it('still distributes while collapsed', () => {
@@ -1053,7 +1081,7 @@ describe('groups', () => {
     fireEvent.click(settings.getByRole('button', { name: 'Lock the bonus group' }))
     expect(lockedRows()).toBeGreaterThan(before)
 
-    fireEvent.click(screen.getByRole('button', { name: '↶ Undo' }))
+    fireEvent.keyDown(window, { key: 'z', ctrlKey: true })
     expect(lockedRows()).toBe(before)
   })
 
@@ -1152,7 +1180,7 @@ describe('groups', () => {
     expect(values[1]).toBe(other)
 
     // One undo step reverts the whole multi-change.
-    fireEvent.click(screen.getByRole('button', { name: '↶ Undo' }))
+    fireEvent.keyDown(window, { key: 'z', ctrlKey: true })
     const reverted = [...document.querySelectorAll('.grid-row .col-group select')].map(
       (s) => (s as HTMLSelectElement).value,
     )
@@ -1257,12 +1285,12 @@ describe('group bars', () => {
 })
 
 describe('chrome layout', () => {
-  it('opens group settings inside the settings drawer', () => {
+  it('opens group settings from the top-bar Settings button', () => {
     render(<App />)
     fireEvent.click(screen.getByRole('button', { name: 'Load sample' }))
-    const targets = document.querySelector('.targets')!
+    const topbar = document.querySelector('.topbar')!
     const btn = screen.getByRole('button', { name: /Settings/ })
-    expect(targets.contains(btn)).toBe(true)
+    expect(topbar.contains(btn)).toBe(true)
     fireEvent.click(btn)
     expect(screen.getByRole('heading', { name: 'Groups' })).toBeDefined()
     expect(document.querySelector('.settings-drawer .group-settings')).not.toBeNull()

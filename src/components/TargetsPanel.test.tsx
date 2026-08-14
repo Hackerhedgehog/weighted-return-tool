@@ -21,8 +21,6 @@ const renderPanel = (over: Partial<React.ComponentProps<typeof TargetsPanel>> = 
       warnings={[]}
       bucketCount={30}
       lockedCount={0}
-      canUndo={false}
-      canRedo={false}
       collapsed={false}
       panelRef={() => {}}
       onCollapsed={() => {}}
@@ -30,10 +28,6 @@ const renderPanel = (over: Partial<React.ComponentProps<typeof TargetsPanel>> = 
       onVolatility={() => {}}
       onCurve={() => {}}
       onAutoDistribute={() => {}}
-      onUndo={() => {}}
-      onRedo={() => {}}
-      onSettings={() => {}}
-      settingsOpen={false}
       {...over}
     />,
   )

@@ -721,6 +721,18 @@ body {
   font-size: 10px;
 }
 
+.priority-grip {
+  cursor: grab;
+  user-select: none;
+  touch-action: none;
+  color: var(--text-dim);
+  padding: 0 6px;
+}
+
+.priority-row.dragging {
+  opacity: 0.55;
+}
+
 /* ---------- group distribution ---------- */
 
 .gdist-table {

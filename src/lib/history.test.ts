@@ -10,12 +10,13 @@ describe('history', () => {
     expect(redo(h, 'x')).toBeNull()
   })
 
-  it('caps at the limit and drops the oldest entry', () => {
+  it('holds 100 steps, capping there and dropping the oldest entry', () => {
+    expect(HISTORY_LIMIT).toBe(100)
     let h = emptyHistory<number>()
-    for (let i = 0; i < 25; i++) h = pushHistory(h, i)
-    expect(h.past).toHaveLength(HISTORY_LIMIT)
-    expect(h.past[0]).toBe(5)
-    expect(h.past.at(-1)).toBe(24)
+    for (let i = 0; i < 150; i++) h = pushHistory(h, i)
+    expect(h.past).toHaveLength(100)
+    expect(h.past[0]).toBe(50)
+    expect(h.past.at(-1)).toBe(149)
   })
 
   it('round-trips undo and redo', () => {

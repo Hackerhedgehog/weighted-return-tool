@@ -21,8 +21,6 @@ interface TargetsPanelProps {
   warnings: string[]
   bucketCount: number
   lockedCount: number
-  canUndo: boolean
-  canRedo: boolean
   collapsed: boolean
   /** App measures the panel to keep the other sticky offsets clear of it. */
   panelRef: (el: HTMLElement | null) => void
@@ -31,10 +29,6 @@ interface TargetsPanelProps {
   onVolatility: (v: Exclude<Volatility, 'custom'>) => void
   onCurve: (c: number) => void
   onAutoDistribute: () => void
-  onUndo: () => void
-  onRedo: () => void
-  onSettings: () => void
-  settingsOpen: boolean
 }
 
 /** Small numeric field that also accepts arithmetic, like the grid cells do. */
@@ -183,8 +177,6 @@ export function TargetsPanel(props: TargetsPanelProps) {
     warnings,
     bucketCount,
     lockedCount,
-    canUndo,
-    canRedo,
     collapsed,
     panelRef,
     onCollapsed,
@@ -192,10 +184,6 @@ export function TargetsPanel(props: TargetsPanelProps) {
     onVolatility,
     onCurve,
     onAutoDistribute,
-    onUndo,
-    onRedo,
-    onSettings,
-    settingsOpen,
   } = props
 
   // Only the chance constraints can be invalid, and only while they are being
@@ -213,40 +201,21 @@ export function TargetsPanel(props: TargetsPanelProps) {
   const rtpOk = Math.abs(rtpDelta) < 1e-6
 
   /**
-   * Auto-Distribute, Group settings and undo/redo appear in exactly one place
-   * at a time — the settings row when expanded, the head bar when collapsed —
-   * so acting on the table never needs an expand, and there is never a
-   * duplicate control.
+   * Auto-Distribute appears in exactly one place at a time — the settings row
+   * when expanded, the head bar when collapsed — so acting on the table never
+   * needs an expand. Settings live in the top bar; undo/redo are Ctrl+Z /
+   * Ctrl+Shift+Z / Ctrl+Y only.
    */
   const actions = (
-    <>
-      <button
-        type="button"
-        className="btn primary"
-        onClick={onAutoDistribute}
-        disabled={invalid || bucketCount === 0}
-        title={invalid ? 'Fix the targets first' : 'Redistribute unlocked weights to hit these targets'}
-      >
-        Auto-Distribute
-      </button>
-      <button
-        type="button"
-        className={`btn ${settingsOpen ? 'primary' : ''}`}
-        aria-expanded={settingsOpen}
-        onClick={onSettings}
-        title="Bucket groups, solver priority order and weight step"
-      >
-        ⚙ Settings
-      </button>
-      <div className="btn-row">
-        <button type="button" className="btn" onClick={onUndo} disabled={!canUndo} title="Ctrl+Z">
-          ↶ Undo
-        </button>
-        <button type="button" className="btn" onClick={onRedo} disabled={!canRedo} title="Ctrl+Y">
-          ↷ Redo
-        </button>
-      </div>
-    </>
+    <button
+      type="button"
+      className="btn primary"
+      onClick={onAutoDistribute}
+      disabled={invalid || bucketCount === 0}
+      title={invalid ? 'Fix the targets first' : 'Redistribute unlocked weights to hit these targets'}
+    >
+      Auto-Distribute
+    </button>
   )
 
   return (

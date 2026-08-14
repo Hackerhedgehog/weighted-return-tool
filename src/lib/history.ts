@@ -14,7 +14,7 @@ export interface HistoryState<T> {
   future: T[]
 }
 
-export const HISTORY_LIMIT = 20
+export const HISTORY_LIMIT = 100
 
 export function emptyHistory<T>(): HistoryState<T> {
   return { past: [], future: [] }

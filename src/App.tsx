@@ -158,14 +158,16 @@ function WorkspaceView({
         },
   )
   // Seeded from the per-tab store so switching tabs keeps each tab's undo
-  // stack — the store outlives this component, the state does not.
-  const [history, setHistoryState] = useState<HistoryState<Doc>>(
+  // stack — the store outlives this component, the state does not. Nothing
+  // renders from it since the undo buttons went keyboard-only; the state
+  // exists so the ref mirror below stays in step across re-renders.
+  const [, setHistoryState] = useState<HistoryState<Doc>>(
     () => historyStore.get(tabId) ?? emptyHistory<Doc>(),
   )
 
   // Mirrors, so a handler can read the live value without re-subscribing.
   const docRef = useRef(doc)
-  const historyRef = useRef(history)
+  const historyRef = useRef<HistoryState<Doc>>(historyStore.get(tabId) ?? emptyHistory<Doc>())
 
   const setDoc = useCallback((d: Doc) => {
     docRef.current = d
@@ -1032,6 +1034,15 @@ function WorkspaceView({
                   </span>
                 )}
               </div>
+              <button
+                type="button"
+                className={`btn ${settingsOpen ? 'primary' : ''}`}
+                aria-expanded={settingsOpen}
+                onClick={() => setSettingsOpen((v) => !v)}
+                title="Bucket groups, solver priority order and weight step"
+              >
+                ⚙ Settings
+              </button>
               {/* Destructive, so it stands apart from the two blocks rather
                   than sitting among the actions used constantly. */}
               <button type="button" className="btn danger" onClick={handleClear}>
@@ -1056,16 +1067,10 @@ function WorkspaceView({
             warnings={notices}
             bucketCount={doc.rows.length}
             lockedCount={lockedCount}
-            canUndo={history.past.length > 0}
-            canRedo={history.future.length > 0}
             onTargets={(t) => commit((d) => ({ ...d, targets: t }))}
             onVolatility={(v) => commit((d) => ({ ...d, volatility: v, curve: CURVE_PRESETS[v] }))}
             onCurve={(c) => commit((d) => ({ ...d, curve: c, volatility: volatilityForCurve(c) }))}
             onAutoDistribute={autoDistribute}
-            onUndo={doUndo}
-            onRedo={doRedo}
-            onSettings={() => setSettingsOpen((v) => !v)}
-            settingsOpen={settingsOpen}
           />
 
           <SettingsPanel

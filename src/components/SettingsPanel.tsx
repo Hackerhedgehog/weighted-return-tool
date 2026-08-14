@@ -1,3 +1,4 @@
+import { useRef, useState } from 'react'
 import {
   normalizePriority,
   PRIORITY_LABELS,
@@ -61,16 +62,108 @@ export function SettingsPanel({
   onGroupAutoDetectAll,
   onClose,
 }: SettingsPanelProps) {
-  if (!open) return null
+  return open ? (
+    <SettingsPanelBody
+      {...{
+        targets,
+        weightStep,
+        groups,
+        groupCounts,
+        groupLockStates,
+        groupStats,
+        onTargets,
+        onWeightStep,
+        onGroupAdd,
+        onGroupRename,
+        onGroupRecolor,
+        onGroupDelete,
+        onGroupLock,
+        onGroupSoftLock,
+        onGroupChance,
+        onGroupValue,
+        onGroupAutoDetect,
+        onGroupAutoDetectAll,
+        onClose,
+      }}
+    />
+  ) : null
+}
+
+function SettingsPanelBody({
+  targets,
+  weightStep,
+  groups,
+  groupCounts,
+  groupLockStates,
+  groupStats,
+  onTargets,
+  onWeightStep,
+  onGroupAdd,
+  onGroupRename,
+  onGroupRecolor,
+  onGroupDelete,
+  onGroupLock,
+  onGroupSoftLock,
+  onGroupChance,
+  onGroupValue,
+  onGroupAutoDetect,
+  onGroupAutoDetectAll,
+  onClose,
+}: Omit<SettingsPanelProps, 'open'>) {
   const priority = normalizePriority(targets.priority)
 
-  const move = (index: number, delta: -1 | 1) => {
-    const next = [...priority]
-    const j = index + delta
-    if (j < 0 || j >= next.length) return
-    ;[next[index], next[j]] = [next[j], next[index]]
-    onTargets({ ...targets, priority: next })
+  // Pointer drag over the list reorders it: the grip anchors the gesture and
+  // the row under the pointer (by even division of the list's height) is
+  // where the dragged row would land. Committed once, on release.
+  const [dragFrom, setDragFrom] = useState<number | null>(null)
+  const [dragOver, setDragOver] = useState<number | null>(null)
+  const listRef = useRef<HTMLOListElement>(null)
+
+  const indexAt = (y: number): number | null => {
+    const el = listRef.current
+    if (el === null) return null
+    const rect = el.getBoundingClientRect()
+    const rowH = (rect.bottom - rect.top) / Math.max(1, priority.length)
+    return Math.max(
+      0,
+      Math.min(priority.length - 1, Math.floor((y - rect.top) / Math.max(1, rowH))),
+    )
   }
+
+  const onGripDown = (e: React.PointerEvent, i: number) => {
+    if (e.button !== 0) return
+    e.preventDefault()
+    ;(e.currentTarget as Element).setPointerCapture?.(e.pointerId)
+    setDragFrom(i)
+    setDragOver(i)
+  }
+
+  const onGripMove = (e: React.PointerEvent) => {
+    if (dragFrom === null) return
+    const i = indexAt(e.clientY)
+    if (i !== null) setDragOver(i)
+  }
+
+  const onGripUp = () => {
+    if (dragFrom !== null && dragOver !== null && dragFrom !== dragOver) {
+      const next = [...priority]
+      const [moved] = next.splice(dragFrom, 1)
+      next.splice(dragOver, 0, moved)
+      onTargets({ ...targets, priority: next })
+    }
+    setDragFrom(null)
+    setDragOver(null)
+  }
+
+  // The list previews the drop while the pointer moves, so the user sees the
+  // order they are about to commit rather than a static list plus a marker.
+  const previewOrder = (() => {
+    if (dragFrom === null || dragOver === null || dragFrom === dragOver) return priority
+    const next = [...priority]
+    const [moved] = next.splice(dragFrom, 1)
+    next.splice(dragOver, 0, moved)
+    return next
+  })()
 
   return (
     <>
@@ -110,31 +203,29 @@ export function SettingsPanel({
           <h3>Priority order</h3>
           <p className="field-hint">
             When two targets cannot both hold, the lower one yields. Locks always outrank
-            everything.
+            everything. Drag the ≡ grip to reorder.
           </p>
-          <ol className="priority-list">
-            {priority.map((key, i) => (
-              <li className="priority-row" key={key}>
+          <ol className="priority-list" ref={listRef}>
+            {previewOrder.map((key, i) => (
+              <li
+                className={`priority-row ${dragFrom !== null && priority[dragFrom] === key ? 'dragging' : ''}`}
+                key={key}
+              >
+                <span
+                  className="priority-grip"
+                  role="button"
+                  tabIndex={0}
+                  aria-label={`Drag to reorder ${PRIORITY_LABELS[key]}`}
+                  title="Drag to reorder"
+                  onPointerDown={(e) => onGripDown(e, priority.indexOf(key))}
+                  onPointerMove={onGripMove}
+                  onPointerUp={onGripUp}
+                  onPointerCancel={onGripUp}
+                >
+                  ≡
+                </span>
                 <span className="priority-rank">{i + 1}</span>
                 <span className="priority-label">{PRIORITY_LABELS[key]}</span>
-                <button
-                  type="button"
-                  className="btn"
-                  disabled={i === 0}
-                  aria-label={`Raise ${PRIORITY_LABELS[key]}`}
-                  onClick={() => move(i, -1)}
-                >
-                  ↑
-                </button>
-                <button
-                  type="button"
-                  className="btn"
-                  disabled={i === priority.length - 1}
-                  aria-label={`Lower ${PRIORITY_LABELS[key]}`}
-                  onClick={() => move(i, 1)}
-                >
-                  ↓
-                </button>
               </li>
             ))}
           </ol>
