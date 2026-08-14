@@ -220,17 +220,6 @@ export interface ChartSettings {
   xOrder: 'payout' | 'group'
   /** What the x tick under each bar says: its payout, or its bucket label. */
   xLabels: 'payout' | 'label'
-  /**
-   * Forces the distribution chart onto its own line below the buckets table,
-   * even when the viewport is wide enough to fit both side by side.
-   */
-  forceStack: boolean
-  /**
-   * Puts the distribution chart on the left and the buckets table on the
-   * right (default: table left, chart right). The table's column alignment
-   * follows — see `.content-row.swapped .grid-table` in index.css.
-   */
-  swapped: boolean
 }
 
 export const DEFAULT_CHART: ChartSettings = {
@@ -242,8 +231,6 @@ export const DEFAULT_CHART: ChartSettings = {
   groupBars: [],
   xOrder: 'payout',
   xLabels: 'payout',
-  forceStack: false,
-  swapped: false,
 }
 
 export const DEFAULT_EXPORT_FILENAME = 'ref-weights-regular.tsv'

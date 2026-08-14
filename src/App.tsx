@@ -47,6 +47,7 @@ import {
   type LockState,
 } from './lib/groups'
 import { emptyHistory, pushHistory, redo, undo, type HistoryState } from './lib/history'
+import { isDockLayout, migrateLayout, normalizeLayout, type DockLayout } from './lib/layout'
 import { DEFAULT_SPINS } from './lib/sim'
 import {
   loadTabsState,
@@ -59,6 +60,7 @@ import { fetchSession, saveTsv, type BridgeSession } from './lib/bridge'
 import { BucketTable } from './components/BucketTable'
 import { GearMenu } from './components/GearMenu'
 import { GroupDistributionTable } from './components/GroupDistributionTable'
+import { PanelDock } from './components/PanelDock'
 import { clampHeight, DIST_HEIGHT, SIM_HEIGHT } from './components/chartUtils'
 import { DistributionChart } from './components/DistributionChart'
 import { GroupChips } from './components/GroupChips'
@@ -199,7 +201,6 @@ function WorkspaceView({
    */
   const [chartHeightAuto, setChartHeightAuto] = useState(saved?.chartHeightAuto ?? true)
   const [tableHeight, setTableHeight] = useState<number | null>(null)
-  const [stacked, setStacked] = useState(false)
   /** The chart panel's own chrome (everything besides its SVG) — see rowRef. */
   const [chartChrome, setChartChrome] = useState(0)
   const [simChartHeight, setSimChartHeight] = useState(() =>
@@ -239,6 +240,15 @@ function WorkspaceView({
   const [hiddenBucketColumns, setHiddenBucketColumns] = useState<string[]>(
     saved?.hiddenBucketColumns ?? [],
   )
+  // A workspace saved before the dock existed derives its layout from the old
+  // chart flags (swapped / forceStack), which stay readable on disk.
+  const [layout, setLayout] = useState<DockLayout>(() =>
+    saved?.layout !== undefined && isDockLayout(saved.layout)
+      ? normalizeLayout(saved.layout)
+      : migrateLayout(
+          saved?.chart as unknown as { swapped?: boolean; forceStack?: boolean } | undefined,
+        ),
+  )
   const [settingsOpen, setSettingsOpen] = useState(false)
   const [sort, setSort] = useState<SortState>({ key: 'id', dir: 1 })
   // View state like chart.groupBars, and deliberately separate from it:
@@ -253,20 +263,12 @@ function WorkspaceView({
    * ref rather than an effect: this has to run when the panel mounts and
    * unmounts, which is exactly when the ref fires.
    */
-  /**
-   * Whether the chart has wrapped below the table. CSS cannot express "did
-   * this flex line break?", and the answer decides how the table aligns, so it
-   * is measured: two panels on the same line share an offsetTop.
-   */
   const rowRef = useCallback((el: HTMLDivElement | null) => {
     if (el === null) return
     const check = () => {
       const table = el.querySelector<HTMLElement>('.panel.buckets')
       const chartPanel = el.querySelector<HTMLElement>('.panel.chart')
       if (table === null || chartPanel === null) return
-      const isStacked = table.offsetTop !== chartPanel.offsetTop
-      setStacked((prev) => (prev === isStacked ? prev : isStacked))
-
       // The chart defaults to the table's height. Safe against a feedback loop:
       // the two panels are independent flex items under align-items: flex-start,
       // so the table's height never depends on the chart's — a chart resize
@@ -310,8 +312,15 @@ function WorkspaceView({
     return () => obs.disconnect()
   }, [])
 
+  /** Auto-fit only makes sense while the chart shares a row with the (open) table. */
+  const chartRow = layout.rows.find((r) => r.panels.some((p) => p.id === 'chart'))
+  const chartBesideBuckets =
+    chartRow !== undefined &&
+    chartRow.panels.length > 1 &&
+    chartRow.panels.some((p) => p.id === 'buckets')
+
   const effectiveChartHeight =
-    chartHeightAuto && tableHeight !== null
+    chartHeightAuto && tableHeight !== null && chartBesideBuckets && !bucketsCollapsed
       ? clampHeight(tableHeight - chartChrome, DIST_HEIGHT)
       : chartHeight
 
@@ -419,6 +428,7 @@ function WorkspaceView({
       bucketsCollapsed,
       hiddenGroupColumns,
       hiddenBucketColumns,
+      layout,
     }
     snapshotRef.current = workspace
     const t = window.setTimeout(() => onPersistRef.current(workspace), SAVE_DEBOUNCE_MS)
@@ -452,6 +462,7 @@ function WorkspaceView({
     bucketsCollapsed,
     hiddenGroupColumns,
     hiddenBucketColumns,
+    layout,
   ])
 
   useEffect(
@@ -1080,23 +1091,18 @@ function WorkspaceView({
             onClose={() => setSettingsOpen(false)}
           />
 
-          <section className="panel group-dist">
-            <div className="panel-head">
-              <button
-                type="button"
-                className="panel-collapse"
-                aria-expanded={!groupDistCollapsed}
-                onClick={() => setGroupDistCollapsed(!groupDistCollapsed)}
-                title={groupDistCollapsed ? 'Show the group distribution' : 'Hide the group distribution'}
-              >
-                <span className="chev" aria-hidden="true">
-                  {groupDistCollapsed ? '▸' : '▾'}
-                </span>
-              </button>
-              <h2 title="per-group chance, payout and RTP share — hover Chance for full precision · ⚙ chooses columns">
-                Group Distribution
-              </h2>
-              <GearMenu label="Group distribution columns">
+          <div className="dock-wrap" ref={rowRef}>
+            <PanelDock
+              layout={layout}
+              onLayout={setLayout}
+              panels={{
+                groupDist: {
+                  title: 'Group Distribution',
+                  hint: 'per-group chance, payout and RTP share — hover Chance for full precision · ⚙ chooses columns · drag this header to move the panel',
+                  collapsed: groupDistCollapsed,
+                  onCollapsed: setGroupDistCollapsed,
+                  headExtra: (
+                    <GearMenu label="Group distribution columns">
                 {GROUP_DIST_COLUMNS.map((c) => (
                   <label className="checkbox" key={c.key}>
                     <input
@@ -1114,36 +1120,23 @@ function WorkspaceView({
                   </label>
                 ))}
               </GearMenu>
-            </div>
-            {!groupDistCollapsed && (
-              <GroupDistributionTable
-                rows={viewRows}
-                grouping={grouping}
-                totalWeight={totalWeight}
-                hidden={hiddenGroupColumns}
-              />
-            )}
-          </section>
-
-          {(() => {
-            const bucketsSection = (
-              <section className="panel buckets" key="buckets">
-                <div className="panel-head">
-                  <button
-                    type="button"
-                    className="panel-collapse"
-                    aria-expanded={!bucketsCollapsed}
-                    onClick={() => setBucketsCollapsed(!bucketsCollapsed)}
-                    title={bucketsCollapsed ? 'Show the buckets table' : 'Hide the buckets table'}
-                  >
-                    <span className="chev" aria-hidden="true">
-                      {bucketsCollapsed ? '▸' : '▾'}
-                    </span>
-                  </button>
-                  <h2 title="arrow keys to move · type +500 to add · shift+click selects rows · drag a header edge to resize · double-click an edge to fit · Space toggles a lock · click a header to sort · Ctrl+Z / Ctrl+Shift+Z undo and redo">
-                    Buckets
-                  </h2>
-                  <GearMenu label="Buckets table columns">
+                  ),
+                  children: (
+                    <GroupDistributionTable
+                      rows={viewRows}
+                      grouping={grouping}
+                      totalWeight={totalWeight}
+                      hidden={hiddenGroupColumns}
+                    />
+                  ),
+                },
+                buckets: {
+                  title: 'Buckets',
+                  hint: 'arrow keys to move · type +500 to add · shift+click selects rows · drag a header edge to resize · double-click an edge to fit · Space toggles a lock · click a header to sort · Ctrl+Z / Ctrl+Shift+Z undo and redo · drag this header to move the panel',
+                  collapsed: bucketsCollapsed,
+                  onCollapsed: setBucketsCollapsed,
+                  headExtra: (
+                    <GearMenu label="Buckets table columns">
                     {COLUMNS.filter((c) => c.key !== 'lock').map((c) => (
                       <label className="checkbox" key={c.key}>
                         <input
@@ -1161,8 +1154,8 @@ function WorkspaceView({
                       </label>
                     ))}
                   </GearMenu>
-                </div>
-                {!bucketsCollapsed && (
+                  ),
+                  children: (
                   <>
                     <GroupChips
                       groups={grouping.groups}
@@ -1192,16 +1185,13 @@ function WorkspaceView({
                       onGroupLock={setGroupLocked}
                     />
                   </>
-                )}
-              </section>
-            )
-            const chartSection = (
-              <section className="panel chart" key="chart">
-                <div className="panel-head">
-                  <h2 title="drag a bar or group handle to reshape · right-click a bar for an exact value · shift+click selects several · scroll an axis to zoom · middle-drag pans · ⚙ for axis and drag options">
-                    Distribution
-                  </h2>
-                  <GearMenu label="Distribution chart settings">
+                  ),
+                },
+                chart: {
+                  title: 'Distribution',
+                  hint: 'drag a bar or group handle to reshape · right-click a bar for an exact value · shift+click selects several · scroll an axis to zoom · middle-drag pans · ⚙ for axis and drag options · drag this header to move the panel',
+                  headExtra: (
+                    <GearMenu label="Distribution chart settings">
                     <label className="checkbox">
                       <input
                         type="checkbox"
@@ -1273,25 +1263,8 @@ function WorkspaceView({
                       </label>
                     </div>
                   </GearMenu>
-                  <button
-                    type="button"
-                    className={`btn ${chart.swapped ? 'primary' : ''}`}
-                    aria-pressed={chart.swapped}
-                    title="Put the distribution chart on the left and the table on the right"
-                    onClick={() => setChart({ ...chart, swapped: !chart.swapped })}
-                  >
-                    Swap sides
-                  </button>
-                  <button
-                    type="button"
-                    className={`btn ${chart.forceStack ? 'primary' : ''}`}
-                    aria-pressed={chart.forceStack}
-                    title="Always show the distribution chart below the table, even if there's room beside it"
-                    onClick={() => setChart({ ...chart, forceStack: !chart.forceStack })}
-                  >
-                    Stack below
-                  </button>
-                </div>
+                  ),
+                  children: (
                 <DistributionChart
                   rows={viewRows}
                   totalWeight={totalWeight}
@@ -1320,27 +1293,11 @@ function WorkspaceView({
                   xPan={distChartXPan}
                   onXPan={setDistChartXPan}
                 />
-              </section>
-            )
-            return (
-              <div
-                className={`content-row${stacked ? ' stacked' : ''}${chart.forceStack ? ' force-stack' : ''}${chart.swapped ? ' swapped' : ''}`}
-                ref={rowRef}
-              >
-                {chart.swapped ? (
-                  <>
-                    {chartSection}
-                    {bucketsSection}
-                  </>
-                ) : (
-                  <>
-                    {bucketsSection}
-                    {chartSection}
-                  </>
-                )}
-              </div>
-            )
-          })()}
+                  ),
+                },
+              }}
+            />
+          </div>
 
           <section className="panel full">
             <div className="panel-head">

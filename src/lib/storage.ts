@@ -9,6 +9,7 @@ import type {
   WeightStep,
 } from './types'
 import { isHexColor } from './palette'
+import { isDockLayout, type DockLayout } from './layout'
 
 /**
  * One autosaved workspace. The key carries the schema version, and the payload
@@ -65,6 +66,11 @@ export interface Workspace {
   hiddenGroupColumns?: string[]
   /** Optional — absent in workspaces saved before bucket columns could hide. */
   hiddenBucketColumns?: string[]
+  /**
+   * Optional — absent in workspaces saved before the dock existed, which
+   * instead migrate the legacy chart.swapped / chart.forceStack flags.
+   */
+  layout?: DockLayout
 }
 
 const isObject = (v: unknown): v is Record<string, unknown> =>
@@ -190,7 +196,8 @@ function isWorkspace(v: unknown): v is Workspace {
         v.hiddenGroupColumns.every((s) => typeof s === 'string'))) &&
     (v.hiddenBucketColumns === undefined ||
       (Array.isArray(v.hiddenBucketColumns) &&
-        v.hiddenBucketColumns.every((s) => typeof s === 'string')))
+        v.hiddenBucketColumns.every((s) => typeof s === 'string'))) &&
+    (v.layout === undefined || isDockLayout(v.layout))
   )
 }
 

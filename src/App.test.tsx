@@ -751,49 +751,42 @@ describe('numpad decimal', () => {
 })
 
 describe('page layout', () => {
-  it('lays the table and the chart out side by side, in their own row', () => {
+  it('docks the three panels — group distribution on its own row, table beside chart', () => {
     loadRealData()
     const content = document.querySelector('.content')!
     expect([...content.children].map((el) => el.className)).toEqual([
       'targets',
-      'panel group-dist',
-      'content-row',
+      'dock-wrap',
       'panel full',
     ])
-    // The row is the sticky chart's containing block, so it cannot follow the
-    // page past the bottom of the table.
-    const row = document.querySelector('.content-row')!
-    expect([...row.children].map((el) => el.className)).toEqual(['panel buckets', 'panel chart'])
+    const rows = document.querySelectorAll('.dock-row')
+    expect(rows).toHaveLength(2)
+    expect(rows[0].querySelector('.dock-panel')!.className).toContain('group-dist')
+    const second = [...rows[1].querySelectorAll('.dock-panel')].map((el) => el.className)
+    expect(second[0]).toContain('buckets')
+    expect(second[1]).toContain('chart')
+    // The chart sticks only while it shares a row with the table.
+    expect(second[1]).toContain('dock-sticky')
   })
 
-  it('forces the chart below the table when the toggle is pressed', () => {
+  it('has no Swap sides or Stack below buttons — panels move by dragging their headers', () => {
     loadRealData()
-    const toggle = screen.getByRole('button', { name: 'Stack below' })
-    expect(toggle.getAttribute('aria-pressed')).toBe('false')
-    fireEvent.click(toggle)
-    expect(toggle.getAttribute('aria-pressed')).toBe('true')
-    expect(document.querySelector('.content-row')!.className).toContain('force-stack')
+    expect(screen.queryByRole('button', { name: 'Swap sides' })).toBeNull()
+    expect(screen.queryByRole('button', { name: 'Stack below' })).toBeNull()
   })
 
-  it('swaps the table and chart sides, and persists it', async () => {
+  it('persists the dock layout with the workspace', async () => {
     loadRealData()
-    const toggle = screen.getByRole('button', { name: 'Swap sides' })
-    expect(toggle.getAttribute('aria-pressed')).toBe('false')
-
-    fireEvent.click(toggle)
-
-    expect(toggle.getAttribute('aria-pressed')).toBe('true')
-    const row = document.querySelector('.content-row')!
-    expect(row.className).toContain('swapped')
-    expect([...row.children].map((el) => el.className)).toEqual(['panel chart', 'panel buckets'])
-
     // The workspace save is debounced (see SAVE_DEBOUNCE_MS in App.tsx), and
     // persists per-tab under TABS_KEY, not the legacy single-workspace
     // STORAGE_KEY — App.tsx only ever calls loadTabsState/saveTabsState.
     await waitFor(() => {
       const saved = JSON.parse(localStorage.getItem(TABS_KEY)!) as TabsState
       const active = saved.tabs.find((t) => t.id === saved.active)
-      expect(active?.workspace?.chart.swapped).toBe(true)
+      expect(active?.workspace?.layout?.rows.map((r) => r.panels.map((p) => p.id))).toEqual([
+        ['groupDist'],
+        ['buckets', 'chart'],
+      ])
     })
   })
 })

@@ -533,40 +533,89 @@ body {
   gap: 16px;
 }
 
-/* The table and the chart share one line — and one containing block, which is
-   what stops the sticky chart following past the bottom of the table.
-
-   A wrapping flex row, not a grid: `min-width: min-content` on the table panel
-   stops flex shrinking it below its real column widths, so the chart wraps to
-   the next line the moment the two no longer fit. Columns are user-resizable,
-   so no fixed breakpoint could get this right.
-
-   `flex-basis: 0` on both is what keeps a column resize off the chart: the
-   panels split the space by grow factor rather than by content, so widening a
-   column eats the table's own left-hand slack and only reaches the chart once
-   the table genuinely needs more than its half. */
-.content-row {
+/* The dock: rows of draggable panels. Fractional flex-grow per panel gives
+   each its user-chosen share of the row; the divider between two panels
+   adjusts those shares. A row is the sticky chart's containing block, which
+   is what stops it following past the bottom of the table beside it. */
+.dock {
+  position: relative;
   display: flex;
-  flex-wrap: wrap;
+  flex-direction: column;
   gap: 16px;
+}
+
+.dock-row {
+  display: flex;
   align-items: flex-start;
 }
 
-.content-row > .panel.buckets {
-  flex: 1 1 0;
-  min-width: min-content;
+.dock-cell {
+  display: flex;
+  align-items: stretch;
+  min-width: 0;
 }
 
-.content-row > .panel.chart {
-  flex: 1 1 0;
-  min-width: 420px;
+.dock-cell > .dock-panel {
+  flex: 1 1 auto;
+  min-width: 0;
 }
 
-/* Forces the chart onto its own line however wide the viewport is: an
-   oversized basis can never fit beside the table. */
-.content-row.force-stack > .panel.chart {
-  flex-basis: 100%;
-  min-width: 100%;
+.dock-cell.dragging {
+  opacity: 0.55;
+}
+
+.dock-divider {
+  flex: 0 0 12px;
+  cursor: col-resize;
+  align-self: stretch;
+  position: relative;
+  touch-action: none;
+}
+
+.dock-divider::after {
+  content: '';
+  position: absolute;
+  left: 5px;
+  top: 0;
+  bottom: 0;
+  width: 2px;
+  background: var(--line);
+}
+
+.dock-divider:hover::after {
+  background: var(--accent);
+}
+
+.dock-head {
+  cursor: grab;
+  user-select: none;
+  touch-action: none;
+}
+
+.dock-panel.dock-sticky {
+  position: sticky;
+  top: calc(var(--targets-h, 0px) + 8px);
+  align-self: start;
+}
+
+.dock-drop-row {
+  position: absolute;
+  left: 0;
+  right: 0;
+  height: 4px;
+  background: var(--accent);
+  border-radius: 2px;
+  z-index: 40;
+  pointer-events: none;
+}
+
+.dock-drop-beside {
+  position: absolute;
+  width: 4px;
+  background: var(--accent);
+  border-radius: 2px;
+  z-index: 40;
+  pointer-events: none;
 }
 
 .panel {
@@ -576,15 +625,9 @@ body {
   overflow: hidden;
 }
 
-.panel.chart {
-  position: sticky;
-  top: calc(var(--targets-h, 0px) + 8px);
-  align-self: start;
-}
-
-/* A table widened past its half must overflow, not be clipped out of reach. */
-.panel.buckets {
-  overflow: visible;
+/* A table wider than its share scrolls inside its panel instead of clipping. */
+.dock-panel.buckets .grid-wrap {
+  overflow-x: auto;
 }
 
 .panel-head {
@@ -611,10 +654,8 @@ body {
   cursor: help;
 }
 
-/* Distribution panel head has three children (h2 + two buttons); push both
-   buttons to the right edge instead of letting space-between spread them
-   across the middle. */
-.panel.chart .panel-head .btn:first-of-type {
+/* The head lays title left, extras right; the gear menu takes the far edge. */
+.panel-head .gear-menu {
   margin-left: auto;
 }
 
@@ -731,8 +772,8 @@ body {
   overflow: visible;
 }
 
-/* Base default: table on the left, chart on the right — columns hug the
-   right edge, next to the chart. */
+/* The dock decides the table's neighbourhood, so it simply centres in its
+   panel; a panel narrower than the table scrolls it (see .dock-panel above). */
 .grid-table {
   border-collapse: separate;
   border-spacing: 0;
@@ -740,31 +781,7 @@ body {
   font-variant-numeric: tabular-nums;
   background: var(--surface);
   margin-left: auto;
-  margin-right: 0;
-}
-
-/* Swapped: chart on the left, table on the right — columns hug the left
-   edge, next to the chart. Same specificity as the .stacked rule below, so
-   it must be declared first: the wrapped/centered rule needs to win the tie
-   when both classes are present. */
-.content-row.swapped .grid-table {
-  margin-left: 0;
   margin-right: auto;
-}
-
-/* Wrapped onto its own line: neither edge is beside the chart anymore, so
-   center regardless of swap state. Declared after .swapped above so it wins
-   the specificity tie. */
-.content-row.stacked .grid-table {
-  margin-left: auto;
-  margin-right: auto;
-}
-
-/* Swapped puts the chart first, so when the row wraps it sits *above* the
-   table — sticky would then pin it over the scrolling table beneath it. */
-.content-row.swapped.stacked > .panel.chart,
-.content-row.swapped.force-stack > .panel.chart {
-  position: static;
 }
 
 .grid-table th,
@@ -1636,16 +1653,23 @@ input.gcell.editing {
 
 /* A half-width table stops fitting here, so the columns stack — and a sticky
    chart in a one-column flow would only get in the way. */
-/* Wrapping is handled by the flex layout, which reacts to the table's real
-   width. This only stops the chart sticking once the page is narrow enough
-   that it lands under the table rather than beside it. */
+/* Below 1200px every dock row stacks vertically, whatever the saved layout
+   says — side-by-side panels have no room, and the sticky chart would pin
+   itself over the table it now sits above. */
 @media (max-width: 1200px) {
-  .content-row > .panel.buckets,
-  .content-row > .panel.chart {
-    flex: 1 0 100%;
+  .dock-row {
+    flex-wrap: wrap;
   }
 
-  .panel.chart {
+  .dock-cell {
+    flex-basis: 100% !important;
+  }
+
+  .dock-divider {
+    display: none;
+  }
+
+  .dock-panel.dock-sticky {
     position: static;
   }
 }

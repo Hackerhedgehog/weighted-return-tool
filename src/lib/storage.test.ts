@@ -55,6 +55,33 @@ describe('storage', () => {
     expect(loadWorkspace()).toBeNull()
   })
 
+  it('round-trips a dock layout and rejects a malformed one', () => {
+    const w: Workspace = {
+      ...workspace,
+      layout: {
+        rows: [
+          { panels: [{ id: 'chart', size: 1 }] },
+          {
+            panels: [
+              { id: 'groupDist', size: 0.3 },
+              { id: 'buckets', size: 0.7 },
+            ],
+          },
+        ],
+      },
+    }
+    saveWorkspace(w)
+    expect(loadWorkspace()).toEqual(w)
+
+    // A layout missing a panel fails validation and takes the workspace with
+    // it — App then falls back to migration, never to a broken dock.
+    store.set(
+      STORAGE_KEY,
+      JSON.stringify({ ...workspace, layout: { rows: [{ panels: [{ id: 'chart', size: 1 }] }] } }),
+    )
+    expect(loadWorkspace()).toBeNull()
+  })
+
   it('discards malformed JSON instead of throwing', () => {
     store.set(STORAGE_KEY, '{not json')
     expect(loadWorkspace()).toBeNull()
@@ -255,31 +282,20 @@ describe('storage', () => {
     expect(loaded?.bankrollChartYPan).toBeUndefined()
   })
 
-  it('round-trips forceStack and rejects a non-boolean', () => {
-    saveWorkspace({ ...workspace, chart: { ...DEFAULT_CHART, forceStack: true } })
-    expect(loadWorkspace()?.chart.forceStack).toBe(true)
+  it('still accepts the legacy forceStack / swapped chart flags on disk', () => {
+    // The dock replaced both flags; workspaces saved before it carry them and
+    // must keep loading so App can migrate them into a layout.
+    store.set(
+      STORAGE_KEY,
+      JSON.stringify({ ...workspace, chart: { ...DEFAULT_CHART, forceStack: true, swapped: true } }),
+    )
+    const loaded = loadWorkspace()
+    expect(loaded).not.toBeNull()
+    expect((loaded?.chart as unknown as { swapped?: boolean }).swapped).toBe(true)
 
     store.set(
       STORAGE_KEY,
       JSON.stringify({ ...workspace, chart: { ...DEFAULT_CHART, forceStack: 'yes' } }),
-    )
-    expect(loadWorkspace()).toBeNull()
-  })
-
-  it('accepts a workspace saved before forceStack existed', () => {
-    const chart: Record<string, unknown> = { ...DEFAULT_CHART }
-    delete chart.forceStack
-    store.set(STORAGE_KEY, JSON.stringify({ ...workspace, chart }))
-    expect(loadWorkspace()).not.toBeNull()
-  })
-
-  it('round-trips swapped and rejects a non-boolean', () => {
-    saveWorkspace({ ...workspace, chart: { ...DEFAULT_CHART, swapped: true } })
-    expect(loadWorkspace()?.chart.swapped).toBe(true)
-
-    store.set(
-      STORAGE_KEY,
-      JSON.stringify({ ...workspace, chart: { ...DEFAULT_CHART, swapped: 'yes' } }),
     )
     expect(loadWorkspace()).toBeNull()
   })
