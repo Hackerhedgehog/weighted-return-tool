@@ -18,8 +18,10 @@ weights — then exports a `.tsv` the engine can read back.
   - [The solver](#the-solver)
   - [Tolerance](#tolerance)
   - [Volatility](#volatility)
+  - [The user curve](#the-user-curve)
   - [Weight step](#weight-step)
   - [The targets panel](#the-targets-panel)
+- [The group distribution table](#the-group-distribution-table)
 - [Editing the table](#editing-the-table)
   - [Keyboard](#keyboard)
   - [In-cell arithmetic](#in-cell-arithmetic)
@@ -164,31 +166,35 @@ How the tool turns targets into weights, and the knobs that shape the result.
 ### The solver
 
 `Auto-Distribute` assigns weights to every unlocked bucket. The targets are
-over-constrained, so they are resolved by rank. Ranks 2–6 below are the
-**default** order — the `⚙ Settings` drawer lets you rearrange them, and each
-conflict then reads that ranking to decide which side yields. Rank 1 is not
-reorderable:
+over-constrained, so they are resolved by rank. Ranks 2–7 below are the
+**default** order — the `⚙ Settings` drawer (in the top bar) lets you drag
+them into any order, and each conflict then reads that ranking to decide
+which side yields. Rank 1 is not reorderable:
 
 1. **Locked rows** are absolute — never touched and never reordered. A lock
    that breaks the payout ladder is reported rather than moved, though only
-   while the ladder is being kept at all (see 3).
+   while the ladder is being kept at all (see 4).
 2. **Target RTP** is hit exactly, to integer-weight granularity, by solving
    the slope of the weight curve.
-3. **Ordering**: every unlocked bucket holds at least one weight step, and
+3. **User curve** — when one is saved and `Solve for → User curve` is on, the
+   saved shape becomes the base the solver tilts, and its ordering (including
+   deliberate inversions like a 1x rarer than a 2x) is kept wherever the
+   higher-ranked targets allow. See [The user curve](#the-user-curve).
+4. **Ordering**: every unlocked bucket holds at least one weight step, and
    weight never rises as payout rises. Equal payouts are unconstrained
    against each other, which is what keeps the tease buckets free to sit
    below the ladder — and is also why the residual `0x` bucket is held above
    every unlocked *paying* bucket rather than above the whole table: its
    zero-payout siblings are not ordered against it. Locks outrank all of
    this, so a lock heavy enough to outweigh the residual stays where it is.
-4. **Volatility** shapes whatever freedom is left, as curvature of that curve.
-5. **Preferred Hit Chance**, then 6. **Win Chance**, are satisfied
+5. **Volatility** shapes whatever freedom is left, as curvature of that curve.
+6. **Preferred Hit Chance**, then 7. **Win Chance**, are satisfied
    *structurally*, by deciding how much total weight each payout group
    receives. They are preferences with a relative tolerance band; the band is
    spent when the RTP target is otherwise unreachable, and the masses
    themselves are overridden when ordering demands it.
 
-Steps 4, 5 and 6 can each be **switched off** from the `Solve for` checkboxes.
+Steps 3, 5, 6 and 7 can each be **switched off** from the `Solve for` checkboxes.
 Off, the fields keep reporting what the table currently achieves — they simply
 stop being goals, so everything goes into RTP. With chance targets off the
 paying groups are pooled and the curve is free to move mass across the whole
@@ -280,6 +286,9 @@ from very high to very low.
 can feel the shape out against the log-log chart. Once you know the values you
 want, put them in `CURVE_PRESETS` in `src/lib/types.ts`.
 
+While a saved user curve is active it owns the shape outright, so the
+volatility fields grey out and read back what the table achieves.
+
 Volatility is the first thing spent when it conflicts with keeping weights
 ordered. The ordering constraint puts a floor under the curve's slope, and that
 floor is proportional to the curvature, so a heavy curve works against itself
@@ -287,6 +296,32 @@ twice: it thins the tail *and* pins the slope further from flat. Past a point
 the two together put the RTP target out of reach with the ladder in order. On
 the reference table that happens at `very low` alone, which flattens from 0.32
 to 0.265 and says so in a notice; the other four presets are untouched.
+
+### The user curve
+
+Sometimes the shape you want is not one the volatility family can express — a
+1x deliberately rarer than a 2x, say. **Save curve**, next to the chart's
+Reset view button, snapshots every bucket's share of the total weight as *the*
+curve. From then on:
+
+- the chart draws the saved curve as a dashed reference line over the bars,
+  so you can see how far the live table has drifted from it;
+- Auto-Distribute uses the saved shape as its base, tilting it just enough to
+  hit Target RTP, and keeps the saved *ordering* wherever the higher-ranked
+  targets allow — the tilt is clamped to the range where the ordering holds,
+  and when the RTP target is unreachable inside that clamp the ordering
+  yields with a notice rather than silently;
+- the `User curve` entry in the priority order (rank 2 by default) decides
+  every conflict: above Target RTP it keeps the shape exact and reports the
+  RTP miss; below Ordering the payout ladder wins and the curve's inversions
+  are repaired (and reported); above the chance preferences its band masses
+  replace theirs when the two disagree.
+
+The `Solve for → User curve` checkbox switches the steering off without
+losing the saved curve; **Clear saved curve** in the chart's ⚙ menu deletes
+it. Saving again overwrites. The curve is keyed to the current buckets, so
+importing new data clears it. Saving, clearing and the solve itself are all
+undoable.
 
 ### Weight step
 
@@ -310,20 +345,21 @@ and the panel names the nearest totals that would work.
 ### The targets panel
 
 Everything sits on one wrapping row — Target RTP, Preferred Hit Chance,
-Preferred Win Chance, Chance tolerance, Volatility, Curve c, then
-`Auto-Distribute`, `⚙ Settings` and undo/redo. The `⚙ Settings` drawer holds
-the bucket groups, the solver's priority order and the weight step.
+Preferred Win Chance, Chance tolerance, Volatility, Curve c, the `Solve for`
+checkboxes, then `Auto-Distribute`. The `⚙ Settings` button lives in the
+**top bar** beside the export controls; its drawer holds the bucket groups,
+the solver's priority order (drag the ≡ grip to rearrange it) and the weight
+step. Undo and redo are keyboard-only: Ctrl+Z, Ctrl+Shift+Z / Ctrl+Y.
 
 The panel **sticks to the top of the viewport** as you scroll, and
 **collapses**: the ▾ toggle at its left folds the inputs away, leaving a slim
 bar that reads every setting back as `name: value` — RTP, hit, win,
-tolerance, volatility, curve and step — alongside the `Auto-Distribute`,
-`⚙ Settings`, `Undo` and `Redo` buttons, so you can still act on the
-table from the bottom of a long page; only editing the targets needs an
-expand. The action buttons appear in exactly one of the two rows at a time,
-never both. The collapsed state is remembered with the workspace. The table
-header and the chart panel offset themselves by the panel's measured height,
-so nothing slides underneath it.
+tolerance, volatility, curve and step — alongside the `Auto-Distribute`
+button, so you can still act on the table from the bottom of a long page;
+only editing the targets needs an expand. The button appears in exactly one
+of the two rows at a time, never both. The collapsed state is remembered with
+the workspace. The table header and the chart panel offset themselves by the
+panel's measured height, so nothing slides underneath it.
 
 Solver warnings collect under a count line — `3 warnings ▾` — that folds and
 unfolds on click, so a hard solve's pile of notices does not push the table
@@ -339,10 +375,32 @@ The `= current` button under each chance copies the achieved figure into the
 target — handy after hand-editing weights, to adopt the current state as the
 new goal.
 
+## The group distribution table
+
+A read-only panel with one row per bucket group — the numbers you would get
+by collapsing every group in the buckets table, plus the derived columns the
+grid has no room for:
+
+| Column | Meaning |
+|---|---|
+| Chance % | the group's share of total weight, to 2 decimals — hover for 10 |
+| One in | `1 / chance` — one hit of the group per this many spins |
+| Payout | weight-weighted mean payout, the same figure the chart's group bars sit at |
+| Weighted Value | the group's slice of RTP in absolute terms |
+| RTP Share | that slice as a percentage of the table's RTP |
+| STD | the weighted payout spread *inside* the group — how volatile the group itself is |
+
+The ⚙ menu in its header chooses which columns show; the ▾ toggle collapses
+the whole panel, and the buckets panel collapses the same way. Both choices,
+and the column set, persist with the workspace.
+
 ## Editing the table
 
 The grid itself — navigating it, typing arithmetic into it, locking rows,
-grouping buckets and shaping the columns around them.
+grouping buckets and shaping the columns around them. The usage hints that
+used to sit in the panel headers now live in tooltips on the panel titles —
+hover **Buckets**, **Distribution**, **Group Distribution** or **Simulation**
+for each panel's cheat sheet.
 
 ### Keyboard
 
@@ -358,7 +416,7 @@ grouping buckets and shaping the columns around them.
 | PageUp / PageDown | jump a page |
 | Delete / Backspace | clear the cell |
 | Space | toggle the lock, on the lock column |
-| Ctrl+Z / Ctrl+Y | undo / redo (20 steps) |
+| Ctrl+Z / Ctrl+Shift+Z / Ctrl+Y | undo / redo (100 steps) |
 | Numpad `.` | always types a decimal point, as in Excel |
 
 The numpad remap covers every numeric field, not just the grid. A comma typed
@@ -460,14 +518,19 @@ remaining group. All of it is undoable and saved with the workspace.
 ### Columns
 
 The table carries **Group**, **ID**, **Weight ID**, **Avg Payout**, **Label**,
-**Weights**, **Weighted Value** and **Chance**, plus the lock toggle. Weight ID
-is free text the tool never interprets — somewhere to put your own identifier
-when the bucket id is not the one that matters downstream.
+**Weights**, **Weighted Value**, **Chance**, **One in** and **RTP Share**,
+plus the lock toggle. Weight ID is free text the tool never interprets —
+somewhere to put your own identifier when the bucket id is not the one that
+matters downstream. One in (`1 / chance`) and RTP Share (the bucket's slice
+of the table's RTP) are derived and read-only; neither reaches the export,
+whose format never changes with what the table shows.
 
-Drag a header edge to resize; double-click it to fit the content. Click a header
-to sort. Widths persist with the workspace. The defaults are sized to fit the
-table in its half of the page; widen the Chance column when you want to read a
-chance to its full 15 decimals.
+The ⚙ menu at the panel's top right toggles any column on or off (the lock
+column always shows); the choice persists with the workspace. Drag a header
+edge to resize; double-click it to fit the content. Click a header to sort.
+Widths persist with the workspace. The defaults are sized to fit the table in
+its half of the page; widen the Chance column when you want to read a chance
+to its full 15 decimals.
 
 ## The distribution chart
 
@@ -499,10 +562,17 @@ a bar drag is always relative and always confined: the group's other unlocked
 buckets absorb the whole change, whatever the toggle says, because the group
 total is the thing the lock pins.
 
-The view has its own controls: **Weights / % Chance** switches the metric,
-**Log Y** and **Log X** flip the axes to log scale, and **Aggregate equal
-payouts** merges buckets sharing a payout into one bar (the reference data's
-two 200x buckets, for instance).
+The view's controls split between the inline row and the panel's ⚙ menu.
+Inline: **Weights / % Chance** switches the metric, **Log X** flips the
+payout axis to log scale, **Aggregate equal payouts** merges buckets sharing
+a payout into one bar (the reference data's two 200x buckets, for instance),
+**Reset view** undoes zoom/pan and **Save curve** snapshots the shape (see
+[The user curve](#the-user-curve)). The ⚙ menu holds the settings that mostly
+stay put: **Log Y** and **Relative drag** (both on by default), **X order**
+(the plain payout ladder, or clustered by group — meaningless under Log X,
+whose positions are payout-derived), **X labels** (each bar's payout, or its
+bucket label) and **Clear saved curve**. The x tick labels draw diagonally,
+so far more of them fit than a horizontal row ever could.
 
 Every group also gets a **handle on the chart's right edge**, sitting at the
 height of the group's total in the current metric and axis mode, labelled with
@@ -639,39 +709,33 @@ reload.
 
 ### Layout
 
-The page runs at 95% of the viewport width with the **table and the
-distribution chart side by side**. The table takes exactly the width its
-columns need and sits against the right of its half, so the numbers stay next
-to the chart they are read against and any slack falls on the left. The chart
-takes the rest. The chart panel sticks as you scroll, so the bars stay beside
-whichever rows you are editing. Targets sit across the top and the simulation
-across the bottom, both full width.
+The three middle panels — **Group Distribution**, **Buckets** and
+**Distribution** — live in a dock of rows you arrange yourself. **Drag a
+panel's header** and drop indicators appear: the left or right half of
+another panel docks it beside that panel in its row; the top or bottom edge
+of a row gives it a row of its own. **Drag the divider** between two
+side-by-side panels to trade width between them. The default is the group
+table on its own row above the buckets table and chart side by side; a
+workspace saved before the dock existed migrates its old Swap sides / Stack
+below choice into the equivalent arrangement. The layout and the panel
+widths persist with the workspace. Targets sit across the top and the
+simulation across the bottom, both full width, outside the dock.
+
+The chart panel **sticks** as you scroll while it shares a row with the
+buckets table, so the bars stay beside whichever rows you are editing — and
+its row bounds it, so it never rides over the panels below. In any other
+position it flows normally. Its height still auto-fits the table beside it
+until you pin one with its grip.
 
 **The bucket table has no scroll box of its own.** However many buckets there
 are, it renders every row and grows the page instead — so there is never a
 little window to scroll inside a taller page. The header row stays pinned
 below the targets panel and the editable totals row to the bottom while you
-scroll a long table.
+scroll a long table. A panel narrower than the table's columns lets the
+table overflow rather than clipping it — drag the divider to give it room.
 
-**The chart wraps below the table when it no longer fits beside it** — not at
-a fixed breakpoint, but at whatever width the table's own columns imply. Widen
-a column and the wrap happens sooner; narrow them and the two stay side by
-side for longer. Once wrapped the table centres itself instead, since there is
-no chart beside it to sit against. Below 1200px the chart also stops sticking.
-
-**Stack below**, a toggle in the Distribution panel's header, overrides all
-of that: press it and the chart always renders under the table, however wide
-the window is; press it again to return to the width-based wrap above. The
-setting is remembered with the rest of the workspace. Because the chart still
-defaults to fitting the table's own height, forcing it below a tall table can
-make it tall too — drag its grip to pin a fixed height if that's not wanted.
-
-Widening a column eats the table's own left-hand slack first: the two panels
-split the row by share rather than by content, so the chart only gives up
-width once the table genuinely needs more than its half.
-
-The sticky chart is bounded by the table's row, so it follows you down the
-table and then stops — it never rides over the simulation panel below.
+Below 1200px every row stacks vertically whatever the saved layout says, and
+the chart stops sticking — side-by-side panels have no room there.
 
 ### Export
 
@@ -695,11 +759,13 @@ source file over in-progress tuning.
 
 ### Persistence
 
-Every tab's table, targets, volatility, weight step, column widths, chart
-settings, which groups are collapsed into bars, both chart heights, the
-groups and their colors, whether the targets panel is collapsed, export
-filename and simulation spin count autosave to `localStorage` and come back
-on reload — along with which tabs exist and which is active. A workspace
+Every tab's table, targets, volatility, weight step, column widths and
+visibility, chart settings, which groups are collapsed into bars, both chart
+heights, the groups and their colors, the dock layout and panel sizes, the
+saved user curve, whether the targets, group-distribution and buckets panels
+are collapsed, export filename and simulation spin count autosave to
+`localStorage` and come back on reload — along with which tabs exist and
+which is active. A workspace
 saved before tabs existed comes back as the first tab; one saved before
 groups became data is migrated on load — the detector seeds it once, exactly
 as an import would. `Clear workspace`, at the right of the top bar, wipes the
@@ -711,8 +777,10 @@ persisted.
 ```
 src/
   lib/
-    types.ts        row model, targets, volatility presets
+    types.ts        row model, targets, volatility presets, solver priority
     columns.ts      column definitions and shared sorting
+    layout.ts       the dock layout model: rows, moves, resizes, migration
+    groupDistribution.ts  the group distribution table's per-group stats
     parse.ts        TSV in, including round-tripping our own export
     format.ts       plain-decimal display, 10-sig-digit export
     expr.ts         in-cell arithmetic parser
@@ -735,8 +803,11 @@ src/
     cells.tsx            cell rendering and edit lifecycle
     numpadDecimal.ts     numpad ',' → '.' remap shared by every numeric input
     useGridNavigation.ts selection and edit state machine
-    TargetsPanel.tsx     targets, volatility, weight step, undo
-    DistributionChart.tsx draggable bars, group handles
+    TargetsPanel.tsx     targets, volatility, solve-for switches
+    PanelDock.tsx        the dock: drag panels between rows, resize widths
+    GearMenu.tsx         the ⚙ popover used by the tables and the chart
+    GroupDistributionTable.tsx  the per-group stats panel
+    DistributionChart.tsx draggable bars, group handles, the user-curve line
     ChartValueEntry.tsx  right-click popover for an exact weight or chance
     GroupBarChips.tsx    which groups are drawn as a single bar
     SimulationPanel.tsx  mode toggle over the two simulation panels

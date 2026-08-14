@@ -57,7 +57,7 @@ function textWidth(text: string, font: string): number {
 }
 
 /** "One in" display: 1/X with X to two decimals; a dash when nothing can hit. */
-export function fmtOneIn(chance: number): string {
+function fmtOneIn(chance: number): string {
   return chance > 0 ? `1/${fmtDecimal(1 / chance, 2)}` : '—'
 }
 

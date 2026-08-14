@@ -36,6 +36,36 @@ interface PanelRect {
   right: number
 }
 
+/** Drop-indicator geometry, in dock-root-relative pixels. */
+type Indicator =
+  | { kind: 'row'; y: number }
+  | { kind: 'beside'; x: number; top: number; height: number }
+
+/** Where the drop indicator draws for a target, from the drag-start rects. */
+function indicatorFor(
+  t: DropTarget,
+  rows: RowRect[],
+  prects: PanelRect[],
+  rootTop: number,
+  rootLeft: number,
+): Indicator | null {
+  if (rows.length === 0) return null
+  if (t.kind === 'row') {
+    const y = t.index >= rows.length ? rows[rows.length - 1].bottom : rows[t.index].top
+    return { kind: 'row', y: y - rootTop - 2 }
+  }
+  const row = rows[t.row]
+  if (row === undefined) return null
+  const inRow = prects.filter((p) => p.row === t.row)
+  const x = t.index >= inRow.length ? row.right : inRow[t.index].left
+  return {
+    kind: 'beside',
+    x: x - rootLeft - 2,
+    top: row.top - rootTop,
+    height: row.bottom - row.top,
+  }
+}
+
 /**
  * The dock: rows of draggable, resizable panels.
  *
@@ -48,7 +78,7 @@ interface PanelRect {
 export function PanelDock({ layout, onLayout, panels }: PanelDockProps) {
   const rootRef = useRef<HTMLDivElement>(null)
   const [dragId, setDragId] = useState<PanelId | null>(null)
-  const [target, setTarget] = useState<DropTarget | null>(null)
+  const [indicator, setIndicator] = useState<Indicator | null>(null)
   const targetRef = useRef<DropTarget | null>(null)
   const drag = useRef<{
     id: PanelId
@@ -57,6 +87,8 @@ export function PanelDock({ layout, onLayout, panels }: PanelDockProps) {
     live: boolean
     rows: RowRect[]
     panels: PanelRect[]
+    rootTop: number
+    rootLeft: number
   } | null>(null)
   const resize = useRef<{
     row: number
@@ -70,7 +102,8 @@ export function PanelDock({ layout, onLayout, panels }: PanelDockProps) {
     const root = rootRef.current
     const rows: RowRect[] = []
     const prects: PanelRect[] = []
-    if (root === null) return { rows, panels: prects }
+    if (root === null) return { rows, panels: prects, rootTop: 0, rootLeft: 0 }
+    const rootRect = root.getBoundingClientRect()
     root.querySelectorAll<HTMLElement>('.dock-row').forEach((rowEl, r) => {
       const rect = rowEl.getBoundingClientRect()
       rows.push({ top: rect.top, bottom: rect.bottom, left: rect.left, right: rect.right })
@@ -81,7 +114,7 @@ export function PanelDock({ layout, onLayout, panels }: PanelDockProps) {
         i += 1
       })
     })
-    return { rows, panels: prects }
+    return { rows, panels: prects, rootTop: rootRect.top, rootLeft: rootRect.left }
   }
 
   /** The drop this pointer position means: a new row in a row's outer fifths, beside a panel elsewhere. */
@@ -108,11 +141,6 @@ export function PanelDock({ layout, onLayout, panels }: PanelDockProps) {
     return { kind: 'row', index: rows.length }
   }
 
-  const setTargetBoth = (t: DropTarget | null) => {
-    targetRef.current = t
-    setTarget(t)
-  }
-
   const onHeadPointerDown = (e: React.PointerEvent, id: PanelId) => {
     if (e.button !== 0) return
     // Buttons, inputs and menus in the head keep their own clicks.
@@ -129,7 +157,9 @@ export function PanelDock({ layout, onLayout, panels }: PanelDockProps) {
       d.live = true
       setDragId(d.id)
     }
-    setTargetBoth(targetAt(e.clientX, e.clientY, d.rows, d.panels))
+    const t = targetAt(e.clientX, e.clientY, d.rows, d.panels)
+    targetRef.current = t
+    setIndicator(t === null ? null : indicatorFor(t, d.rows, d.panels, d.rootTop, d.rootLeft))
   }
 
   const onHeadPointerUp = () => {
@@ -137,7 +167,8 @@ export function PanelDock({ layout, onLayout, panels }: PanelDockProps) {
     drag.current = null
     setDragId(null)
     const t = targetRef.current
-    setTargetBoth(null)
+    targetRef.current = null
+    setIndicator(null)
     if (d === null || !d.live || t === null) return
     onLayout(movePanel(layout, d.id, t))
   }
@@ -224,44 +255,16 @@ export function PanelDock({ layout, onLayout, panels }: PanelDockProps) {
           </div>
         )
       })}
-      {dragId !== null && target !== null && <DropIndicator target={target} rootRef={rootRef} />}
+      {dragId !== null &&
+        indicator !== null &&
+        (indicator.kind === 'row' ? (
+          <div className="dock-drop-row" style={{ top: indicator.y }} />
+        ) : (
+          <div
+            className="dock-drop-beside"
+            style={{ left: indicator.x, top: indicator.top, height: indicator.height }}
+          />
+        ))}
     </div>
-  )
-}
-
-function DropIndicator({
-  target,
-  rootRef,
-}: {
-  target: DropTarget
-  rootRef: React.RefObject<HTMLDivElement | null>
-}) {
-  const root = rootRef.current
-  if (root === null) return null
-  const rows = [...root.querySelectorAll<HTMLElement>('.dock-row')].map((el) =>
-    el.getBoundingClientRect(),
-  )
-  const rootRect = root.getBoundingClientRect()
-  if (rows.length === 0) return null
-  if (target.kind === 'row') {
-    const y = target.index >= rows.length ? rows[rows.length - 1].bottom : rows[target.index].top
-    return <div className="dock-drop-row" style={{ top: y - rootRect.top - 2 }} />
-  }
-  const rowEl = root.querySelectorAll<HTMLElement>('.dock-row')[target.row]
-  if (rowEl === undefined) return null
-  const cells = [...rowEl.querySelectorAll<HTMLElement>(':scope > .dock-cell')].map((el) =>
-    el.getBoundingClientRect(),
-  )
-  const rowRect = rows[target.row]
-  const x = target.index >= cells.length ? rowRect.right : cells[target.index].left
-  return (
-    <div
-      className="dock-drop-beside"
-      style={{
-        left: x - rootRect.left - 2,
-        top: rowRect.top - rootRect.top,
-        height: rowRect.bottom - rowRect.top,
-      }}
-    />
   )
 }

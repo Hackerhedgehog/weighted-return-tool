@@ -625,9 +625,11 @@ body {
   overflow: hidden;
 }
 
-/* A table wider than its share scrolls inside its panel instead of clipping. */
-.dock-panel.buckets .grid-wrap {
-  overflow-x: auto;
+/* A table widened past its share must overflow, not be clipped out of reach —
+   and never gain a scroll box: the thead/tfoot stick to the viewport, which
+   an overflow container would capture (pinning the header mid-table). */
+.dock-panel.buckets {
+  overflow: visible;
 }
 
 .panel-head {

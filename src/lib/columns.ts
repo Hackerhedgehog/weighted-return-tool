@@ -66,13 +66,13 @@ export function sortRows(
         )
       case 'payout':
         return dir * (a.payout - b.payout)
+      // One in is 1/chance and RTP Share is weighted value over a
+      // row-independent constant — each sorts identically to its source.
       case 'weight':
       case 'chance':
-      // One in is 1/chance — the same ordering, read from the other end.
       case 'oneIn':
         return dir * (a.weight - b.weight)
       case 'weightedValue':
-      // RTP share is weighted value over a row-independent constant.
       case 'rtpShare':
         return dir * (value(a) - value(b))
       case 'id':
